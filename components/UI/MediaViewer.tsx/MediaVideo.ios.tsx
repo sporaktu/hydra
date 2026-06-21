@@ -1,5 +1,5 @@
 import { useEvent, useEventListener } from "expo";
-import { useVideoPlayer, VideoView } from "expo-video";
+import { VideoView } from "expo-video";
 import { useEffect, useRef, useState } from "react";
 import {
   Animated,
@@ -18,6 +18,7 @@ import DismountWhenBackgrounded from "../../Other/DismountWhenBackgrounded";
 import VideoCache from "../../../utils/VideoCache";
 import Redgifs from "../../../utils/RedGifs";
 import { useResolvedVideoSource } from "../../../utils/useResolvedVideoSource";
+import { useSharedVideoPlayer } from "../../../contexts/VideoPlayerRegistryContext";
 import { Post } from "../../../api/Posts";
 
 export type VideoItem = {
@@ -35,9 +36,8 @@ type MediaVideoProps = {
 const PLAYBACK_RATES = [0.5, 1, 1.5, 2];
 
 function MediaVideo(props: MediaVideoProps) {
-  const { source, focused, overlayOpacity } = props;
+  const { source } = props;
   const { width, height } = useSafeAreaFrame();
-  const { top: safeAreaTop, left: safeAreaLeft } = useSafeAreaInsets();
 
   const {
     uri: resolvedUri,
@@ -45,14 +45,67 @@ function MediaVideo(props: MediaVideoProps) {
     retry,
   } = useResolvedVideoSource(source.source, source.needsResolution);
 
-  const player = useVideoPlayer(
+  const player = useSharedVideoPlayer(
+    source.source,
     resolvedUri ? VideoCache.makeCachedVideoSource(resolvedUri) : null,
     (player) => {
       player.audioMixingMode = "mixWithOthers";
       player.loop = true;
       player.timeUpdateEventInterval = 1 / 15;
+      player.seekTolerance = {
+        toleranceBefore: 0.1,
+        toleranceAfter: 0.1,
+      };
     },
   );
+
+  // C's resolution-error tap-to-retry tile lives here in the wrapper, since the
+  // inner content component requires a non-null player.
+  if (resolveStatus === "error") {
+    return (
+      <View style={[styles.container, { width, height }]}>
+        <View style={styles.notReadyContainer}>
+          <TouchableOpacity onPress={retry}>
+            <Text style={styles.errorText}>
+              Couldn&apos;t load video. Tap to retry.
+            </Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  }
+
+  if (!player) {
+    return (
+      <View style={[styles.container, { width, height }]}>
+        <View style={styles.notReadyContainer}>
+          <ActivityIndicator color="white" />
+        </View>
+      </View>
+    );
+  }
+
+  return (
+    <MediaVideoContent
+      {...props}
+      player={player}
+      retry={retry}
+      resolveStatus={resolveStatus}
+    />
+  );
+}
+
+function MediaVideoContent(
+  props: MediaVideoProps & {
+    player: import("expo-video").VideoPlayer;
+    retry: () => void;
+    resolveStatus: "loading" | "ready" | "error";
+  },
+) {
+  const { source, focused, overlayOpacity, player, retry, resolveStatus } =
+    props;
+  const { width, height } = useSafeAreaFrame();
+  const { top: safeAreaTop, left: safeAreaLeft } = useSafeAreaInsets();
 
   const touchStart = useRef({
     x: 0,
@@ -124,14 +177,19 @@ function MediaVideo(props: MediaVideoProps) {
   });
 
   useEffect(() => {
+    player.seekTolerance = {
+      toleranceBefore: 0.1,
+      toleranceAfter: 0.1,
+    };
     if (focused) {
+      player.muted = false;
       player.play();
       player.volume = 1;
     } else {
       player.pause();
       player.volume = 0;
     }
-  }, [focused]);
+  }, [focused, player]);
 
   useEffect(() => {
     return () => {
