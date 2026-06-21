@@ -1,5 +1,4 @@
-import { useEvent, useEventListener } from "expo";
-import { useVideoPlayer, VideoView } from "expo-video";
+import { VideoView } from "expo-video";
 import { useContext, useEffect, useRef } from "react";
 import {
   Animated,
@@ -16,6 +15,7 @@ import VideoCache from "../../../utils/VideoCache";
 import { Post } from "../../../api/Posts";
 import Redgifs from "../../../utils/RedGifs";
 import { useResolvedVideoSource } from "../../../utils/useResolvedVideoSource";
+import { useSharedVideoPlayer } from "../../../contexts/VideoPlayerRegistryContext";
 
 type VideoProps = {
   video: Post["videos"][number];
@@ -32,7 +32,8 @@ function Video({ video }: VideoProps) {
     retry,
   } = useResolvedVideoSource(video.source, video.needsResolution);
 
-  const player = useVideoPlayer(
+  const player = useSharedVideoPlayer(
+    video.source,
     resolvedUri ? VideoCache.makeCachedVideoSource(resolvedUri) : null,
     (player) => {
       player.audioMixingMode = "mixWithOthers";
@@ -46,12 +47,21 @@ function Video({ video }: VideoProps) {
     },
   );
 
-  const status = useEvent(player, "statusChange");
+  // The feed always wants the player muted, looping, and playing — even if a
+  // fullscreen viewer session left the SAME shared player unmuted or paused.
+  useEffect(() => {
+    if (!player) return;
+    player.muted = true;
+    player.loop = true;
+    if (player.status === "readyToPlay") {
+      player.play();
+    }
+  }, [player]);
 
   const hasBustedStaleCache = useRef(false);
   useEffect(() => {
     if (
-      status?.error &&
+      player?.status === "error" &&
       video.needsResolution &&
       resolveStatus === "ready" &&
       !hasBustedStaleCache.current
@@ -61,18 +71,24 @@ function Video({ video }: VideoProps) {
       retry();
     }
   }, [
-    status?.error,
+    player?.status,
     video.needsResolution,
     resolveStatus,
     video.source,
     retry,
   ]);
 
-  useEventListener(player, "timeUpdate", (e) => {
-    progress.setValue(e.currentTime / player.duration);
-  });
+  useEffect(() => {
+    if (!player) return;
+    const sub = player.addListener("timeUpdate", (e) => {
+      if (!player.duration) return;
+      progress.setValue(e.currentTime / player.duration);
+    });
+    return () => sub.remove();
+  }, [player, progress]);
 
   useEffect(() => {
+    if (!player) return;
     const subscription = AppState.addEventListener("change", (state) => {
       if (state === "active" && player.status === "readyToPlay") {
         player.play();
@@ -82,10 +98,12 @@ function Video({ video }: VideoProps) {
   }, [player]);
 
   useEffect(() => {
+    if (!player) return;
     return subscribeToVisibility((isShowing) => {
       if (isShowing) {
         player.pause();
       } else {
+        player.muted = true;
         player.play();
       }
     });
@@ -109,22 +127,24 @@ function Video({ video }: VideoProps) {
         <View style={styles.notReadyContainer}>
           <ActivityIndicator color={theme.text} />
         </View>
-      ) : status?.error ? (
+      ) : player?.status === "error" ? (
         <View style={styles.notReadyContainer}>
-          <Text style={styles.errorText}>{status.error.message}</Text>
+          <Text style={styles.errorText}>Failed to load video</Text>
         </View>
-      ) : status === null || status.status === "loading" ? (
+      ) : player === null || player.status === "loading" ? (
         <View style={styles.notReadyContainer}>
           <ActivityIndicator color={theme.text} />
         </View>
       ) : null}
-      <VideoView
-        player={player}
-        style={styles.video}
-        contentFit="contain"
-        nativeControls={false}
-        allowsVideoFrameAnalysis={false}
-      />
+      {player && (
+        <VideoView
+          player={player}
+          style={styles.video}
+          contentFit="contain"
+          nativeControls={false}
+          allowsVideoFrameAnalysis={false}
+        />
+      )}
       <View
         style={[
           styles.progressBarBackground,
