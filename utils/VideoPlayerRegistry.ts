@@ -29,10 +29,10 @@ export class VideoPlayerRegistry<P> {
     this.createPlayer = options.createPlayer;
     this.releasePlayer = options.releasePlayer;
     this.maxLivePlayers = options.maxLivePlayers ?? DEFAULT_MAX_LIVE_PLAYERS;
-    this.scheduleTick =
-      options.scheduleTick ?? ((fn) => setTimeout(fn, 0));
+    this.scheduleTick = options.scheduleTick ?? ((fn) => setTimeout(fn, 0));
     this.cancelTick =
-      options.cancelTick ?? ((handle) => clearTimeout(handle as ReturnType<typeof setTimeout>));
+      options.cancelTick ??
+      ((handle) => clearTimeout(handle as ReturnType<typeof setTimeout>));
   }
 
   acquire(key: string): P {
