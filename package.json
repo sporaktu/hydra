@@ -81,6 +81,7 @@
     "typescript-eslint": "^8.39.0"
   },
   "devDependencies": {
+    "@types/jest": "^29.5.14",
     "@types/react": "~19.2.10",
     "@types/react-test-renderer": "^19.1.0",
     "drizzle-kit": "^0.31.4",
