@@ -2,9 +2,9 @@ import { getSwitcherSubredditName } from "../getSwitcherSubredditName";
 
 describe("getSwitcherSubredditName", () => {
   it("returns the sub name for a subreddit feed", () => {
-    expect(
-      getSwitcherSubredditName("https://www.reddit.com/r/askreddit"),
-    ).toBe("askreddit");
+    expect(getSwitcherSubredditName("https://www.reddit.com/r/askreddit")).toBe(
+      "askreddit",
+    );
   });
 
   it("returns 'Home' for the root home feed", () => {
@@ -12,9 +12,9 @@ describe("getSwitcherSubredditName", () => {
   });
 
   it("returns the name for r/popular", () => {
-    expect(
-      getSwitcherSubredditName("https://www.reddit.com/r/popular"),
-    ).toBe("popular");
+    expect(getSwitcherSubredditName("https://www.reddit.com/r/popular")).toBe(
+      "popular",
+    );
   });
 
   it("returns the name for r/all", () => {
@@ -24,16 +24,12 @@ describe("getSwitcherSubredditName", () => {
   });
 
   it("returns the name for a sorted home feed", () => {
-    expect(getSwitcherSubredditName("https://www.reddit.com/hot")).toBe(
-      "Hot",
-    );
+    expect(getSwitcherSubredditName("https://www.reddit.com/hot")).toBe("Hot");
   });
 
   it("returns the multireddit name for a multireddit page", () => {
     expect(
-      getSwitcherSubredditName(
-        "https://www.reddit.com/user/someone/m/mymulti",
-      ),
+      getSwitcherSubredditName("https://www.reddit.com/user/someone/m/mymulti"),
     ).toBe("mymulti");
   });
 

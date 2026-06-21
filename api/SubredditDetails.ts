@@ -48,9 +48,7 @@ export async function resolveSubreddit(
   name: string,
 ): Promise<Subreddit | null> {
   try {
-    const data = await api(
-      `https://www.reddit.com/r/${name}/about.json`,
-    );
+    const data = await api(`https://www.reddit.com/r/${name}/about.json`);
     if (data?.kind === "t5" && data?.data?.display_name) {
       return formatSubredditData(data);
     }
