@@ -53,3 +53,50 @@ describe("VideoPlayerRegistry.acquire", () => {
     expect(created).toHaveLength(2);
   });
 });
+
+describe("VideoPlayerRegistry refcount + deferred release", () => {
+  it("does not release until the deferred tick fires", () => {
+    const { registry, released, flushTicks } = makeHarness();
+    registry.acquire("key-1");
+    registry.release("key-1");
+    expect(released).toHaveLength(0); // still pending
+    flushTicks();
+    expect(released).toHaveLength(1);
+  });
+
+  it("does NOT release if refCount returns above 0 before the tick", () => {
+    const { registry, created, released, flushTicks } = makeHarness();
+    const first = registry.acquire("key-1");
+    registry.release("key-1"); // refCount -> 0, schedules release
+    const second = registry.acquire("key-1"); // refCount -> 1, cancels release
+    flushTicks();
+    expect(released).toHaveLength(0);
+    expect(second).toBe(first);
+    expect(created).toHaveLength(1); // never recreated
+  });
+
+  it("releases when still 0 after the tick", () => {
+    const { registry, released, flushTicks } = makeHarness();
+    registry.acquire("key-1");
+    registry.acquire("key-1"); // refCount 2
+    registry.release("key-1"); // refCount 1, no schedule
+    expect(released).toHaveLength(0);
+    registry.release("key-1"); // refCount 0, schedule
+    flushTicks();
+    expect(released).toHaveLength(1);
+  });
+
+  it("a re-acquire after release recreates a fresh player", () => {
+    const { registry, created, flushTicks } = makeHarness();
+    registry.acquire("key-1");
+    registry.release("key-1");
+    flushTicks(); // actually released + deleted
+    registry.acquire("key-1");
+    expect(created).toHaveLength(2);
+  });
+
+  it("ignores release for an unknown key without throwing", () => {
+    const { registry } = makeHarness();
+    expect(() => registry.release("missing")).not.toThrow();
+  });
+});

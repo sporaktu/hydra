@@ -57,6 +57,22 @@ export class VideoPlayerRegistry<P> {
     return player;
   }
 
+  release(key: string): void {
+    const entry = this.entries.get(key);
+    if (!entry) return;
+    entry.refCount = Math.max(0, entry.refCount - 1);
+    if (entry.refCount > 0) return;
+    if (entry.releaseTimer !== null) return; // already scheduled
+    entry.releaseTimer = this.scheduleTick(() => {
+      const current = this.entries.get(key);
+      if (!current || current !== entry) return;
+      current.releaseTimer = null;
+      if (current.refCount > 0) return; // re-acquired before the tick
+      this.releasePlayer(current.player);
+      this.entries.delete(key);
+    });
+  }
+
   private evictIfOverCap(): void {
     if (this.entries.size < this.maxLivePlayers) return;
     let lruKey: string | null = null;
