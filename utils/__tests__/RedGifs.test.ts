@@ -8,7 +8,7 @@ jest.mock("../KeyStore", () => ({
 }));
 
 import safeFetch from "../safeFetch";
-import Redgifs from "../RedGifs";
+import Redgifs, { RedgifsResolutionError } from "../RedGifs";
 
 const mockSafeFetch = safeFetch as jest.MockedFunction<typeof safeFetch>;
 
@@ -68,5 +68,35 @@ describe("Redgifs cache", () => {
     await Redgifs.getMediaURL(url);
 
     expect(mockSafeFetch).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("Redgifs failure", () => {
+  it("throws RedgifsResolutionError when the api keeps failing", async () => {
+    mockSafeFetch.mockResolvedValue({
+      ok: false,
+      status: 500,
+      json: async () => ({}),
+    } as unknown as Awaited<ReturnType<typeof safeFetch>>);
+
+    await expect(
+      Redgifs.getMediaURL("https://www.redgifs.com/watch/failgif"),
+    ).rejects.toBeInstanceOf(RedgifsResolutionError);
+  });
+
+  it("does not cache a failure", async () => {
+    mockSafeFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 500,
+      json: async () => ({}),
+    } as unknown as Awaited<ReturnType<typeof safeFetch>>);
+    mockSafeFetch.mockResolvedValue(gifResponse("https://hd.example/c.mp4"));
+
+    await expect(
+      Redgifs.getMediaURL("https://www.redgifs.com/watch/retrygif"),
+    ).rejects.toBeInstanceOf(RedgifsResolutionError);
+
+    const ok = await Redgifs.getMediaURL("https://www.redgifs.com/watch/retrygif");
+    expect(ok).toBe("https://hd.example/c.mp4");
   });
 });

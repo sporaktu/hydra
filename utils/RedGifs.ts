@@ -105,6 +105,13 @@ type RedGifResponse = {
   niches?: RedGifNiche[];
 };
 
+export class RedgifsResolutionError extends Error {
+  constructor(message = "Failed to resolve Redgifs media URL") {
+    super(message);
+    this.name = "RedgifsResolutionError";
+  }
+}
+
 const REDGIFS_TOKEN_STORAGE_KEY = "redgifsToken";
 
 const resolvedUrlCache = new Map<string, string>();
@@ -114,7 +121,7 @@ export default class Redgifs {
     return url.split(/watch\/|\?|#/)[1];
   }
 
-  static async getMediaURL(url: string, attemptsLeft = 1): Promise<string> {
+  static async getMediaURL(url: string, attemptsLeft = 0): Promise<string> {
     const videoId = Redgifs.getVideoId(url);
     const cached = resolvedUrlCache.get(videoId);
     if (cached) {
@@ -125,25 +132,28 @@ export default class Redgifs {
       token = await Redgifs.refreshStoredToken();
     }
     try {
-      return await safeFetch(`https://api.redgifs.com/v2/gifs/${videoId}`, {
+      const res = await safeFetch(`https://api.redgifs.com/v2/gifs/${videoId}`, {
         headers: {
           Authorization: `Bearer ${token}`,
           "User-Agent": "Hydra",
         },
-      })
-        .then((res) => res.json() as Promise<RedGifResponse>)
-        .then((json) => json.gif.urls.hd ?? json.gif.urls.sd)
-        .then((resolved) => {
-          resolvedUrlCache.set(videoId, resolved);
-          return resolved;
-        });
-    } catch (_) {
+      });
+      if (!res.ok) {
+        throw new RedgifsResolutionError(`Redgifs responded ${res.status}`);
+      }
+      const json = (await res.json()) as RedGifResponse;
+      const resolved = json.gif.urls.hd ?? json.gif.urls.sd;
+      resolvedUrlCache.set(videoId, resolved);
+      return resolved;
+    } catch (e) {
       if (attemptsLeft > 0) {
         await Redgifs.refreshStoredToken();
         return await Redgifs.getMediaURL(url, attemptsLeft - 1);
       }
+      throw e instanceof RedgifsResolutionError
+        ? e
+        : new RedgifsResolutionError(String(e));
     }
-    return url;
   }
 
   static getStoredToken() {
