@@ -1,5 +1,6 @@
 import {
   ActivityIndicator,
+  Alert,
   Text,
   TouchableOpacity,
   View,
@@ -10,6 +11,7 @@ import { PageTypeToNavName } from "../../../utils/PageTypeToNavName";
 import { FontAwesome6, MaterialIcons } from "@expo/vector-icons";
 import { useState } from "react";
 import useMediaSharing from "../../../utils/useMediaSharing";
+import Redgifs, { RedgifsResolutionError } from "../../../utils/RedGifs";
 import RedditURL from "../../../utils/RedditURL";
 import { StackActions, useNavigation } from "@react-navigation/native";
 import { PostDetail } from "../../../api/PostDetail";
@@ -65,10 +67,24 @@ export default function PostOverlay({
             onPress={async () => {
               setIsDownloading(true);
               if (post.videos.length > 0) {
-                await shareMedia(
-                  "video",
-                  post.videos[columnIndex].videoDownloadURL,
-                );
+                const video = post.videos[columnIndex];
+                let downloadURL = video.videoDownloadURL;
+                if (video.needsResolution) {
+                  try {
+                    downloadURL = await Redgifs.getMediaURL(video.source);
+                  } catch (e) {
+                    setIsDownloading(false);
+                    if (e instanceof RedgifsResolutionError) {
+                      Alert.alert(
+                        "Couldn't load video",
+                        "Redgifs is rate limiting requests. Please try again in a moment.",
+                      );
+                      return;
+                    }
+                    throw e;
+                  }
+                }
+                await shareMedia("video", downloadURL);
               } else if (post.images.length > 0) {
                 await shareMedia("image", post.images[columnIndex]);
               }
