@@ -33,6 +33,7 @@ import { ERROR_REPORTING_STORAGE_KEY } from "../pages/SettingsPage/Privacy";
 import KeyStore from "../utils/KeyStore";
 import { TabScrollProvider } from "../contexts/TabScrollContext";
 import { StartupModalProvider } from "../contexts/StartupModalContext";
+import { VideoPlayerRegistryProvider } from "../contexts/VideoPlayerRegistryContext";
 import { modifyStat, Stat } from "../db/functions/Stats";
 import { ActionSheetBgProvider } from "../contexts/ActionSheetBgProvider";
 import VideoCache from "../utils/VideoCache";
@@ -118,14 +119,16 @@ function RootLayout() {
                     <ActionSheetBgProvider>
                       <InboxProvider>
                         <ModalProvider>
-                          <MediaViewerProvider>
-                            <SubredditProvider>
-                              <StartupModalProvider>
-                                <SubscribeToHydra />
-                                <Tabs />
-                              </StartupModalProvider>
-                            </SubredditProvider>
-                          </MediaViewerProvider>
+                          <VideoPlayerRegistryProvider>
+                            <MediaViewerProvider>
+                              <SubredditProvider>
+                                <StartupModalProvider>
+                                  <SubscribeToHydra />
+                                  <Tabs />
+                                </StartupModalProvider>
+                              </SubredditProvider>
+                            </MediaViewerProvider>
+                          </VideoPlayerRegistryProvider>
                         </ModalProvider>
                       </InboxProvider>
                     </ActionSheetBgProvider>
