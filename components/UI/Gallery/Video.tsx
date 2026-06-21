@@ -92,7 +92,13 @@ function Video({ video }: VideoProps) {
   }, [player, subscribeToVisibility]);
 
   return (
-    <View style={styles.videoContainer} pointerEvents="none">
+    <View
+      style={styles.videoContainer}
+      // "none" lets feed taps pass through to open fullscreen; in the resolve-
+      // error state switch to "box-none" so the retry tile's touch reaches its
+      // child handler reliably on Android (a "none" parent can swallow it).
+      pointerEvents={resolveStatus === "error" ? "box-none" : "none"}
+    >
       {resolveStatus === "error" ? (
         <View style={styles.notReadyContainer} pointerEvents="auto">
           <Text style={styles.errorText} onPress={retry} suppressHighlighting>
