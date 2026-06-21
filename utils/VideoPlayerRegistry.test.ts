@@ -126,3 +126,27 @@ describe("VideoPlayerRegistry LRU backstop", () => {
     expect(created).toHaveLength(2);
   });
 });
+
+describe("VideoPlayerRegistry introspection", () => {
+  it("peek returns the live player without changing refcount", () => {
+    const { registry, released, flushTicks } = makeHarness();
+    const acquired = registry.acquire("key-1");
+    expect(registry.peek("key-1")).toBe(acquired);
+    // peek did not add a reference, so a single release still frees it.
+    registry.release("key-1");
+    flushTicks();
+    expect(released).toHaveLength(1);
+    expect(registry.peek("key-1")).toBeNull();
+  });
+
+  it("liveCount reflects live entries", () => {
+    const { registry, flushTicks } = makeHarness();
+    expect(registry.liveCount()).toBe(0);
+    registry.acquire("a");
+    registry.acquire("b");
+    expect(registry.liveCount()).toBe(2);
+    registry.release("a");
+    flushTicks();
+    expect(registry.liveCount()).toBe(1);
+  });
+});

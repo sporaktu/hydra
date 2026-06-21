@@ -73,6 +73,14 @@ export class VideoPlayerRegistry<P> {
     });
   }
 
+  peek(key: string): P | null {
+    return this.entries.get(key)?.player ?? null;
+  }
+
+  liveCount(): number {
+    return this.entries.size;
+  }
+
   private evictIfOverCap(): void {
     if (this.entries.size < this.maxLivePlayers) return;
     let lruKey: string | null = null;
