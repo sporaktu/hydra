@@ -105,6 +105,32 @@ type RedGifResponse = {
   niches?: RedGifNiche[];
 };
 
+const MAX_CONCURRENT_RESOLUTIONS = 2;
+
+let activeResolutions = 0;
+const resolutionQueue: (() => void)[] = [];
+
+function acquireSlot(): Promise<void> {
+  if (activeResolutions < MAX_CONCURRENT_RESOLUTIONS) {
+    activeResolutions++;
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => {
+    resolutionQueue.push(() => {
+      activeResolutions++;
+      resolve();
+    });
+  });
+}
+
+function releaseSlot(): void {
+  activeResolutions--;
+  const next = resolutionQueue.shift();
+  if (next) {
+    next();
+  }
+}
+
 export class RedgifsResolutionError extends Error {
   constructor(message = "Failed to resolve Redgifs media URL") {
     super(message);
@@ -152,7 +178,17 @@ export default class Redgifs {
     if (cached) {
       return cached;
     }
-    return await Redgifs.resolveWithRetry(videoId);
+    await acquireSlot();
+    try {
+      // Re-check cache: another queued caller for the same id may have resolved it.
+      const cachedAfterWait = resolvedUrlCache.get(videoId);
+      if (cachedAfterWait) {
+        return cachedAfterWait;
+      }
+      return await Redgifs.resolveWithRetry(videoId);
+    } finally {
+      releaseSlot();
+    }
   }
 
   private static async resolveWithRetry(videoId: string): Promise<string> {

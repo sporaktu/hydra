@@ -129,6 +129,28 @@ describe("Redgifs failure", () => {
   });
 });
 
+describe("Redgifs concurrency cap", () => {
+  it("never runs more than 2 resolutions at once", async () => {
+    let inFlight = 0;
+    let maxInFlight = 0;
+    mockSafeFetch.mockImplementation(async (url: string) => {
+      inFlight++;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      await new Promise((r) => setTimeout(r, 5));
+      inFlight--;
+      return gifResponse(`https://hd.example/${url}.mp4`);
+    });
+
+    await Promise.all(
+      ["a", "b", "c", "d", "e", "f"].map((id) =>
+        Redgifs.getMediaURL(`https://www.redgifs.com/watch/${id}`),
+      ),
+    );
+
+    expect(maxInFlight).toBeLessThanOrEqual(2);
+  });
+});
+
 describe("Redgifs 429 cooldown", () => {
   it("applies a shared cooldown after a 429 so a second caller waits", async () => {
     jest.useFakeTimers();
