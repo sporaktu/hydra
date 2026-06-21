@@ -13,18 +13,27 @@ import { ThemeContext } from "../../../contexts/SettingsContexts/ThemeContext";
 import { MediaViewerContext } from "../../../contexts/MediaViewerContext";
 import DismountWhenBackgrounded from "../../Other/DismountWhenBackgrounded";
 import VideoCache from "../../../utils/VideoCache";
+import { Post } from "../../../api/Posts";
+import Redgifs from "../../../utils/RedGifs";
+import { useResolvedVideoSource } from "../../../utils/useResolvedVideoSource";
 
 type VideoProps = {
-  uri: string;
+  video: Post["videos"][number];
 };
 
-function Video({ uri }: VideoProps) {
+function Video({ video }: VideoProps) {
   const { theme } = useContext(ThemeContext);
   const { subscribeToVisibility } = useContext(MediaViewerContext);
   const progress = useRef(new Animated.Value(0)).current;
 
+  const {
+    uri: resolvedUri,
+    status: resolveStatus,
+    retry,
+  } = useResolvedVideoSource(video.source, video.needsResolution);
+
   const player = useVideoPlayer(
-    VideoCache.makeCachedVideoSource(uri),
+    resolvedUri ? VideoCache.makeCachedVideoSource(resolvedUri) : null,
     (player) => {
       player.audioMixingMode = "mixWithOthers";
       player.muted = true;
@@ -38,6 +47,26 @@ function Video({ uri }: VideoProps) {
   );
 
   const status = useEvent(player, "statusChange");
+
+  const hasBustedStaleCache = useRef(false);
+  useEffect(() => {
+    if (
+      status?.error &&
+      video.needsResolution &&
+      resolveStatus === "ready" &&
+      !hasBustedStaleCache.current
+    ) {
+      hasBustedStaleCache.current = true;
+      Redgifs.clearCached(Redgifs.getVideoId(video.source));
+      retry();
+    }
+  }, [
+    status?.error,
+    video.needsResolution,
+    resolveStatus,
+    video.source,
+    retry,
+  ]);
 
   useEventListener(player, "timeUpdate", (e) => {
     progress.setValue(e.currentTime / player.duration);
@@ -64,7 +93,17 @@ function Video({ uri }: VideoProps) {
 
   return (
     <View style={styles.videoContainer} pointerEvents="none">
-      {status?.error ? (
+      {resolveStatus === "error" ? (
+        <View style={styles.notReadyContainer} pointerEvents="auto">
+          <Text style={styles.errorText} onPress={retry} suppressHighlighting>
+            Couldn&apos;t load video. Tap to retry.
+          </Text>
+        </View>
+      ) : resolveStatus === "loading" ? (
+        <View style={styles.notReadyContainer}>
+          <ActivityIndicator color={theme.text} />
+        </View>
+      ) : status?.error ? (
         <View style={styles.notReadyContainer}>
           <Text style={styles.errorText}>{status.error.message}</Text>
         </View>

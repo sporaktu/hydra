@@ -171,7 +171,7 @@ export default function GalleryComponent({
                 allowDownscaling={Platform.OS === "ios" ? false : true}
               />
             ) : item.type === "video" ? (
-              <Video uri={item.source.source} />
+              <Video video={item.source} />
             ) : null}
           </TouchableOpacity>
         )}
