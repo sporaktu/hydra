@@ -108,8 +108,12 @@ type RedGifResponse = {
 const REDGIFS_TOKEN_STORAGE_KEY = "redgifsToken";
 
 export default class Redgifs {
+  static getVideoId(url: string): string {
+    return url.split(/watch\/|\?|#/)[1];
+  }
+
   static async getMediaURL(url: string, attemptsLeft = 1): Promise<string> {
-    const videoId = url.split(/watch\/|\?|#/)[1];
+    const videoId = Redgifs.getVideoId(url);
     let token = Redgifs.getStoredToken();
     if (!token) {
       token = await Redgifs.refreshStoredToken();
