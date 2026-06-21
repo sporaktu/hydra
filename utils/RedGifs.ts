@@ -107,6 +107,8 @@ type RedGifResponse = {
 
 const REDGIFS_TOKEN_STORAGE_KEY = "redgifsToken";
 
+const resolvedUrlCache = new Map<string, string>();
+
 export default class Redgifs {
   static getVideoId(url: string): string {
     return url.split(/watch\/|\?|#/)[1];
@@ -114,6 +116,10 @@ export default class Redgifs {
 
   static async getMediaURL(url: string, attemptsLeft = 1): Promise<string> {
     const videoId = Redgifs.getVideoId(url);
+    const cached = resolvedUrlCache.get(videoId);
+    if (cached) {
+      return cached;
+    }
     let token = Redgifs.getStoredToken();
     if (!token) {
       token = await Redgifs.refreshStoredToken();
@@ -126,7 +132,11 @@ export default class Redgifs {
         },
       })
         .then((res) => res.json() as Promise<RedGifResponse>)
-        .then((json) => json.gif.urls.hd ?? json.gif.urls.sd);
+        .then((json) => json.gif.urls.hd ?? json.gif.urls.sd)
+        .then((resolved) => {
+          resolvedUrlCache.set(videoId, resolved);
+          return resolved;
+        });
     } catch (_) {
       if (attemptsLeft > 0) {
         await Redgifs.refreshStoredToken();
@@ -150,5 +160,14 @@ export default class Redgifs {
       .then((json) => json.token);
     KeyStore.set(REDGIFS_TOKEN_STORAGE_KEY, token);
     return token;
+  }
+
+  static clearCached(videoId: string): void {
+    resolvedUrlCache.delete(videoId);
+  }
+
+  /** Test-only: wipe the in-memory cache between tests. */
+  static clearAllCachedForTests(): void {
+    resolvedUrlCache.clear();
   }
 }
