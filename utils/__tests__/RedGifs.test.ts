@@ -23,6 +23,7 @@ function gifResponse(hd: string) {
 beforeEach(() => {
   jest.clearAllMocks();
   Redgifs.clearAllCachedForTests();
+  Redgifs.resetCooldownForTests();
 });
 
 describe("Redgifs.getVideoId", () => {
@@ -73,30 +74,117 @@ describe("Redgifs cache", () => {
 
 describe("Redgifs failure", () => {
   it("throws RedgifsResolutionError when the api keeps failing", async () => {
+    jest.useFakeTimers();
     mockSafeFetch.mockResolvedValue({
       ok: false,
       status: 500,
       json: async () => ({}),
     } as unknown as Awaited<ReturnType<typeof safeFetch>>);
 
-    await expect(
-      Redgifs.getMediaURL("https://www.redgifs.com/watch/failgif"),
-    ).rejects.toBeInstanceOf(RedgifsResolutionError);
+    const call = Redgifs.getMediaURL("https://www.redgifs.com/watch/failgif");
+    // Suppress unhandled rejection warning before timers fire
+    const settled = Promise.allSettled([call]);
+    await jest.runAllTimersAsync();
+    const [result] = await settled;
+    expect(result.status).toBe("rejected");
+    expect((result as PromiseRejectedResult).reason).toBeInstanceOf(RedgifsResolutionError);
+    jest.useRealTimers();
   });
 
   it("does not cache a failure", async () => {
-    mockSafeFetch.mockResolvedValueOnce({
+    jest.useFakeTimers();
+    // First call: exhaust all MAX_BACKOFF_ATTEMPTS (3) with 500 responses
+    mockSafeFetch
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 500,
+        json: async () => ({}),
+      } as unknown as Awaited<ReturnType<typeof safeFetch>>)
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 500,
+        json: async () => ({}),
+      } as unknown as Awaited<ReturnType<typeof safeFetch>>)
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 500,
+        json: async () => ({}),
+      } as unknown as Awaited<ReturnType<typeof safeFetch>>);
+
+    const firstCall = Redgifs.getMediaURL("https://www.redgifs.com/watch/retrygif");
+    const settled = Promise.allSettled([firstCall]);
+    await jest.runAllTimersAsync();
+    const [result] = await settled;
+    expect(result.status).toBe("rejected");
+    expect((result as PromiseRejectedResult).reason).toBeInstanceOf(RedgifsResolutionError);
+
+    // Reset cooldown so second call doesn't wait
+    Redgifs.resetCooldownForTests();
+    jest.useRealTimers();
+
+    // Second call: should succeed now
+    mockSafeFetch.mockResolvedValue(gifResponse("https://hd.example/c.mp4"));
+    const ok = await Redgifs.getMediaURL("https://www.redgifs.com/watch/retrygif");
+    expect(ok).toBe("https://hd.example/c.mp4");
+  });
+});
+
+describe("Redgifs 429 cooldown", () => {
+  it("applies a shared cooldown after a 429 so a second caller waits", async () => {
+    jest.useFakeTimers();
+    const r429 = {
+      ok: false,
+      status: 429,
+      json: async () => ({}),
+    } as unknown as Awaited<ReturnType<typeof safeFetch>>;
+    // First caller: 429 on all attempts -> throws and arms cooldown.
+    mockSafeFetch.mockResolvedValue(r429);
+
+    const firstCall = Redgifs.getMediaURL("https://www.redgifs.com/watch/g1");
+    const settled = Promise.allSettled([firstCall]);
+    await jest.runAllTimersAsync();
+    const [result] = await settled;
+    expect(result.status).toBe("rejected");
+    expect((result as PromiseRejectedResult).reason).toBeInstanceOf(RedgifsResolutionError);
+
+    expect(Redgifs.getCooldownRemainingForTests()).toBeGreaterThan(0);
+
+    jest.useRealTimers();
+  });
+
+  it("a normal failure arms a shorter cooldown than a 429", async () => {
+    jest.useFakeTimers();
+
+    mockSafeFetch.mockResolvedValue({
       ok: false,
       status: 500,
       json: async () => ({}),
     } as unknown as Awaited<ReturnType<typeof safeFetch>>);
-    mockSafeFetch.mockResolvedValue(gifResponse("https://hd.example/c.mp4"));
+    const c1 = Redgifs.getMediaURL("https://www.redgifs.com/watch/g2");
+    const settled1 = Promise.allSettled([c1]);
+    await jest.runAllTimersAsync();
+    const [r1] = await settled1;
+    expect(r1.status).toBe("rejected");
+    expect((r1 as PromiseRejectedResult).reason).toBeInstanceOf(RedgifsResolutionError);
+    const after500 = Redgifs.getCooldownRemainingForTests();
 
-    await expect(
-      Redgifs.getMediaURL("https://www.redgifs.com/watch/retrygif"),
-    ).rejects.toBeInstanceOf(RedgifsResolutionError);
+    Redgifs.clearAllCachedForTests();
+    Redgifs.resetCooldownForTests();
 
-    const ok = await Redgifs.getMediaURL("https://www.redgifs.com/watch/retrygif");
-    expect(ok).toBe("https://hd.example/c.mp4");
+    mockSafeFetch.mockResolvedValue({
+      ok: false,
+      status: 429,
+      json: async () => ({}),
+    } as unknown as Awaited<ReturnType<typeof safeFetch>>);
+    const c2 = Redgifs.getMediaURL("https://www.redgifs.com/watch/g3");
+    const settled2 = Promise.allSettled([c2]);
+    await jest.runAllTimersAsync();
+    const [r2] = await settled2;
+    expect(r2.status).toBe("rejected");
+    expect((r2 as PromiseRejectedResult).reason).toBeInstanceOf(RedgifsResolutionError);
+    const after429 = Redgifs.getCooldownRemainingForTests();
+
+    expect(after429).toBeGreaterThan(after500);
+    jest.useRealTimers();
   });
 });

@@ -114,6 +114,31 @@ export class RedgifsResolutionError extends Error {
 
 const REDGIFS_TOKEN_STORAGE_KEY = "redgifsToken";
 
+const NORMAL_COOLDOWN_MS = 1_000;
+const RATE_LIMIT_COOLDOWN_MS = 30_000;
+const MAX_BACKOFF_ATTEMPTS = 3;
+
+let cooldownUntil = 0;
+
+function now(): number {
+  return Date.now();
+}
+
+function armCooldown(ms: number): void {
+  cooldownUntil = Math.max(cooldownUntil, now() + ms);
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function waitForCooldown(): Promise<void> {
+  const remaining = cooldownUntil - now();
+  if (remaining > 0) {
+    await sleep(remaining);
+  }
+}
+
 const resolvedUrlCache = new Map<string, string>();
 
 export default class Redgifs {
@@ -121,39 +146,59 @@ export default class Redgifs {
     return url.split(/watch\/|\?|#/)[1];
   }
 
-  static async getMediaURL(url: string, attemptsLeft = 0): Promise<string> {
+  static async getMediaURL(url: string): Promise<string> {
     const videoId = Redgifs.getVideoId(url);
     const cached = resolvedUrlCache.get(videoId);
     if (cached) {
       return cached;
     }
-    let token = Redgifs.getStoredToken();
-    if (!token) {
-      token = await Redgifs.refreshStoredToken();
-    }
-    try {
-      const res = await safeFetch(`https://api.redgifs.com/v2/gifs/${videoId}`, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "User-Agent": "Hydra",
-        },
-      });
-      if (!res.ok) {
-        throw new RedgifsResolutionError(`Redgifs responded ${res.status}`);
+    return await Redgifs.resolveWithRetry(videoId);
+  }
+
+  private static async resolveWithRetry(videoId: string): Promise<string> {
+    let lastError: unknown;
+    for (let attempt = 0; attempt < MAX_BACKOFF_ATTEMPTS; attempt++) {
+      await waitForCooldown();
+      let token = Redgifs.getStoredToken();
+      if (!token) {
+        token = await Redgifs.refreshStoredToken();
       }
-      const json = (await res.json()) as RedGifResponse;
-      const resolved = json.gif.urls.hd ?? json.gif.urls.sd;
-      resolvedUrlCache.set(videoId, resolved);
-      return resolved;
-    } catch (e) {
-      if (attemptsLeft > 0) {
+      try {
+        const res = await safeFetch(
+          `https://api.redgifs.com/v2/gifs/${videoId}`,
+          {
+            headers: {
+              Authorization: `Bearer ${token}`,
+              "User-Agent": "Hydra",
+            },
+          },
+        );
+        if (res.status === 429) {
+          armCooldown(RATE_LIMIT_COOLDOWN_MS);
+          lastError = new RedgifsResolutionError("Redgifs rate limited (429)");
+          continue;
+        }
+        if (!res.ok) {
+          armCooldown(NORMAL_COOLDOWN_MS * (attempt + 1));
+          lastError = new RedgifsResolutionError(
+            `Redgifs responded ${res.status}`,
+          );
+          await Redgifs.refreshStoredToken();
+          continue;
+        }
+        const json = (await res.json()) as RedGifResponse;
+        const resolved = json.gif.urls.hd ?? json.gif.urls.sd;
+        resolvedUrlCache.set(videoId, resolved);
+        return resolved;
+      } catch (e) {
+        lastError = e;
+        armCooldown(NORMAL_COOLDOWN_MS * (attempt + 1));
         await Redgifs.refreshStoredToken();
-        return await Redgifs.getMediaURL(url, attemptsLeft - 1);
       }
-      throw e instanceof RedgifsResolutionError
-        ? e
-        : new RedgifsResolutionError(String(e));
     }
+    throw lastError instanceof RedgifsResolutionError
+      ? lastError
+      : new RedgifsResolutionError(String(lastError));
   }
 
   static getStoredToken() {
@@ -179,5 +224,15 @@ export default class Redgifs {
   /** Test-only: wipe the in-memory cache between tests. */
   static clearAllCachedForTests(): void {
     resolvedUrlCache.clear();
+  }
+
+  /** Test-only: get remaining cooldown ms. */
+  static getCooldownRemainingForTests(): number {
+    return Math.max(0, cooldownUntil - Date.now());
+  }
+
+  /** Test-only: reset the shared cooldown state. */
+  static resetCooldownForTests(): void {
+    cooldownUntil = 0;
   }
 }
