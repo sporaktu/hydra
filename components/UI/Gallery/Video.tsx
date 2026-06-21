@@ -47,6 +47,23 @@ function Video({ video }: VideoProps) {
     },
   );
 
+  // When a stale cached redgifs URL is busted and re-resolved, the shared player
+  // still holds the old source (the registry key is unchanged), so swap the source
+  // on the live player. Skip the first application — the registry created the
+  // player with the current resolvedUri at acquire time.
+  const lastReplacedUri = useRef<string | null>(null);
+  useEffect(() => {
+    if (!player || !resolvedUri) return;
+    if (lastReplacedUri.current === null) {
+      lastReplacedUri.current = resolvedUri;
+      return;
+    }
+    if (lastReplacedUri.current !== resolvedUri) {
+      lastReplacedUri.current = resolvedUri;
+      player.replace(VideoCache.makeCachedVideoSource(resolvedUri));
+    }
+  }, [player, resolvedUri]);
+
   // The feed always wants the player muted, looping, and playing — even if a
   // fullscreen viewer session left the SAME shared player unmuted or paused.
   useEffect(() => {

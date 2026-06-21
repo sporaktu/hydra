@@ -59,6 +59,23 @@ function MediaVideo(props: MediaVideoProps) {
     },
   );
 
+  // When a stale cached redgifs URL is busted and re-resolved, the shared player
+  // still holds the old source (the registry key is unchanged), so swap the source
+  // on the live player. Skip the first application — the registry created the
+  // player with the current resolvedUri at acquire time.
+  const lastReplacedUri = useRef<string | null>(null);
+  useEffect(() => {
+    if (!player || !resolvedUri) return;
+    if (lastReplacedUri.current === null) {
+      lastReplacedUri.current = resolvedUri;
+      return;
+    }
+    if (lastReplacedUri.current !== resolvedUri) {
+      lastReplacedUri.current = resolvedUri;
+      player.replace(VideoCache.makeCachedVideoSource(resolvedUri));
+    }
+  }, [player, resolvedUri]);
+
   // C's resolution-error tap-to-retry tile lives here in the wrapper, since the
   // inner content component requires a non-null player.
   if (resolveStatus === "error") {
