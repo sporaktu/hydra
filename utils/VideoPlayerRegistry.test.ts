@@ -100,3 +100,29 @@ describe("VideoPlayerRegistry refcount + deferred release", () => {
     expect(() => registry.release("missing")).not.toThrow();
   });
 });
+
+describe("VideoPlayerRegistry LRU backstop", () => {
+  it("evicts the least-recently-used idle player when over cap", () => {
+    const { registry, released } = makeHarness(2); // cap = 2
+    registry.acquire("a"); // size 1
+    registry.acquire("b"); // size 2
+    registry.release("a"); // a idle (refCount 0), but NOT yet tick-released
+    registry.release("b"); // b idle
+    // Touch b so a is the LRU.
+    registry.acquire("b");
+    registry.release("b");
+    // size is 2 (== cap) -> acquiring a new key forces eviction of LRU idle (a).
+    registry.acquire("c");
+    expect(released).toHaveLength(1);
+    // The released player is the one created for "a" (id 0).
+    expect(released[0].id).toBe(0);
+  });
+
+  it("does not evict a player that is still referenced", () => {
+    const { registry, released, created } = makeHarness(1); // cap = 1
+    registry.acquire("a"); // refCount 1, size 1 == cap
+    registry.acquire("b"); // would be over cap, but "a" is referenced -> no eviction
+    expect(released).toHaveLength(0);
+    expect(created).toHaveLength(2);
+  });
+});
