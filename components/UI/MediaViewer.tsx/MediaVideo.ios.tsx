@@ -16,6 +16,8 @@ import {
 } from "react-native-safe-area-context";
 import DismountWhenBackgrounded from "../../Other/DismountWhenBackgrounded";
 import VideoCache from "../../../utils/VideoCache";
+import Redgifs from "../../../utils/RedGifs";
+import { useResolvedVideoSource } from "../../../utils/useResolvedVideoSource";
 import { Post } from "../../../api/Posts";
 
 export type VideoItem = {
@@ -37,8 +39,14 @@ function MediaVideo(props: MediaVideoProps) {
   const { width, height } = useSafeAreaFrame();
   const { top: safeAreaTop, left: safeAreaLeft } = useSafeAreaInsets();
 
+  const {
+    uri: resolvedUri,
+    status: resolveStatus,
+    retry,
+  } = useResolvedVideoSource(source.source, source.needsResolution);
+
   const player = useVideoPlayer(
-    VideoCache.makeCachedVideoSource(source.source),
+    resolvedUri ? VideoCache.makeCachedVideoSource(resolvedUri) : null,
     (player) => {
       player.audioMixingMode = "mixWithOthers";
       player.loop = true;
@@ -134,6 +142,20 @@ function MediaVideo(props: MediaVideoProps) {
     };
   }, []);
 
+  const hasBustedStaleCache = useRef(false);
+  useEffect(() => {
+    if (
+      error &&
+      source.needsResolution &&
+      resolveStatus === "ready" &&
+      !hasBustedStaleCache.current
+    ) {
+      hasBustedStaleCache.current = true;
+      Redgifs.clearCached(Redgifs.getVideoId(source.source));
+      retry();
+    }
+  }, [error, source.needsResolution, resolveStatus, source.source, retry]);
+
   return (
     <View
       style={[styles.container, { width, height }]}
@@ -174,7 +196,19 @@ function MediaVideo(props: MediaVideoProps) {
         props.setIsScrollLocked(false);
       }}
     >
-      {error ? (
+      {resolveStatus === "error" ? (
+        <View style={styles.notReadyContainer}>
+          <TouchableOpacity onPress={retry}>
+            <Text style={styles.errorText}>
+              Couldn&apos;t load video. Tap to retry.
+            </Text>
+          </TouchableOpacity>
+        </View>
+      ) : resolveStatus === "loading" ? (
+        <View style={styles.notReadyContainer}>
+          <ActivityIndicator color="white" />
+        </View>
+      ) : error ? (
         <View style={styles.notReadyContainer}>
           <Text style={styles.errorText}>{error}</Text>
         </View>
