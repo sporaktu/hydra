@@ -46,7 +46,11 @@ export type Post = {
   images: (string | ImageSource[])[];
   imageThumbnail: ImageSource | null;
   mediaAspectRatio: number;
-  videos: { source: string; videoDownloadURL: string; needsResolution?: boolean }[];
+  videos: {
+    source: string;
+    videoDownloadURL: string;
+    needsResolution?: boolean;
+  }[];
   poll: Poll | undefined;
   externalLink: string | undefined;
   openGraphData: OpenGraphData | undefined;
@@ -138,7 +142,9 @@ function formatImages(child: any): ImageSource[][] {
 
 export async function formatVideos(
   child: any,
-): Promise<{ source: string; videoDownloadURL: string; needsResolution?: boolean }[]> {
+): Promise<
+  { source: string; videoDownloadURL: string; needsResolution?: boolean }[]
+> {
   if (child.data.media?.reddit_video?.hls_url) {
     return [
       {
