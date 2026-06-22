@@ -1,4 +1,5 @@
-import React, { useEffect } from "react";
+import React, { useContext, useEffect } from "react";
+import { ColorValue } from "react-native";
 import Animated, {
   cancelAnimation,
   Easing,
@@ -8,9 +9,19 @@ import Animated, {
   withTiming,
 } from "react-native-reanimated";
 
+import { ThemeContext } from "../../contexts/SettingsContexts/ThemeContext";
+
+type PulseHighlightChildren =
+  | React.ReactNode
+  | ((args: { color: ColorValue | undefined }) => React.ReactNode);
+
 type PulseHighlightProps = {
   // When true the wrapped content slowly pulses to draw the user's attention.
   active: boolean;
+  // The wrapped content. When passed as a function it receives the theme's
+  // alert color while `active` (and `undefined` otherwise) so icons can render
+  // in the attention-grabbing color.
+  children: PulseHighlightChildren;
 };
 
 const PULSE_DURATION = 1400;
@@ -18,7 +29,8 @@ const PULSE_DURATION = 1400;
 export default function PulseHighlight({
   active,
   children,
-}: React.PropsWithChildren<PulseHighlightProps>) {
+}: PulseHighlightProps) {
+  const { theme } = useContext(ThemeContext);
   const progress = useSharedValue(0);
 
   useEffect(() => {
@@ -43,5 +55,13 @@ export default function PulseHighlight({
     transform: [{ scale: 1 - progress.value * 0.08 }],
   }));
 
-  return <Animated.View style={animatedStyle}>{children}</Animated.View>;
+  const alertColor = active ? theme.delete : undefined;
+
+  return (
+    <Animated.View style={animatedStyle}>
+      {typeof children === "function"
+        ? children({ color: alertColor })
+        : children}
+    </Animated.View>
+  );
 }

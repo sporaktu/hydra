@@ -202,11 +202,16 @@ export default function Tabs() {
                 headerShown: false,
                 tabBarIcon: ({ focused, size }) => (
                   <PulseHighlight active={accounts.length === 0}>
-                    <MaterialIcons
-                      name="account-circle"
-                      size={size}
-                      color={focused ? theme.iconPrimary : theme.subtleText}
-                    />
+                    {({ color }) => (
+                      <MaterialIcons
+                        name="account-circle"
+                        size={size}
+                        color={
+                          color ??
+                          (focused ? theme.iconPrimary : theme.subtleText)
+                        }
+                      />
+                    )}
                   </PulseHighlight>
                 ),
                 tabBarActiveTintColor: theme.iconOrTextButton as string,
