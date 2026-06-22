@@ -122,6 +122,15 @@ export function MediaImage({ item, setIsScrollLocked }: MediaImageProps) {
     >
       <Image
         source={highestResSource}
+        /**
+         * Show the same best-fit resolution the feed already cached while the
+         * full-size original downloads, instead of a black screen. expo-image
+         * picks the placeholder source that best fits the container — the same
+         * choice the feed's ImageViewer made — so it's an instant cache hit.
+         * The high-res `source` then loads underneath for crisp zoom.
+         */
+        placeholder={typeof item.source === "string" ? undefined : item.source}
+        placeholderContentFit="contain"
         style={{ width, height }}
         contentFit="contain"
         onLoad={() => setIsLoaded(true)}
