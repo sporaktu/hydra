@@ -19,7 +19,9 @@ import { useSharedVideoPlayer } from "../../../contexts/VideoPlayerRegistryConte
 import {
   shouldArmReloadWatchdog,
   nextReloadDelayMs,
+  MAX_RELOAD_ATTEMPTS,
 } from "../../../utils/videoWatchdog";
+import { getVideoOverlayState } from "../../../utils/videoOverlayState";
 
 type VideoProps = {
   video: Post["videos"][number];
@@ -51,22 +53,45 @@ function Video({ video }: VideoProps) {
     },
   );
 
-  // expo-video's player.status is a non-reactive getter, so reading it during
-  // render gives a one-time snapshot. Subscribe to statusChange and mirror it
-  // into state so the loading overlay actually clears once the shared player
-  // becomes readyToPlay (otherwise the black "loading" tile covers the playing
-  // video forever, since nothing else re-renders this component).
+  // expo-video's player.status / .playing / .currentTime are non-reactive
+  // getters, so reading them during render gives a one-time snapshot. Mirror the
+  // live readiness signals into state so the opaque black "loading" overlay
+  // actually clears once the shared player is showing frames — otherwise the
+  // black tile covers the playing video forever (nothing else re-renders this
+  // component). We subscribe to BOTH statusChange AND playingChange: a recycled
+  // FlashList cell often mounts on top of a player that is ALREADY playing, so
+  // the loading -> readyToPlay statusChange already fired before we subscribed
+  // and never repeats. playingChange + a synchronous read of the live status /
+  // playing / currentTime on mount guarantee we observe the real state.
   const [playerStatus, setPlayerStatus] = useState(player?.status ?? null);
+  const [isPlaying, setIsPlaying] = useState(player?.playing ?? false);
+  const [currentTime, setCurrentTime] = useState(player?.currentTime ?? 0);
   useEffect(() => {
     if (!player) {
       setPlayerStatus(null);
+      setIsPlaying(false);
+      setCurrentTime(0);
       return;
     }
+    // Read the player's CURRENT live state immediately on (re)mount instead of
+    // waiting for a future event that may never come for an already-ready cell.
     setPlayerStatus(player.status);
-    const sub = player.addListener("statusChange", (e) => {
+    setIsPlaying(player.playing);
+    setCurrentTime(player.currentTime);
+    const statusSub = player.addListener("statusChange", (e) => {
       setPlayerStatus(e.status);
     });
-    return () => sub.remove();
+    const playingSub = player.addListener("playingChange", (e) => {
+      setIsPlaying(e.isPlaying);
+      // A playing player has, by definition, decoded a frame — capture the live
+      // currentTime so the overlay's readiness gate flips even if no timeUpdate
+      // has fired yet.
+      setCurrentTime(player.currentTime);
+    });
+    return () => {
+      statusSub.remove();
+      playingSub.remove();
+    };
   }, [player]);
 
   // When a stale cached redgifs URL is busted and re-resolved, the shared player
@@ -177,6 +202,13 @@ function Video({ video }: VideoProps) {
   useEffect(() => {
     if (!player) return;
     const sub = player.addListener("timeUpdate", (e) => {
+      // Mirror the very first advance past frame 0 into state (once) so the
+      // overlay's readiness gate clears even if statusChange/playingChange were
+      // both missed for this recycled cell. Guarded so we don't re-render the
+      // component 15x/sec for the rest of playback.
+      if (e.currentTime > 0) {
+        setCurrentTime((prev) => (prev > 0 ? prev : e.currentTime));
+      }
       if (!player.duration) return;
       progress.setValue(e.currentTime / player.duration);
     });
@@ -206,31 +238,56 @@ function Video({ video }: VideoProps) {
     });
   }, [player, subscribeToVisibility]);
 
+  const overlay = getVideoOverlayState({
+    resolveStatus,
+    playerStatus,
+    hasPlayer: player !== null,
+    isPlaying,
+    currentTime,
+    reloadAttempts: reloadAttempts.current,
+    maxReloadAttempts: MAX_RELOAD_ATTEMPTS,
+  });
+
   return (
     <View
       style={styles.videoContainer}
-      // "none" lets feed taps pass through to open fullscreen; in the resolve-
-      // error state switch to "box-none" so the retry tile's touch reaches its
-      // child handler reliably on Android (a "none" parent can swallow it).
-      pointerEvents={resolveStatus === "error" ? "box-none" : "none"}
+      // "none" lets feed taps pass through to open fullscreen; when the overlay
+      // is tappable (resolve-error retry) switch to "box-none" so the retry
+      // tile's touch reaches its child handler reliably on Android (a "none"
+      // parent can swallow it).
+      pointerEvents={
+        overlay.kind !== "hidden" && overlay.tappable ? "box-none" : "none"
+      }
     >
-      {resolveStatus === "error" ? (
-        <View style={styles.notReadyContainer} pointerEvents="auto">
-          <Text style={styles.errorText} onPress={retry} suppressHighlighting>
-            Couldn&apos;t load video. Tap to retry.
-          </Text>
-        </View>
-      ) : resolveStatus === "loading" ? (
-        <View style={styles.notReadyContainer}>
-          <ActivityIndicator color={theme.text} />
-        </View>
-      ) : playerStatus === "error" ? (
-        <View style={styles.notReadyContainer}>
-          <Text style={styles.errorText}>Failed to load video</Text>
-        </View>
-      ) : player === null || playerStatus === "loading" ? (
-        <View style={styles.notReadyContainer}>
-          <ActivityIndicator color={theme.text} />
+      {overlay.kind !== "hidden" ? (
+        // One overlay, always self-explanatory: it shows the EXACT current state
+        // (resolving / loading / no player / stalled+retry / error) so the tile
+        // is never a featureless black box. Critically, getVideoOverlayState
+        // returns "hidden" the instant the player is actually playing / has a
+        // frame / is readyToPlay, so this can never cover a working video.
+        <View
+          style={styles.notReadyContainer}
+          pointerEvents={overlay.tappable ? "auto" : "none"}
+        >
+          {overlay.tappable ? (
+            <Text
+              style={styles.diagnosticText}
+              onPress={retry}
+              suppressHighlighting
+            >
+              {overlay.message}
+            </Text>
+          ) : (
+            <>
+              {overlay.kind !== "playerError" && (
+                <ActivityIndicator
+                  color={theme.text}
+                  style={styles.diagnosticSpinner}
+                />
+              )}
+              <Text style={styles.diagnosticText}>{overlay.message}</Text>
+            </>
+          )}
         </View>
       ) : null}
       {player && (
@@ -291,10 +348,15 @@ const styles = StyleSheet.create({
     backgroundColor: "black",
     zIndex: 1,
   },
-  errorText: {
+  diagnosticText: {
     color: "white",
     textAlign: "center",
-    margin: 10,
+    marginHorizontal: 16,
+    fontSize: 13,
+    opacity: 0.85,
+  },
+  diagnosticSpinner: {
+    marginBottom: 8,
   },
   video: {
     width: "100%",
