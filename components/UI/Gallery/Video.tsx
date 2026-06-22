@@ -16,6 +16,10 @@ import { Post } from "../../../api/Posts";
 import Redgifs from "../../../utils/RedGifs";
 import { useResolvedVideoSource } from "../../../utils/useResolvedVideoSource";
 import { useSharedVideoPlayer } from "../../../contexts/VideoPlayerRegistryContext";
+import {
+  shouldArmReloadWatchdog,
+  nextReloadDelayMs,
+} from "../../../utils/videoWatchdog";
 
 type VideoProps = {
   video: Post["videos"][number];
@@ -101,6 +105,54 @@ function Video({ video }: VideoProps) {
       player.play();
     }
   }, [player, playerStatus]);
+
+  // Self-healing watchdog for stuck on-screen players. During a fast fling the
+  // registry churns players faster than iOS asynchronously frees the underlying
+  // AVPlayer decoders, so the REAL live-decoder count can momentarily exceed the
+  // ~16 hardware ceiling even though the registry's logical count is capped at
+  // 12. A player created in that window comes up black and never reaches
+  // readyToPlay on its own. Since this component only renders while its cell is
+  // mounted (on/near screen), a stuck player here means a visible black box.
+  // Reload it with the same source after a short delay — by then the fling has
+  // settled and decoders are free, so the reload succeeds. Bounded + backed off
+  // so it never thrashes.
+  const reloadAttempts = useRef(0);
+  useEffect(() => {
+    if (!player || !resolvedUri) return;
+    // Healthy: clear the watchdog and reset the budget.
+    if (playerStatus === "readyToPlay") {
+      reloadAttempts.current = 0;
+      return;
+    }
+    if (
+      !shouldArmReloadWatchdog({
+        playerStatus,
+        resolveStatus,
+        hasPlayerAndSource: true,
+        attempts: reloadAttempts.current,
+      })
+    ) {
+      return;
+    }
+    // Stuck (loading / idle / error) while visible — arm a watchdog.
+    const delay = nextReloadDelayMs(reloadAttempts.current);
+    const timer = setTimeout(() => {
+      // Re-check: only reload if still not ready (status is a live getter).
+      if (player.status === "readyToPlay") {
+        reloadAttempts.current = 0;
+        return;
+      }
+      reloadAttempts.current += 1;
+      try {
+        player.replace(VideoCache.makeCachedVideoSource(resolvedUri));
+        if (!isViewerShowing.current) player.play();
+      } catch {
+        // Player may have been released by the registry as the cell scrolled
+        // off; the next mount will re-acquire a fresh one. Nothing to do.
+      }
+    }, delay);
+    return () => clearTimeout(timer);
+  }, [player, playerStatus, resolvedUri, resolveStatus]);
 
   const hasBustedStaleCache = useRef(false);
   useEffect(() => {
