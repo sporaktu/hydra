@@ -4,7 +4,6 @@ import {
   View,
   Text,
   TouchableOpacity,
-  Alert,
   Switch,
   Appearance,
 } from "react-native";
@@ -12,7 +11,6 @@ import { useURLNavigation } from "../../utils/navigation";
 import { ThemeContext } from "../../contexts/SettingsContexts/ThemeContext";
 import { useSetTheme } from "../../utils/useSetTheme";
 import ThemeList from "../../components/UI/Themes/ThemeList";
-import { SubscriptionsContext } from "../../contexts/SubscriptionsContext";
 import List from "../../components/UI/List";
 import { FontAwesome } from "@expo/vector-icons";
 
@@ -25,7 +23,6 @@ export default function Theme() {
     useDifferentDarkTheme,
     setUseDifferentDarkTheme,
   } = useContext(ThemeContext);
-  const { isPro } = useContext(SubscriptionsContext);
 
   const { pushURL } = useURLNavigation();
   const setTheme = useSetTheme();
@@ -42,25 +39,6 @@ export default function Theme() {
         <Text style={[styles.headerText, { color: theme.text }]}>Themes</Text>
         <TouchableOpacity
           onPress={() => {
-            if (!isPro) {
-              Alert.alert(
-                "Hydra Pro Feature",
-                "This feature is only available to Hydra Pro subscribers. You can make and save custom themes, but will only be able to use them for 5 minutes.",
-                [
-                  {
-                    text: "Get Hydra Pro",
-                    isPreferred: true,
-                    onPress: () => {
-                      pushURL("hydra://settings/hydraPro");
-                    },
-                  },
-                  {
-                    text: "Just try it out",
-                    style: "cancel",
-                  },
-                ],
-              );
-            }
             pushURL("hydra://settings/themeMaker");
           }}
           hitSlop={20}

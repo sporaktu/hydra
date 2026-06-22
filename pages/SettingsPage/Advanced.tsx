@@ -1,14 +1,6 @@
 import { Entypo, Feather } from "@expo/vector-icons";
 import React, { useContext, useEffect, useState } from "react";
-import {
-  Alert,
-  Switch,
-  View,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-} from "react-native";
-import * as Clipboard from "expo-clipboard";
+import { Switch, View, StyleSheet, Text } from "react-native";
 
 import List from "../../components/UI/List";
 import { ThemeContext } from "../../contexts/SettingsContexts/ThemeContext";
@@ -21,12 +13,10 @@ import { useMMKVBoolean } from "react-native-mmkv";
 import TextInput from "../../components/UI/TextInput";
 import KeyStore from "../../utils/KeyStore";
 import { hydraServerStatus } from "../../api/HydraServerStatus";
-import { SubscriptionsContext } from "../../contexts/SubscriptionsContext";
 import ImageCache from "../../utils/ImageCache";
 import VideoCache from "../../utils/VideoCache";
 
 export default function Advanced() {
-  const { customerId } = useContext(SubscriptionsContext);
   const { theme } = useContext(ThemeContext);
 
   const { cacheSize: imageCacheSize, clearCache: clearImageCache } =
@@ -147,21 +137,6 @@ export default function Advanced() {
           </View>
         </>
       )}
-      {customerId && (
-        <TouchableOpacity
-          onPress={() => {
-            Clipboard.setStringAsync(customerId);
-            Alert.alert(
-              "Customer ID Copied",
-              "The customer ID has been copied to your clipboard.",
-            );
-          }}
-        >
-          <Text style={[styles.customerIdText, { color: theme.text }]}>
-            Customer ID: {customerId}
-          </Text>
-        </TouchableOpacity>
-      )}
     </>
   );
 }
@@ -181,12 +156,5 @@ const styles = StyleSheet.create({
   },
   hydraServerUrlStatusText: {
     fontSize: 14,
-  },
-  customerIdText: {
-    fontSize: 14,
-    marginTop: 30,
-    marginHorizontal: 20,
-    marginBottom: 20,
-    textAlign: "center",
   },
 });

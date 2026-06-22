@@ -12,7 +12,6 @@ import React, { useContext } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { supportsAlternateIcons } from "expo-alternate-app-icons";
 
-import GetHydraProButton from "../../components/UI/GetHydraProButton";
 import List from "../../components/UI/List";
 import { ThemeContext } from "../../contexts/SettingsContexts/ThemeContext";
 import { useURLNavigation } from "../../utils/navigation";
@@ -130,7 +129,6 @@ export default function Root() {
           },
         ]}
       />
-      <GetHydraProButton />
       <View style={styles.appDetails}>
         <Text
           style={[
