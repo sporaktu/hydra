@@ -5,6 +5,8 @@ import { useContext } from "react";
 import { StackParamsList } from "./index";
 import Login from "../../components/Modals/Login";
 import IconButton from "../../components/Navbar/IconButton";
+import PulseHighlight from "../../components/UI/PulseHighlight";
+import { AccountContext } from "../../contexts/AccountContext";
 import { ModalContext } from "../../contexts/ModalContext";
 import { ThemeContext } from "../../contexts/SettingsContexts/ThemeContext";
 import AccountsPage from "../../pages/AccountsPage";
@@ -20,6 +22,7 @@ export default function AccountsScreen({
 }: AccountsScreenProps) {
   const { theme } = useContext(ThemeContext);
   const { setModal } = useContext(ModalContext);
+  const { accounts } = useContext(AccountContext);
 
   return (
     <StackNavigator.Screen<"Accounts">
@@ -27,16 +30,18 @@ export default function AccountsScreen({
       component={AccountsPage}
       options={() => ({
         headerRight: () => (
-          <IconButton
-            icon={
-              <Entypo name="plus" size={24} color={theme.iconOrTextButton} />
-            }
-            onPress={() => setModal(<Login />)}
-            touchableOpacityProps={{
-              accessibilityLabel: "Add account",
-              accessibilityRole: "button",
-            }}
-          />
+          <PulseHighlight active={accounts.length === 0}>
+            <IconButton
+              icon={
+                <Entypo name="plus" size={24} color={theme.iconOrTextButton} />
+              }
+              onPress={() => setModal(<Login />)}
+              touchableOpacityProps={{
+                accessibilityLabel: "Add account",
+                accessibilityRole: "button",
+              }}
+            />
+          </PulseHighlight>
         ),
         headerBackTitle: "Subreddits",
       })}
