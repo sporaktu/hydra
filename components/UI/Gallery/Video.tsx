@@ -82,16 +82,25 @@ function Video({ video }: VideoProps) {
     }
   }, [player, resolvedUri]);
 
+  // Tracks whether the fullscreen viewer is currently open for this shared
+  // player, so the "always play" effect below doesn't fight the viewer (which
+  // pauses the inline feed playback while it owns the player).
+  const isViewerShowing = useRef(false);
+
   // The feed always wants the player muted, looping, and playing — even if a
   // fullscreen viewer session left the SAME shared player unmuted or paused.
+  // Re-run on status changes too: streaming sources (e.g. v.redd.it HLS) aren't
+  // "readyToPlay" yet when the player is first acquired, so the configure-time
+  // play() never starts them. Once they reach readyToPlay we (re-)issue play(),
+  // otherwise they sit paused inline as a black box until tapped into fullscreen.
   useEffect(() => {
     if (!player) return;
     player.muted = true;
     player.loop = true;
-    if (player.status === "readyToPlay") {
+    if (player.status === "readyToPlay" && !isViewerShowing.current) {
       player.play();
     }
-  }, [player]);
+  }, [player, playerStatus]);
 
   const hasBustedStaleCache = useRef(false);
   useEffect(() => {
@@ -135,6 +144,7 @@ function Video({ video }: VideoProps) {
   useEffect(() => {
     if (!player) return;
     return subscribeToVisibility((isShowing) => {
+      isViewerShowing.current = isShowing;
       if (isShowing) {
         player.pause();
       } else {
