@@ -199,10 +199,20 @@ function MediaVideoContent(
       toleranceAfter: 0.1,
     };
     if (focused) {
+      // The shared player is created by the inline feed with
+      // audioMixingMode "mixWithOthers" + muted, which leaves the iOS audio
+      // session in a mixing state that isn't activated until a play/mute
+      // change races through — so fullscreen audio started seconds late and
+      // broke after a seek or after closing and reopening. Forcing "doNotMix"
+      // here makes expo-video activate the audio session immediately and keep
+      // it active across seeks/reopens.
+      player.audioMixingMode = "doNotMix";
       player.muted = false;
       player.play();
       player.volume = 1;
     } else {
+      // Hand the player back to the inline feed's mixing/muted behavior.
+      player.audioMixingMode = "mixWithOthers";
       player.pause();
       player.volume = 0;
     }

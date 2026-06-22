@@ -220,10 +220,16 @@ function MediaVideoContent(
       toleranceAfter: 0.1,
     };
     if (focused) {
+      // Take exclusive audio focus so fullscreen audio starts promptly and
+      // stays working across seeks/reopens, instead of inheriting the inline
+      // feed player's "mixWithOthers" muted state.
+      player.audioMixingMode = "doNotMix";
       player.muted = false;
       player.play();
       player.volume = 1;
     } else {
+      // Hand the player back to the inline feed's mixing/muted behavior.
+      player.audioMixingMode = "mixWithOthers";
       player.pause();
       player.volume = 0;
     }
