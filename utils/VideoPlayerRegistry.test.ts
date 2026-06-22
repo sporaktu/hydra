@@ -163,6 +163,45 @@ describe("VideoPlayerRegistry LRU backstop", () => {
     expect(released).toHaveLength(0);
     expect(created).toHaveLength(2);
   });
+
+  it("NEVER denies a player to a mounted cell, even past the cap", () => {
+    // Invariant: a currently-mounted/visible cell must always get a player. If
+    // FlashList mounts more video cells than the cap, the extra cells still need
+    // real players (a brief over-cap is far better than a black visible video).
+    // Here every player stays referenced (all cells mounted) so nothing is idle
+    // to evict — acquire must still return a live, distinct player for each.
+    const cap = 3;
+    const { registry, created } = makeHarness(cap);
+    const players = [];
+    for (let i = 0; i < cap + 4; i++) {
+      players.push(registry.acquire(`mounted-${i}`));
+    }
+    // Every mounted cell got a real player...
+    expect(players.every((p) => p && !p.released)).toBe(true);
+    // ...and they are all distinct (no cell was handed a recycled/null player).
+    expect(new Set(players).size).toBe(cap + 4);
+    expect(created).toHaveLength(cap + 4);
+    // No referenced (mounted) player was evicted out from under its cell.
+    expect(created.filter((p) => p.released)).toHaveLength(0);
+  });
+
+  it("never evicts a referenced player even when over cap with one idle victim", () => {
+    // Mixed window: many mounted (referenced) cells plus one idle off-screen
+    // player. Acquiring past the cap must reap ONLY the idle one and leave every
+    // mounted cell's player untouched.
+    const cap = 2;
+    const { registry, released } = makeHarness(cap);
+    const a = registry.acquire("mounted-a"); // refCount 1
+    const idle = registry.acquire("idle"); // refCount 1
+    registry.release("idle"); // idle now refCount 0 (scrolled away)
+    const b = registry.acquire("mounted-b"); // over cap -> evicts the idle one
+    const c = registry.acquire("mounted-c"); // over cap, nothing idle -> create anyway
+    // The only evicted player is the idle one.
+    expect(released).toHaveLength(1);
+    expect(released[0]).toBe(idle);
+    // All mounted players are alive and were never released.
+    expect([a, b, c].every((p) => !p.released)).toBe(true);
+  });
 });
 
 describe("VideoPlayerRegistry introspection", () => {

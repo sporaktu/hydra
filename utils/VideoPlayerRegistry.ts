@@ -14,10 +14,15 @@ type VideoPlayerRegistryOptions<P> = {
 };
 
 // iOS allows only ~16 simultaneous AVPlayers before new ones silently fail to
-// decode (permanent black tiles). Stay well under that ceiling so a fast-scroll
-// burst — where many cells acquire players before the off-screen ones finish
-// their deferred release — can't push the live count over the hardware limit.
-const DEFAULT_MAX_LIVE_PLAYERS = 8;
+// decode (permanent black tiles), so we cap the pool below that ceiling. But the
+// cap must also sit ABOVE the number of video cells FlashList keeps mounted at
+// once (its viewport + drawDistance window in a dense all-video feed): eviction
+// only ever reaps idle (refCount 0) off-screen players, so if the cap were below
+// the mounted-cell count, the LRU pick could be a player still bound to an
+// on-screen cell — reaping it blanks a visible video until that cell recycles
+// (the intermittent "every 3rd–4th video is black" symptom). 12 leaves headroom
+// above the realistic mounted-video window while staying safely under ~16.
+const DEFAULT_MAX_LIVE_PLAYERS = 12;
 
 export class VideoPlayerRegistry<P> {
   private entries = new Map<string, RegistryEntry<P>>();
