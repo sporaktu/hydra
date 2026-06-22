@@ -5,6 +5,7 @@ import {
   useContext,
   useEffect,
   useRef,
+  useState,
 } from "react";
 import { VideoPlayerRegistry } from "../utils/VideoPlayerRegistry";
 
@@ -93,11 +94,20 @@ export function useSharedVideoPlayer(
   configureRef.current = configure;
 
   const acquiredKeyRef = useRef<string | null>(null);
+  // Track the acquired player in state so the consumer re-renders once it
+  // exists. acquire() runs in an effect (after commit), so returning peek()
+  // during render would stay null forever in the feed, where nothing else
+  // triggers a re-render — leaving VideoView unmounted (black box + spinner).
+  const [player, setPlayer] = useState<VideoPlayer | null>(null);
 
   useEffect(() => {
-    if (source === null) return;
-    ctx.acquire(key, source, (player) => configureRef.current(player));
+    if (source === null) {
+      setPlayer(null);
+      return;
+    }
+    const acquired = ctx.acquire(key, source, (p) => configureRef.current(p));
     acquiredKeyRef.current = key;
+    setPlayer(acquired);
     return () => {
       if (acquiredKeyRef.current !== null) {
         ctx.release(acquiredKeyRef.current);
@@ -107,11 +117,5 @@ export function useSharedVideoPlayer(
     // Re-acquire only when the key changes or source transitions null->set.
   }, [key, source === null]);
 
-  if (source === null) return null;
-  // peek returns the live player synchronously after acquire has run in the
-  // effect; on the first render (before the effect) it may be null, so acquire
-  // eagerly here too is unnecessary because VideoView tolerates a null player
-  // for one frame. To avoid that frame, acquire synchronously during render
-  // guard: only peek (no side effect) here.
-  return ctx.peek(key);
+  return player;
 }

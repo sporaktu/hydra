@@ -1,5 +1,5 @@
 import { VideoView } from "expo-video";
-import { useContext, useEffect, useRef } from "react";
+import { useContext, useEffect, useRef, useState } from "react";
 import {
   Animated,
   AppState,
@@ -47,6 +47,24 @@ function Video({ video }: VideoProps) {
     },
   );
 
+  // expo-video's player.status is a non-reactive getter, so reading it during
+  // render gives a one-time snapshot. Subscribe to statusChange and mirror it
+  // into state so the loading overlay actually clears once the shared player
+  // becomes readyToPlay (otherwise the black "loading" tile covers the playing
+  // video forever, since nothing else re-renders this component).
+  const [playerStatus, setPlayerStatus] = useState(player?.status ?? null);
+  useEffect(() => {
+    if (!player) {
+      setPlayerStatus(null);
+      return;
+    }
+    setPlayerStatus(player.status);
+    const sub = player.addListener("statusChange", (e) => {
+      setPlayerStatus(e.status);
+    });
+    return () => sub.remove();
+  }, [player]);
+
   // When a stale cached redgifs URL is busted and re-resolved, the shared player
   // still holds the old source (the registry key is unchanged), so swap the source
   // on the live player. Skip the first application — the registry created the
@@ -78,7 +96,7 @@ function Video({ video }: VideoProps) {
   const hasBustedStaleCache = useRef(false);
   useEffect(() => {
     if (
-      player?.status === "error" &&
+      playerStatus === "error" &&
       video.needsResolution &&
       resolveStatus === "ready" &&
       !hasBustedStaleCache.current
@@ -88,7 +106,7 @@ function Video({ video }: VideoProps) {
       retry();
     }
   }, [
-    player?.status,
+    playerStatus,
     video.needsResolution,
     resolveStatus,
     video.source,
@@ -144,11 +162,11 @@ function Video({ video }: VideoProps) {
         <View style={styles.notReadyContainer}>
           <ActivityIndicator color={theme.text} />
         </View>
-      ) : player?.status === "error" ? (
+      ) : playerStatus === "error" ? (
         <View style={styles.notReadyContainer}>
           <Text style={styles.errorText}>Failed to load video</Text>
         </View>
-      ) : player === null || player.status === "loading" ? (
+      ) : player === null || playerStatus === "loading" ? (
         <View style={styles.notReadyContainer}>
           <ActivityIndicator color={theme.text} />
         </View>
