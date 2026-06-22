@@ -57,9 +57,11 @@ export default function PulseHighlight({
           pointerEvents="none"
           style={[
             styles.highlight,
-            // `share` is the theme's warm gold/amber accent — a softer
-            // caution color than the red `delete`/danger token.
-            { backgroundColor: theme.share },
+            // Pulse in the theme's own button/accent color so it harmonizes
+            // with the rest of the UI: red-button themes (e.g. spiderman)
+            // pulse red, while other themes pulse their accent instead of a
+            // hardcoded danger color.
+            { backgroundColor: theme.iconOrTextButton },
             backgroundStyle,
           ]}
         />
