@@ -105,31 +105,136 @@ type RedGifResponse = {
   niches?: RedGifNiche[];
 };
 
+const MAX_CONCURRENT_RESOLUTIONS = 2;
+
+let activeResolutions = 0;
+const resolutionQueue: (() => void)[] = [];
+
+function acquireSlot(): Promise<void> {
+  if (activeResolutions < MAX_CONCURRENT_RESOLUTIONS) {
+    activeResolutions++;
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => {
+    resolutionQueue.push(() => {
+      activeResolutions++;
+      resolve();
+    });
+  });
+}
+
+function releaseSlot(): void {
+  activeResolutions--;
+  const next = resolutionQueue.shift();
+  if (next) {
+    next();
+  }
+}
+
+export class RedgifsResolutionError extends Error {
+  constructor(message = "Failed to resolve Redgifs media URL") {
+    super(message);
+    this.name = "RedgifsResolutionError";
+  }
+}
+
 const REDGIFS_TOKEN_STORAGE_KEY = "redgifsToken";
 
+const NORMAL_COOLDOWN_MS = 1_000;
+const RATE_LIMIT_COOLDOWN_MS = 30_000;
+const MAX_BACKOFF_ATTEMPTS = 3;
+
+let cooldownUntil = 0;
+
+function now(): number {
+  return Date.now();
+}
+
+function armCooldown(ms: number): void {
+  cooldownUntil = Math.max(cooldownUntil, now() + ms);
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function waitForCooldown(): Promise<void> {
+  const remaining = cooldownUntil - now();
+  if (remaining > 0) {
+    await sleep(remaining);
+  }
+}
+
+const resolvedUrlCache = new Map<string, string>();
+
 export default class Redgifs {
-  static async getMediaURL(url: string, attemptsLeft = 1): Promise<string> {
-    const videoId = url.split(/watch\/|\?|#/)[1];
-    let token = Redgifs.getStoredToken();
-    if (!token) {
-      token = await Redgifs.refreshStoredToken();
+  static getVideoId(url: string): string {
+    return url.split(/watch\/|\?|#/)[1];
+  }
+
+  static async getMediaURL(url: string): Promise<string> {
+    const videoId = Redgifs.getVideoId(url);
+    const cached = resolvedUrlCache.get(videoId);
+    if (cached) {
+      return cached;
     }
+    await acquireSlot();
     try {
-      return await safeFetch(`https://api.redgifs.com/v2/gifs/${videoId}`, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "User-Agent": "Hydra",
-        },
-      })
-        .then((res) => res.json() as Promise<RedGifResponse>)
-        .then((json) => json.gif.urls.hd ?? json.gif.urls.sd);
-    } catch (_) {
-      if (attemptsLeft > 0) {
+      // Re-check cache: another queued caller for the same id may have resolved it.
+      const cachedAfterWait = resolvedUrlCache.get(videoId);
+      if (cachedAfterWait) {
+        return cachedAfterWait;
+      }
+      return await Redgifs.resolveWithRetry(videoId);
+    } finally {
+      releaseSlot();
+    }
+  }
+
+  private static async resolveWithRetry(videoId: string): Promise<string> {
+    let lastError: unknown;
+    for (let attempt = 0; attempt < MAX_BACKOFF_ATTEMPTS; attempt++) {
+      await waitForCooldown();
+      let token = Redgifs.getStoredToken();
+      if (!token) {
+        token = await Redgifs.refreshStoredToken();
+      }
+      try {
+        const res = await safeFetch(
+          `https://api.redgifs.com/v2/gifs/${videoId}`,
+          {
+            headers: {
+              Authorization: `Bearer ${token}`,
+              "User-Agent": "Hydra",
+            },
+          },
+        );
+        if (res.status === 429) {
+          armCooldown(RATE_LIMIT_COOLDOWN_MS);
+          lastError = new RedgifsResolutionError("Redgifs rate limited (429)");
+          continue;
+        }
+        if (!res.ok) {
+          armCooldown(NORMAL_COOLDOWN_MS * (attempt + 1));
+          lastError = new RedgifsResolutionError(
+            `Redgifs responded ${res.status}`,
+          );
+          await Redgifs.refreshStoredToken();
+          continue;
+        }
+        const json = (await res.json()) as RedGifResponse;
+        const resolved = json.gif.urls.hd ?? json.gif.urls.sd;
+        resolvedUrlCache.set(videoId, resolved);
+        return resolved;
+      } catch (e) {
+        lastError = e;
+        armCooldown(NORMAL_COOLDOWN_MS * (attempt + 1));
         await Redgifs.refreshStoredToken();
-        return await Redgifs.getMediaURL(url, attemptsLeft - 1);
       }
     }
-    return url;
+    throw lastError instanceof RedgifsResolutionError
+      ? lastError
+      : new RedgifsResolutionError(String(lastError));
   }
 
   static getStoredToken() {
@@ -146,5 +251,24 @@ export default class Redgifs {
       .then((json) => json.token);
     KeyStore.set(REDGIFS_TOKEN_STORAGE_KEY, token);
     return token;
+  }
+
+  static clearCached(videoId: string): void {
+    resolvedUrlCache.delete(videoId);
+  }
+
+  /** Test-only: wipe the in-memory cache between tests. */
+  static clearAllCachedForTests(): void {
+    resolvedUrlCache.clear();
+  }
+
+  /** Test-only: get remaining cooldown ms. */
+  static getCooldownRemainingForTests(): number {
+    return Math.max(0, cooldownUntil - Date.now());
+  }
+
+  /** Test-only: reset the shared cooldown state. */
+  static resetCooldownForTests(): void {
+    cooldownUntil = 0;
   }
 }

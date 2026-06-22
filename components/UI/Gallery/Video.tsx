@@ -1,6 +1,5 @@
-import { useEvent, useEventListener } from "expo";
-import { useVideoPlayer, VideoView } from "expo-video";
-import { useContext, useEffect, useRef } from "react";
+import { VideoView } from "expo-video";
+import { useContext, useEffect, useRef, useState } from "react";
 import {
   Animated,
   AppState,
@@ -13,18 +12,29 @@ import { ThemeContext } from "../../../contexts/SettingsContexts/ThemeContext";
 import { MediaViewerContext } from "../../../contexts/MediaViewerContext";
 import DismountWhenBackgrounded from "../../Other/DismountWhenBackgrounded";
 import VideoCache from "../../../utils/VideoCache";
+import { Post } from "../../../api/Posts";
+import Redgifs from "../../../utils/RedGifs";
+import { useResolvedVideoSource } from "../../../utils/useResolvedVideoSource";
+import { useSharedVideoPlayer } from "../../../contexts/VideoPlayerRegistryContext";
 
 type VideoProps = {
-  uri: string;
+  video: Post["videos"][number];
 };
 
-function Video({ uri }: VideoProps) {
+function Video({ video }: VideoProps) {
   const { theme } = useContext(ThemeContext);
   const { subscribeToVisibility } = useContext(MediaViewerContext);
   const progress = useRef(new Animated.Value(0)).current;
 
-  const player = useVideoPlayer(
-    VideoCache.makeCachedVideoSource(uri),
+  const {
+    uri: resolvedUri,
+    status: resolveStatus,
+    retry,
+  } = useResolvedVideoSource(video.source, video.needsResolution);
+
+  const player = useSharedVideoPlayer(
+    video.source,
+    resolvedUri ? VideoCache.makeCachedVideoSource(resolvedUri) : null,
     (player) => {
       player.audioMixingMode = "mixWithOthers";
       player.muted = true;
@@ -37,13 +47,92 @@ function Video({ uri }: VideoProps) {
     },
   );
 
-  const status = useEvent(player, "statusChange");
+  // expo-video's player.status is a non-reactive getter, so reading it during
+  // render gives a one-time snapshot. Subscribe to statusChange and mirror it
+  // into state so the loading overlay actually clears once the shared player
+  // becomes readyToPlay (otherwise the black "loading" tile covers the playing
+  // video forever, since nothing else re-renders this component).
+  const [playerStatus, setPlayerStatus] = useState(player?.status ?? null);
+  useEffect(() => {
+    if (!player) {
+      setPlayerStatus(null);
+      return;
+    }
+    setPlayerStatus(player.status);
+    const sub = player.addListener("statusChange", (e) => {
+      setPlayerStatus(e.status);
+    });
+    return () => sub.remove();
+  }, [player]);
 
-  useEventListener(player, "timeUpdate", (e) => {
-    progress.setValue(e.currentTime / player.duration);
-  });
+  // When a stale cached redgifs URL is busted and re-resolved, the shared player
+  // still holds the old source (the registry key is unchanged), so swap the source
+  // on the live player. Skip the first application — the registry created the
+  // player with the current resolvedUri at acquire time.
+  const lastReplacedUri = useRef<string | null>(null);
+  useEffect(() => {
+    if (!player || !resolvedUri) return;
+    if (lastReplacedUri.current === null) {
+      lastReplacedUri.current = resolvedUri;
+      return;
+    }
+    if (lastReplacedUri.current !== resolvedUri) {
+      lastReplacedUri.current = resolvedUri;
+      player.replace(VideoCache.makeCachedVideoSource(resolvedUri));
+    }
+  }, [player, resolvedUri]);
+
+  // Tracks whether the fullscreen viewer is currently open for this shared
+  // player, so the "always play" effect below doesn't fight the viewer (which
+  // pauses the inline feed playback while it owns the player).
+  const isViewerShowing = useRef(false);
+
+  // The feed always wants the player muted, looping, and playing — even if a
+  // fullscreen viewer session left the SAME shared player unmuted or paused.
+  // Re-run on status changes too: streaming sources (e.g. v.redd.it HLS) aren't
+  // "readyToPlay" yet when the player is first acquired, so the configure-time
+  // play() never starts them. Once they reach readyToPlay we (re-)issue play(),
+  // otherwise they sit paused inline as a black box until tapped into fullscreen.
+  useEffect(() => {
+    if (!player) return;
+    player.muted = true;
+    player.loop = true;
+    if (player.status === "readyToPlay" && !isViewerShowing.current) {
+      player.play();
+    }
+  }, [player, playerStatus]);
+
+  const hasBustedStaleCache = useRef(false);
+  useEffect(() => {
+    if (
+      playerStatus === "error" &&
+      video.needsResolution &&
+      resolveStatus === "ready" &&
+      !hasBustedStaleCache.current
+    ) {
+      hasBustedStaleCache.current = true;
+      Redgifs.clearCached(Redgifs.getVideoId(video.source));
+      retry();
+    }
+  }, [
+    playerStatus,
+    video.needsResolution,
+    resolveStatus,
+    video.source,
+    retry,
+  ]);
 
   useEffect(() => {
+    if (!player) return;
+    const sub = player.addListener("timeUpdate", (e) => {
+      if (!player.duration) return;
+      progress.setValue(e.currentTime / player.duration);
+    });
+    return () => sub.remove();
+  }, [player, progress]);
+
+  useEffect(() => {
+    if (!player) return;
     const subscription = AppState.addEventListener("change", (state) => {
       if (state === "active" && player.status === "readyToPlay") {
         player.play();
@@ -53,33 +142,54 @@ function Video({ uri }: VideoProps) {
   }, [player]);
 
   useEffect(() => {
+    if (!player) return;
     return subscribeToVisibility((isShowing) => {
+      isViewerShowing.current = isShowing;
       if (isShowing) {
         player.pause();
       } else {
+        player.muted = true;
         player.play();
       }
     });
   }, [player, subscribeToVisibility]);
 
   return (
-    <View style={styles.videoContainer} pointerEvents="none">
-      {status?.error ? (
-        <View style={styles.notReadyContainer}>
-          <Text style={styles.errorText}>{status.error.message}</Text>
+    <View
+      style={styles.videoContainer}
+      // "none" lets feed taps pass through to open fullscreen; in the resolve-
+      // error state switch to "box-none" so the retry tile's touch reaches its
+      // child handler reliably on Android (a "none" parent can swallow it).
+      pointerEvents={resolveStatus === "error" ? "box-none" : "none"}
+    >
+      {resolveStatus === "error" ? (
+        <View style={styles.notReadyContainer} pointerEvents="auto">
+          <Text style={styles.errorText} onPress={retry} suppressHighlighting>
+            Couldn&apos;t load video. Tap to retry.
+          </Text>
         </View>
-      ) : status === null || status.status === "loading" ? (
+      ) : resolveStatus === "loading" ? (
+        <View style={styles.notReadyContainer}>
+          <ActivityIndicator color={theme.text} />
+        </View>
+      ) : playerStatus === "error" ? (
+        <View style={styles.notReadyContainer}>
+          <Text style={styles.errorText}>Failed to load video</Text>
+        </View>
+      ) : player === null || playerStatus === "loading" ? (
         <View style={styles.notReadyContainer}>
           <ActivityIndicator color={theme.text} />
         </View>
       ) : null}
-      <VideoView
-        player={player}
-        style={styles.video}
-        contentFit="contain"
-        nativeControls={false}
-        allowsVideoFrameAnalysis={false}
-      />
+      {player && (
+        <VideoView
+          player={player}
+          style={styles.video}
+          contentFit="contain"
+          nativeControls={false}
+          allowsVideoFrameAnalysis={false}
+        />
+      )}
       <View
         style={[
           styles.progressBarBackground,

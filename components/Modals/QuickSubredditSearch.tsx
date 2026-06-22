@@ -13,6 +13,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 import { ThemeContext } from "../../contexts/SettingsContexts/ThemeContext";
 import { getSearchResults } from "../../api/Search";
+import { resolveSubreddit } from "../../api/SubredditDetails";
 import { useDebouncedEffect } from "../../utils/debounce";
 import { Subreddit } from "../../api/Subreddits";
 import SubredditIcon from "../RedditDataRepresentations/Post/PostParts/SubredditIcon";
@@ -45,6 +46,8 @@ export default function QuickSubredditSearch({
   const [searchText, setSearchText] = useState("");
   const [subreddits, setSubreddits] = useState<Subreddit[]>([]);
   const [loading, setLoading] = useState(false);
+  const [exactSub, setExactSub] = useState<Subreddit | null>(null);
+  const exactLookupToken = useRef(0);
 
   const subredditsToShow = searchText
     ? subreddits
@@ -54,6 +57,7 @@ export default function QuickSubredditSearch({
     onExit();
     setSearchText("");
     setSubreddits([]);
+    setExactSub(null);
     navigation.dispatch(
       StackActions.push("PostsPage", {
         url: `https://www.reddit.com/r/${subreddit.name}`,
@@ -76,10 +80,24 @@ export default function QuickSubredditSearch({
     setLoading(false);
   };
 
+  const loadExactSub = async (searchText: string) => {
+    const trimmed = searchText.trim().replace(/^(\/r\/|r\/|\/)/, "");
+    if (!trimmed.length) {
+      setExactSub(null);
+      return;
+    }
+    const token = ++exactLookupToken.current;
+    const result = await resolveSubreddit(trimmed);
+    // Ignore stale lookups (user kept typing)
+    if (token !== exactLookupToken.current) return;
+    setExactSub(result);
+  };
+
   useDebouncedEffect(
     500,
     () => {
       loadSearchResults(searchText);
+      loadExactSub(searchText);
     },
     [searchText],
   );
@@ -122,10 +140,45 @@ export default function QuickSubredditSearch({
           ]}
           autoCorrect={false}
           value={searchText}
-          onChangeText={setSearchText}
+          onChangeText={(text) => {
+            setSearchText(text);
+            setExactSub(null);
+          }}
+          returnKeyType="go"
+          onSubmitEditing={() => {
+            if (exactSub) {
+              navigateToSubreddit(exactSub);
+            }
+          }}
           placeholder="Search for a subreddit"
           placeholderTextColor={theme.subtleText}
         />
+        {exactSub && (
+          <TouchableOpacity
+            onPress={() => navigateToSubreddit(exactSub)}
+            activeOpacity={0.5}
+            style={[
+              styles.goToContainer,
+              {
+                backgroundColor: theme.tint,
+                borderColor: theme.divider,
+              },
+            ]}
+          >
+            <SubredditIcon
+              subredditIcon={exactSub.iconURL}
+              overridePostAppearanceSetting={true}
+            />
+            <Text style={[styles.goToText, { color: theme.text }]}>
+              Go to r/{exactSub.name}
+            </Text>
+            <MaterialIcons
+              name="keyboard-arrow-right"
+              size={30}
+              color={theme.verySubtleText}
+            />
+          </TouchableOpacity>
+        )}
         <FlashList
           style={{
             ...styles.subredditsContainer,
@@ -262,5 +315,21 @@ const styles = StyleSheet.create({
   },
   loading: {
     marginTop: 20,
+  },
+  goToContainer: {
+    width: "100%",
+    marginTop: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 15,
+    paddingHorizontal: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+  },
+  goToText: {
+    fontSize: 17,
+    fontWeight: "600",
+    flex: 1,
+    marginLeft: 10,
   },
 });

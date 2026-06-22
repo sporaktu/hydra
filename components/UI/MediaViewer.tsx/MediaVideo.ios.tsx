@@ -1,5 +1,5 @@
 import { useEvent, useEventListener } from "expo";
-import { useVideoPlayer, VideoView } from "expo-video";
+import { VideoView } from "expo-video";
 import { useEffect, useRef, useState } from "react";
 import {
   Animated,
@@ -16,6 +16,9 @@ import {
 } from "react-native-safe-area-context";
 import DismountWhenBackgrounded from "../../Other/DismountWhenBackgrounded";
 import VideoCache from "../../../utils/VideoCache";
+import Redgifs from "../../../utils/RedGifs";
+import { useResolvedVideoSource } from "../../../utils/useResolvedVideoSource";
+import { useSharedVideoPlayer } from "../../../contexts/VideoPlayerRegistryContext";
 import { Post } from "../../../api/Posts";
 
 export type VideoItem = {
@@ -33,18 +36,93 @@ type MediaVideoProps = {
 const PLAYBACK_RATES = [0.5, 1, 1.5, 2];
 
 function MediaVideo(props: MediaVideoProps) {
-  const { source, focused, overlayOpacity } = props;
+  const { source } = props;
   const { width, height } = useSafeAreaFrame();
-  const { top: safeAreaTop, left: safeAreaLeft } = useSafeAreaInsets();
 
-  const player = useVideoPlayer(
-    VideoCache.makeCachedVideoSource(source.source),
+  const {
+    uri: resolvedUri,
+    status: resolveStatus,
+    retry,
+  } = useResolvedVideoSource(source.source, source.needsResolution);
+
+  const player = useSharedVideoPlayer(
+    source.source,
+    resolvedUri ? VideoCache.makeCachedVideoSource(resolvedUri) : null,
     (player) => {
       player.audioMixingMode = "mixWithOthers";
       player.loop = true;
       player.timeUpdateEventInterval = 1 / 15;
+      player.seekTolerance = {
+        toleranceBefore: 0.1,
+        toleranceAfter: 0.1,
+      };
     },
   );
+
+  // When a stale cached redgifs URL is busted and re-resolved, the shared player
+  // still holds the old source (the registry key is unchanged), so swap the source
+  // on the live player. Skip the first application — the registry created the
+  // player with the current resolvedUri at acquire time.
+  const lastReplacedUri = useRef<string | null>(null);
+  useEffect(() => {
+    if (!player || !resolvedUri) return;
+    if (lastReplacedUri.current === null) {
+      lastReplacedUri.current = resolvedUri;
+      return;
+    }
+    if (lastReplacedUri.current !== resolvedUri) {
+      lastReplacedUri.current = resolvedUri;
+      player.replace(VideoCache.makeCachedVideoSource(resolvedUri));
+    }
+  }, [player, resolvedUri]);
+
+  // C's resolution-error tap-to-retry tile lives here in the wrapper, since the
+  // inner content component requires a non-null player.
+  if (resolveStatus === "error") {
+    return (
+      <View style={[styles.container, { width, height }]}>
+        <View style={styles.notReadyContainer}>
+          <TouchableOpacity onPress={retry}>
+            <Text style={styles.errorText}>
+              Couldn&apos;t load video. Tap to retry.
+            </Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  }
+
+  if (!player) {
+    return (
+      <View style={[styles.container, { width, height }]}>
+        <View style={styles.notReadyContainer}>
+          <ActivityIndicator color="white" />
+        </View>
+      </View>
+    );
+  }
+
+  return (
+    <MediaVideoContent
+      {...props}
+      player={player}
+      retry={retry}
+      resolveStatus={resolveStatus}
+    />
+  );
+}
+
+function MediaVideoContent(
+  props: MediaVideoProps & {
+    player: import("expo-video").VideoPlayer;
+    retry: () => void;
+    resolveStatus: "loading" | "ready" | "error";
+  },
+) {
+  const { source, focused, overlayOpacity, player, retry, resolveStatus } =
+    props;
+  const { width, height } = useSafeAreaFrame();
+  const { top: safeAreaTop, left: safeAreaLeft } = useSafeAreaInsets();
 
   const touchStart = useRef({
     x: 0,
@@ -116,14 +194,29 @@ function MediaVideo(props: MediaVideoProps) {
   });
 
   useEffect(() => {
+    player.seekTolerance = {
+      toleranceBefore: 0.1,
+      toleranceAfter: 0.1,
+    };
     if (focused) {
+      // The shared player is created by the inline feed with
+      // audioMixingMode "mixWithOthers" + muted, which leaves the iOS audio
+      // session in a mixing state that isn't activated until a play/mute
+      // change races through — so fullscreen audio started seconds late and
+      // broke after a seek or after closing and reopening. Forcing "doNotMix"
+      // here makes expo-video activate the audio session immediately and keep
+      // it active across seeks/reopens.
+      player.audioMixingMode = "doNotMix";
+      player.muted = false;
       player.play();
       player.volume = 1;
     } else {
+      // Hand the player back to the inline feed's mixing/muted behavior.
+      player.audioMixingMode = "mixWithOthers";
       player.pause();
       player.volume = 0;
     }
-  }, [focused]);
+  }, [focused, player]);
 
   useEffect(() => {
     return () => {
@@ -133,6 +226,20 @@ function MediaVideo(props: MediaVideoProps) {
       }
     };
   }, []);
+
+  const hasBustedStaleCache = useRef(false);
+  useEffect(() => {
+    if (
+      error &&
+      source.needsResolution &&
+      resolveStatus === "ready" &&
+      !hasBustedStaleCache.current
+    ) {
+      hasBustedStaleCache.current = true;
+      Redgifs.clearCached(Redgifs.getVideoId(source.source));
+      retry();
+    }
+  }, [error, source.needsResolution, resolveStatus, source.source, retry]);
 
   return (
     <View
@@ -174,7 +281,19 @@ function MediaVideo(props: MediaVideoProps) {
         props.setIsScrollLocked(false);
       }}
     >
-      {error ? (
+      {resolveStatus === "error" ? (
+        <View style={styles.notReadyContainer}>
+          <TouchableOpacity onPress={retry}>
+            <Text style={styles.errorText}>
+              Couldn&apos;t load video. Tap to retry.
+            </Text>
+          </TouchableOpacity>
+        </View>
+      ) : resolveStatus === "loading" ? (
+        <View style={styles.notReadyContainer}>
+          <ActivityIndicator color="white" />
+        </View>
+      ) : error ? (
         <View style={styles.notReadyContainer}>
           <Text style={styles.errorText}>{error}</Text>
         </View>

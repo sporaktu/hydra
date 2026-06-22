@@ -1,0 +1,64 @@
+# CircleCI pipeline: build the iOS app on EAS and submit it to TestFlight.
+#
+# Trigger: pushing a git tag matching /^v.*/ (e.g. `v4.0.2`). No branch builds.
+# The heavy macOS build + code signing happen on Expo's EAS cloud; this Linux
+# job only drives the eas-cli. See docs/ci/circleci-testflight-setup.md for the
+# one-time account/credential setup this pipeline depends on.
+#
+# Required CircleCI environment variables (Project Settings > Environment
+# Variables, or a Context):
+#   EXPO_TOKEN       (required) Expo personal access token used to authenticate eas-cli.
+#   EAS_PROJECT_ID   your EAS project id (from `eas init`).
+#   EXPO_OWNER       your Expo account/organization username.
+#   IOS_BUNDLE_ID    your iOS bundle identifier (e.g. com.yourname.hydra).
+#   ANDROID_PACKAGE  your Android package name (only needed if you also build Android).
+# Optional:
+#   SENTRY_AUTH_TOKEN / SENTRY_ORG / SENTRY_PROJECT  if you keep the Sentry plugin
+#                    and want source maps uploaded; otherwise the plugin warns and skips.
+
+version: 2.1
+
+jobs:
+  ios_build_and_submit:
+    docker:
+      - image: cimg/node:22.11
+    resource_class: medium
+    steps:
+      - checkout
+      - run:
+          name: Verify EXPO_TOKEN is set
+          command: |
+            if [ -z "$EXPO_TOKEN" ]; then
+              echo "EXPO_TOKEN is not set. Add it in CircleCI Project Settings > Environment Variables."
+              exit 1
+            fi
+      - run:
+          name: Install eas-cli
+          command: npm install -g eas-cli@latest
+      - run:
+          name: Show eas-cli version and authenticated account
+          command: |
+            eas --version
+            eas whoami
+      - run:
+          name: Build on EAS and submit to TestFlight
+          # --auto-submit chains `eas submit` (using submit.production in eas.json)
+          # after the build finishes. --non-interactive fails fast instead of prompting.
+          command: |
+            eas build \
+              --platform ios \
+              --profile production \
+              --non-interactive \
+              --auto-submit
+
+workflows:
+  release:
+    jobs:
+      - ios_build_and_submit:
+          # Tags don't run by default in CircleCI; we must opt in AND ignore
+          # all branches so only `v*` tags trigger this workflow.
+          filters:
+            tags:
+              only: /^v.*/
+            branches:
+              ignore: /.*/

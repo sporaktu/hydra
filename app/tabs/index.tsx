@@ -27,6 +27,10 @@ import { useDrizzleStudio } from "expo-drizzle-studio-plugin";
 import QuickAccountSwap from "../../components/Modals/QuickAccountSwap";
 import QuickSubredditSearch from "../../components/Modals/QuickSubredditSearch";
 import { oneTimeAlert } from "../../utils/oneTimeAlert";
+import {
+  SubredditSwitcherProvider,
+  SubredditSwitcherContext,
+} from "../../contexts/SubredditSwitcherContext";
 
 export type TabParamsList = {
   Posts: undefined;
@@ -37,6 +41,18 @@ export type TabParamsList = {
 };
 
 const Tab = createBottomTabNavigator();
+
+function SubredditSwitcherOpenerRegistrar({
+  openSubredditSearch,
+}: {
+  openSubredditSearch: () => void;
+}) {
+  const { registerOpener } = useContext(SubredditSwitcherContext);
+  useEffect(() => {
+    registerOpener(openSubredditSearch);
+  }, [registerOpener, openSubredditSearch]);
+  return null;
+}
 
 const TAB_BAR_HEIGHT = 90;
 
@@ -69,171 +85,176 @@ export default function Tabs() {
   }, [loginInitialized]);
 
   return (
-    <SafeAreaView
-      style={{ flex: 1, backgroundColor: theme.background }}
-      edges={["right", "left"]}
-    >
-      <QuickSubredditSearch
-        show={showSubredditSearch}
-        onExit={() => setShowSubredditSearch(false)}
-      />
-      <QuickAccountSwap
-        show={showAccountSwap}
-        onExit={() => setShowAccountSwap(false)}
-      />
-      {loginInitialized ? (
-        <Tab.Navigator
-          screenOptions={{
-            tabBarStyle: {
-              position: "absolute",
-              paddingHorizontal: 10,
-              bottom: -TAB_BAR_REMOVED_PADDING_BOTTOM,
-              backgroundColor: theme.background,
-              borderTopWidth: 0,
-              transform: [
-                {
-                  translateY: tabBarTranslateY.interpolate({
-                    inputRange: [0, 1],
-                    outputRange: [0, TAB_BAR_HEIGHT],
-                  }),
-                },
-              ],
-              opacity: tabBarTranslateY.interpolate({
-                inputRange: [0, 1],
-                outputRange: [1, 0],
-              }),
-            },
-            // This is broken in the latest version of react-navigation:
-            // https://github.com/react-navigation/react-navigation/issues/12755
-            // animation: 'fade',
-          }}
-          screenListeners={() => ({
-            tabPress: (e) => {
-              const state = navigation.getState();
-              const stackItem = state.routes[state.index];
-              const isCurrentTab = stackItem.key === e.target;
-              const stackHeight = stackItem.state?.index;
-              if (isCurrentTab && stackHeight && stackHeight > 0) {
-                navigation.dispatch(StackActions.pop());
-                e.preventDefault();
-              }
-              if (e.target?.startsWith("Search")) {
-                oneTimeAlert(
-                  "quickSearchGuideAlert",
-                  "Did you know?",
-                  "You can quick search for subreddits by long pressing the search tab.",
-                );
-              }
-            },
-            tabLongPress: (e) => {
-              if (e.target?.startsWith("Search")) {
-                setShowSubredditSearch(true);
-                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-              }
-              if (e.target?.startsWith("Account") && accounts.length > 0) {
-                setShowAccountSwap(true);
-                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-              }
-            },
-          })}
-        >
-          <Tab.Screen
-            name="Posts"
-            options={{
-              title: "Posts",
-              headerShown: false,
-              tabBarIcon: ({ focused, size }) => (
-                <MaterialCommunityIcons
-                  name="post"
-                  size={size}
-                  color={focused ? theme.iconPrimary : theme.subtleText}
-                />
-              ),
-              tabBarActiveTintColor: theme.iconOrTextButton as string,
-              tabBarInactiveTintColor: theme.subtleText as string,
-              tabBarLabel: "Posts",
+    <SubredditSwitcherProvider>
+      <SafeAreaView
+        style={{ flex: 1, backgroundColor: theme.background }}
+        edges={["right", "left"]}
+      >
+        <SubredditSwitcherOpenerRegistrar
+          openSubredditSearch={() => setShowSubredditSearch(true)}
+        />
+        <QuickSubredditSearch
+          show={showSubredditSearch}
+          onExit={() => setShowSubredditSearch(false)}
+        />
+        <QuickAccountSwap
+          show={showAccountSwap}
+          onExit={() => setShowAccountSwap(false)}
+        />
+        {loginInitialized ? (
+          <Tab.Navigator
+            screenOptions={{
+              tabBarStyle: {
+                position: "absolute",
+                paddingHorizontal: 10,
+                bottom: -TAB_BAR_REMOVED_PADDING_BOTTOM,
+                backgroundColor: theme.background,
+                borderTopWidth: 0,
+                transform: [
+                  {
+                    translateY: tabBarTranslateY.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [0, TAB_BAR_HEIGHT],
+                    }),
+                  },
+                ],
+                opacity: tabBarTranslateY.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [1, 0],
+                }),
+              },
+              // This is broken in the latest version of react-navigation:
+              // https://github.com/react-navigation/react-navigation/issues/12755
+              // animation: 'fade',
             }}
-            component={Stack}
-          />
-          <Tab.Screen
-            name="Inbox"
-            options={{
-              title: "Inbox",
-              headerShown: false,
-              tabBarIcon: ({ focused, size }) => (
-                <Entypo
-                  name="mail"
-                  size={size}
-                  color={focused ? theme.iconPrimary : theme.subtleText}
-                />
-              ),
-              tabBarActiveTintColor: theme.iconOrTextButton as string,
-              tabBarInactiveTintColor: theme.subtleText as string,
-              tabBarLabel: "Inbox",
-              tabBarBadge: inboxCount > 0 ? inboxCount : undefined,
-            }}
-            component={Stack}
-          />
-          <Tab.Screen
-            name="Account"
-            options={{
-              title: currentUser?.userName ?? "Accounts",
-              headerShown: false,
-              tabBarIcon: ({ focused, size }) => (
-                <MaterialIcons
-                  name="account-circle"
-                  size={size}
-                  color={focused ? theme.iconPrimary : theme.subtleText}
-                />
-              ),
-              tabBarActiveTintColor: theme.iconOrTextButton as string,
-              tabBarInactiveTintColor: theme.subtleText as string,
-              tabBarLabel: showUsername
-                ? (currentUser?.userName ?? "Account")
-                : "Account",
-            }}
-            component={Stack}
-          />
-          <Tab.Screen
-            name="Search"
-            options={{
-              title: "Search",
-              headerShown: false,
-              tabBarIcon: ({ focused, size }) => (
-                <Feather
-                  name="search"
-                  size={size}
-                  color={focused ? theme.iconPrimary : theme.subtleText}
-                />
-              ),
-              tabBarActiveTintColor: theme.iconOrTextButton as string,
-              tabBarInactiveTintColor: theme.subtleText as string,
-              tabBarLabel: "Search",
-            }}
-            component={Stack}
-          />
-          <Tab.Screen
-            name="Settings"
-            options={{
-              title: "Settings",
-              headerShown: false,
-              tabBarIcon: ({ focused, size }) => (
-                <Ionicons
-                  name="settings-sharp"
-                  size={size}
-                  color={focused ? theme.iconPrimary : theme.subtleText}
-                />
-              ),
-              tabBarActiveTintColor: theme.iconOrTextButton as string,
-              tabBarInactiveTintColor: theme.subtleText as string,
-              tabBarLabel: "Settings",
-            }}
-            component={Stack}
-          />
-        </Tab.Navigator>
-      ) : (
-        <LoadingSplash />
-      )}
-    </SafeAreaView>
+            screenListeners={() => ({
+              tabPress: (e) => {
+                const state = navigation.getState();
+                const stackItem = state.routes[state.index];
+                const isCurrentTab = stackItem.key === e.target;
+                const stackHeight = stackItem.state?.index;
+                if (isCurrentTab && stackHeight && stackHeight > 0) {
+                  navigation.dispatch(StackActions.pop());
+                  e.preventDefault();
+                }
+                if (e.target?.startsWith("Search")) {
+                  oneTimeAlert(
+                    "quickSearchGuideAlert",
+                    "Did you know?",
+                    "You can quick search for subreddits by long pressing the search tab.",
+                  );
+                }
+              },
+              tabLongPress: (e) => {
+                if (e.target?.startsWith("Search")) {
+                  setShowSubredditSearch(true);
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                }
+                if (e.target?.startsWith("Account") && accounts.length > 0) {
+                  setShowAccountSwap(true);
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                }
+              },
+            })}
+          >
+            <Tab.Screen
+              name="Posts"
+              options={{
+                title: "Posts",
+                headerShown: false,
+                tabBarIcon: ({ focused, size }) => (
+                  <MaterialCommunityIcons
+                    name="post"
+                    size={size}
+                    color={focused ? theme.iconPrimary : theme.subtleText}
+                  />
+                ),
+                tabBarActiveTintColor: theme.iconOrTextButton as string,
+                tabBarInactiveTintColor: theme.subtleText as string,
+                tabBarLabel: "Posts",
+              }}
+              component={Stack}
+            />
+            <Tab.Screen
+              name="Inbox"
+              options={{
+                title: "Inbox",
+                headerShown: false,
+                tabBarIcon: ({ focused, size }) => (
+                  <Entypo
+                    name="mail"
+                    size={size}
+                    color={focused ? theme.iconPrimary : theme.subtleText}
+                  />
+                ),
+                tabBarActiveTintColor: theme.iconOrTextButton as string,
+                tabBarInactiveTintColor: theme.subtleText as string,
+                tabBarLabel: "Inbox",
+                tabBarBadge: inboxCount > 0 ? inboxCount : undefined,
+              }}
+              component={Stack}
+            />
+            <Tab.Screen
+              name="Account"
+              options={{
+                title: currentUser?.userName ?? "Accounts",
+                headerShown: false,
+                tabBarIcon: ({ focused, size }) => (
+                  <MaterialIcons
+                    name="account-circle"
+                    size={size}
+                    color={focused ? theme.iconPrimary : theme.subtleText}
+                  />
+                ),
+                tabBarActiveTintColor: theme.iconOrTextButton as string,
+                tabBarInactiveTintColor: theme.subtleText as string,
+                tabBarLabel: showUsername
+                  ? (currentUser?.userName ?? "Account")
+                  : "Account",
+              }}
+              component={Stack}
+            />
+            <Tab.Screen
+              name="Search"
+              options={{
+                title: "Search",
+                headerShown: false,
+                tabBarIcon: ({ focused, size }) => (
+                  <Feather
+                    name="search"
+                    size={size}
+                    color={focused ? theme.iconPrimary : theme.subtleText}
+                  />
+                ),
+                tabBarActiveTintColor: theme.iconOrTextButton as string,
+                tabBarInactiveTintColor: theme.subtleText as string,
+                tabBarLabel: "Search",
+              }}
+              component={Stack}
+            />
+            <Tab.Screen
+              name="Settings"
+              options={{
+                title: "Settings",
+                headerShown: false,
+                tabBarIcon: ({ focused, size }) => (
+                  <Ionicons
+                    name="settings-sharp"
+                    size={size}
+                    color={focused ? theme.iconPrimary : theme.subtleText}
+                  />
+                ),
+                tabBarActiveTintColor: theme.iconOrTextButton as string,
+                tabBarInactiveTintColor: theme.subtleText as string,
+                tabBarLabel: "Settings",
+              }}
+              component={Stack}
+            />
+          </Tab.Navigator>
+        ) : (
+          <LoadingSplash />
+        )}
+      </SafeAreaView>
+    </SubredditSwitcherProvider>
   );
 }

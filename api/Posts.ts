@@ -3,7 +3,6 @@ import { decode } from "html-entities";
 
 import { Flair, formatFlair } from "./Flair";
 import { api } from "./RedditApi";
-import Redgifs from "../utils/RedGifs";
 import RedditURL from "../utils/RedditURL";
 import Time from "../utils/Time";
 import URL, { OpenGraphData } from "../utils/URL";
@@ -47,7 +46,11 @@ export type Post = {
   images: (string | ImageSource[])[];
   imageThumbnail: ImageSource | null;
   mediaAspectRatio: number;
-  videos: { source: string; videoDownloadURL: string }[];
+  videos: {
+    source: string;
+    videoDownloadURL: string;
+    needsResolution?: boolean;
+  }[];
   poll: Poll | undefined;
   externalLink: string | undefined;
   openGraphData: OpenGraphData | undefined;
@@ -137,9 +140,11 @@ function formatImages(child: any): ImageSource[][] {
   return [];
 }
 
-async function formatVideos(
+export async function formatVideos(
   child: any,
-): Promise<{ source: string; videoDownloadURL: string }[]> {
+): Promise<
+  { source: string; videoDownloadURL: string; needsResolution?: boolean }[]
+> {
   if (child.data.media?.reddit_video?.hls_url) {
     return [
       {
@@ -210,11 +215,11 @@ async function formatVideos(
         },
       ];
     } else if (url.includes("redgifs.com")) {
-      const videoURL = await Redgifs.getMediaURL(url);
       return [
         {
-          source: videoURL,
-          videoDownloadURL: videoURL,
+          source: url,
+          videoDownloadURL: url,
+          needsResolution: true,
         },
       ];
     }

@@ -38,7 +38,17 @@ export default class VideoCache {
   }
 
   static makeCachedVideoSource(uri: string): VideoSource {
-    const isCacheable = !new URL(uri).getBasePath().endsWith(".m3u8");
+    const basePath = new URL(uri).getBasePath();
+    // expo-video's cache derives the cached file's extension (and therefore the
+    // MIME type it hands to AVFoundation) from the URL path. Reddit serves some
+    // videos as an mp4 transcode behind a `.gif` path (e.g.
+    // preview.redd.it/<id>.gif?format=mp4), so caching would store the mp4 bytes
+    // under a .gif extension and AVFoundation would fail to decode it (the video
+    // sits loading forever as a black box). HLS playlists likewise can't be
+    // cached. In both cases, skip caching so the player fetches directly and
+    // infers the real type from the HTTP Content-Type.
+    const isCacheable =
+      !basePath.endsWith(".m3u8") && !basePath.endsWith(".gif");
     return {
       uri,
       useCaching: isCacheable,
