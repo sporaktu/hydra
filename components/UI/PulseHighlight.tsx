@@ -10,6 +10,7 @@ import Animated, {
 } from "react-native-reanimated";
 
 import { ThemeContext } from "../../contexts/SettingsContexts/ThemeContext";
+import { Theme } from "../../constants/Themes";
 
 type PulseHighlightChildren =
   | React.ReactNode
@@ -58,6 +59,17 @@ function isRedish(color: ColorValue): boolean {
   return (hue <= 20 || hue >= 345) && saturation >= 0.5;
 }
 
+/**
+ * The color the pulse uses for `theme`: red-button themes pulse in their own
+ * red, every other theme uses the softer amber `share` caution color. Exported
+ * so call sites can tint adjacent content (e.g. a tab label) to match.
+ */
+export function getPulseColor(theme: Theme): ColorValue {
+  return isRedish(theme.iconOrTextButton)
+    ? theme.iconOrTextButton
+    : theme.share;
+}
+
 export default function PulseHighlight({
   active,
   children,
@@ -87,12 +99,7 @@ export default function PulseHighlight({
     transform: [{ scale: 1 - progress.value * 0.08 }],
   }));
 
-  // Red-button themes pulse in their own red; every other theme uses the
-  // softer amber `share` caution color.
-  const pulseColor = isRedish(theme.iconOrTextButton)
-    ? theme.iconOrTextButton
-    : theme.share;
-  const color = active ? pulseColor : undefined;
+  const color = active ? getPulseColor(theme) : undefined;
 
   return (
     <Animated.View style={animatedStyle}>

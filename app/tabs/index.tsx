@@ -8,12 +8,15 @@ import {
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { SplashScreen, useNavigation } from "expo-router";
 import React, { useContext, useEffect, useState } from "react";
+import { Text } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { NavigationContainerRef, StackActions } from "@react-navigation/native";
 import * as Haptics from "expo-haptics";
 
 import LoadingSplash from "../../components/UI/LoadingSplash";
-import PulseHighlight from "../../components/UI/PulseHighlight";
+import PulseHighlight, {
+  getPulseColor,
+} from "../../components/UI/PulseHighlight";
 import { AccountContext } from "../../contexts/AccountContext";
 import { InboxContext } from "../../contexts/InboxContext";
 import { TabSettingsContext } from "../../contexts/SettingsContexts/TabSettingsContext";
@@ -216,9 +219,21 @@ export default function Tabs() {
                 ),
                 tabBarActiveTintColor: theme.iconOrTextButton as string,
                 tabBarInactiveTintColor: theme.subtleText as string,
-                tabBarLabel: showUsername
-                  ? (currentUser?.userName ?? "Account")
-                  : "Account",
+                tabBarLabel: ({ color }) => (
+                  <Text
+                    style={{
+                      fontSize: 10,
+                      // Tint the label with the pulse color when no account is
+                      // signed in so it matches the pulsing icon.
+                      color:
+                        accounts.length === 0 ? getPulseColor(theme) : color,
+                    }}
+                  >
+                    {showUsername
+                      ? (currentUser?.userName ?? "Account")
+                      : "Account"}
+                  </Text>
+                ),
               }}
               component={Stack}
             />
