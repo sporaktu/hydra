@@ -118,12 +118,89 @@ describe("VideoPlayerRegistry LRU backstop", () => {
     expect(released[0].id).toBe(0);
   });
 
+  it("evicts MULTIPLE idle players in one acquire to get under the cap", () => {
+    // Simulates a fast scroll: several off-screen players are idle (released but
+    // their deferred reap hasn't fired) and pile up at the cap. A single new
+    // acquire must reclaim enough of them to stay strictly under the cap.
+    const { registry, released } = makeHarness(3); // cap = 3
+    registry.acquire("a");
+    registry.acquire("b");
+    registry.acquire("c");
+    // All three scroll off-screen: refCount -> 0, deferred release scheduled but
+    // NOT yet flushed (so they remain live entries counting against the cap).
+    registry.release("a");
+    registry.release("b");
+    registry.release("c");
+    expect(released).toHaveLength(0); // nothing reaped yet (ticks not flushed)
+    // size is 3 (== cap). Acquiring a new key must reclaim enough idle players
+    // that creating the new one leaves the live count at-or-under the cap.
+    registry.acquire("d");
+    expect(registry.liveCount()).toBeLessThanOrEqual(3);
+    // At least one idle player was reaped to make room.
+    expect(released.length).toBeGreaterThanOrEqual(1);
+    // "a" is the least-recently-used idle player, so it goes first.
+    expect(released[0].id).toBe(0);
+  });
+
+  it("keeps the live count under the cap across a fast-scroll burst", () => {
+    // Acquire/release many distinct keys back-to-back WITHOUT flushing the
+    // deferred-release ticks (the JS thread is busy rendering new cells). The
+    // live player count must never exceed the cap, or iOS would run out of
+    // AVPlayers and new videos would render black forever.
+    const cap = 4;
+    const { registry } = makeHarness(cap);
+    for (let i = 0; i < 50; i++) {
+      registry.acquire(`key-${i}`);
+      registry.release(`key-${i}`);
+      expect(registry.liveCount()).toBeLessThanOrEqual(cap);
+    }
+  });
+
   it("does not evict a player that is still referenced", () => {
     const { registry, released, created } = makeHarness(1); // cap = 1
     registry.acquire("a"); // refCount 1, size 1 == cap
     registry.acquire("b"); // would be over cap, but "a" is referenced -> no eviction
     expect(released).toHaveLength(0);
     expect(created).toHaveLength(2);
+  });
+
+  it("NEVER denies a player to a mounted cell, even past the cap", () => {
+    // Invariant: a currently-mounted/visible cell must always get a player. If
+    // FlashList mounts more video cells than the cap, the extra cells still need
+    // real players (a brief over-cap is far better than a black visible video).
+    // Here every player stays referenced (all cells mounted) so nothing is idle
+    // to evict — acquire must still return a live, distinct player for each.
+    const cap = 3;
+    const { registry, created } = makeHarness(cap);
+    const players = [];
+    for (let i = 0; i < cap + 4; i++) {
+      players.push(registry.acquire(`mounted-${i}`));
+    }
+    // Every mounted cell got a real player...
+    expect(players.every((p) => p && !p.released)).toBe(true);
+    // ...and they are all distinct (no cell was handed a recycled/null player).
+    expect(new Set(players).size).toBe(cap + 4);
+    expect(created).toHaveLength(cap + 4);
+    // No referenced (mounted) player was evicted out from under its cell.
+    expect(created.filter((p) => p.released)).toHaveLength(0);
+  });
+
+  it("never evicts a referenced player even when over cap with one idle victim", () => {
+    // Mixed window: many mounted (referenced) cells plus one idle off-screen
+    // player. Acquiring past the cap must reap ONLY the idle one and leave every
+    // mounted cell's player untouched.
+    const cap = 2;
+    const { registry, released } = makeHarness(cap);
+    const a = registry.acquire("mounted-a"); // refCount 1
+    const idle = registry.acquire("idle"); // refCount 1
+    registry.release("idle"); // idle now refCount 0 (scrolled away)
+    const b = registry.acquire("mounted-b"); // over cap -> evicts the idle one
+    const c = registry.acquire("mounted-c"); // over cap, nothing idle -> create anyway
+    // The only evicted player is the idle one.
+    expect(released).toHaveLength(1);
+    expect(released[0]).toBe(idle);
+    // All mounted players are alive and were never released.
+    expect([a, b, c].every((p) => !p.released)).toBe(true);
   });
 });
 

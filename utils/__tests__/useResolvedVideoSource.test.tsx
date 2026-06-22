@@ -2,18 +2,31 @@ import { act, create } from "react-test-renderer";
 import { Text } from "react-native";
 import { useResolvedVideoSource } from "../useResolvedVideoSource";
 
-jest.mock("../RedGifs", () => ({
-  __esModule: true,
-  default: {
-    getMediaURL: jest.fn(),
-    getVideoId: (u: string) => u,
-    clearCached: jest.fn(),
-  },
-}));
+jest.mock("../RedGifs", () => {
+  class RedgifsAbortError extends Error {
+    constructor(message = "Redgifs resolution aborted") {
+      super(message);
+      this.name = "RedgifsAbortError";
+    }
+  }
+  return {
+    __esModule: true,
+    default: {
+      getMediaURL: jest.fn(),
+      getVideoId: (u: string) => u,
+      peekCachedMediaURL: jest.fn(() => null),
+      clearCached: jest.fn(),
+    },
+    RedgifsAbortError,
+  };
+});
 
-import Redgifs from "../RedGifs";
+import Redgifs, { RedgifsAbortError } from "../RedGifs";
 const mockGet = Redgifs.getMediaURL as jest.MockedFunction<
   typeof Redgifs.getMediaURL
+>;
+const mockPeek = Redgifs.peekCachedMediaURL as jest.MockedFunction<
+  typeof Redgifs.peekCachedMediaURL
 >;
 
 let last: ReturnType<typeof useResolvedVideoSource>;
@@ -22,7 +35,10 @@ function Probe({ src, needs }: { src: string; needs?: boolean }) {
   return <Text>{last.status}</Text>;
 }
 
-beforeEach(() => jest.clearAllMocks());
+beforeEach(() => {
+  jest.clearAllMocks();
+  mockPeek.mockReturnValue(null); // default: nothing cached yet
+});
 
 it("passthrough when needsResolution is falsy", async () => {
   await act(async () => {
@@ -40,6 +56,68 @@ it("resolves redgifs on mount", async () => {
   });
   expect(last.status).toBe("ready");
   expect(last.uri).toBe("https://hd/resolved.mp4");
+});
+
+it("reuses an already-cached redgifs url without re-resolving (no loading flash)", async () => {
+  // Simulates a recycle/re-mount of a post that resolved earlier in the scroll.
+  mockPeek.mockReturnValue("https://hd/cached.mp4");
+  await act(async () => {
+    create(<Probe src="https://www.redgifs.com/watch/z" needs />);
+  });
+  // Starts ready from the cache — never flips to loading, never re-resolves.
+  expect(last.status).toBe("ready");
+  expect(last.uri).toBe("https://hd/cached.mp4");
+  expect(mockGet).not.toHaveBeenCalled();
+});
+
+it("keeps a resolved source through a re-render when it becomes cached", async () => {
+  // First mount resolves async; the cache is then warm for the same id.
+  mockGet.mockResolvedValue("https://hd/firstresolve.mp4");
+  let root: ReturnType<typeof create>;
+  await act(async () => {
+    root = create(<Probe src="https://www.redgifs.com/watch/z" needs />);
+  });
+  expect(last.status).toBe("ready");
+  expect(last.uri).toBe("https://hd/firstresolve.mp4");
+
+  // Now the id is cached (as it would be after a real resolve). A re-render /
+  // recycle must NOT blank it back to loading nor fire another resolve.
+  mockPeek.mockReturnValue("https://hd/firstresolve.mp4");
+  mockGet.mockClear();
+  await act(async () => {
+    root.update(<Probe src="https://www.redgifs.com/watch/z" needs />);
+  });
+  expect(last.status).toBe("ready");
+  expect(last.uri).toBe("https://hd/firstresolve.mp4");
+  expect(mockGet).not.toHaveBeenCalled();
+});
+
+it("passes an AbortSignal and aborts the resolution on unmount", async () => {
+  let received: AbortSignal | undefined;
+  mockGet.mockImplementation((_url: string, signal?: AbortSignal) => {
+    received = signal;
+    return new Promise(() => {}); // never resolves
+  });
+  let root: ReturnType<typeof create>;
+  await act(async () => {
+    root = create(<Probe src="https://www.redgifs.com/watch/z" needs />);
+  });
+  expect(received).toBeInstanceOf(AbortSignal);
+  expect(received?.aborted).toBe(false);
+  await act(async () => {
+    root.unmount();
+  });
+  expect(received?.aborted).toBe(true);
+});
+
+it("does NOT flip to error when the resolution aborts", async () => {
+  mockGet.mockRejectedValue(new RedgifsAbortError());
+  await act(async () => {
+    create(<Probe src="https://www.redgifs.com/watch/z" needs />);
+  });
+  // An abort means the post scrolled away, not a failure — stay in loading,
+  // never show the permanent error tile.
+  expect(last.status).toBe("loading");
 });
 
 it("surfaces error and retry re-resolves", async () => {

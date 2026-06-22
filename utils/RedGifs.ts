@@ -107,27 +107,70 @@ type RedGifResponse = {
 
 const MAX_CONCURRENT_RESOLUTIONS = 2;
 
-let activeResolutions = 0;
-const resolutionQueue: (() => void)[] = [];
+type QueuedWaiter = {
+  signal?: AbortSignal;
+  resolve: () => void;
+  reject: (err: unknown) => void;
+};
 
-function acquireSlot(): Promise<void> {
+let activeResolutions = 0;
+const resolutionQueue: QueuedWaiter[] = [];
+
+// Visible-first scheduling: take the most-recently-queued waiter (LIFO). On a
+// fast scroll the currently-visible post is the newest request, so it jumps
+// ahead of the backlog of already-scrolled-past posts instead of starving
+// behind them with only MAX_CONCURRENT_RESOLUTIONS slots. Skip any waiter whose
+// caller already scrolled away (signal aborted) so it never burns a slot.
+function takeNextWaiter(): QueuedWaiter | null {
+  while (resolutionQueue.length > 0) {
+    const waiter = resolutionQueue.pop()!;
+    if (waiter.signal?.aborted) {
+      waiter.reject(new RedgifsAbortError());
+      continue;
+    }
+    return waiter;
+  }
+  return null;
+}
+
+function acquireSlot(signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) {
+    return Promise.reject(new RedgifsAbortError());
+  }
   if (activeResolutions < MAX_CONCURRENT_RESOLUTIONS) {
     activeResolutions++;
     return Promise.resolve();
   }
-  return new Promise((resolve) => {
-    resolutionQueue.push(() => {
-      activeResolutions++;
-      resolve();
-    });
+  return new Promise<void>((resolve, reject) => {
+    const waiter: QueuedWaiter = {
+      signal,
+      resolve: () => {
+        activeResolutions++;
+        resolve();
+      },
+      reject,
+    };
+    // If the caller scrolls away while queued, drop it so it never takes a slot.
+    signal?.addEventListener(
+      "abort",
+      () => {
+        const idx = resolutionQueue.indexOf(waiter);
+        if (idx !== -1) {
+          resolutionQueue.splice(idx, 1);
+          reject(new RedgifsAbortError());
+        }
+      },
+      { once: true },
+    );
+    resolutionQueue.push(waiter);
   });
 }
 
 function releaseSlot(): void {
   activeResolutions--;
-  const next = resolutionQueue.shift();
+  const next = takeNextWaiter();
   if (next) {
-    next();
+    next.resolve();
   }
 }
 
@@ -135,6 +178,13 @@ export class RedgifsResolutionError extends Error {
   constructor(message = "Failed to resolve Redgifs media URL") {
     super(message);
     this.name = "RedgifsResolutionError";
+  }
+}
+
+export class RedgifsAbortError extends Error {
+  constructor(message = "Redgifs resolution aborted") {
+    super(message);
+    this.name = "RedgifsAbortError";
   }
 }
 
@@ -172,29 +222,37 @@ export default class Redgifs {
     return url.split(/watch\/|\?|#/)[1];
   }
 
-  static async getMediaURL(url: string): Promise<string> {
+  static async getMediaURL(url: string, signal?: AbortSignal): Promise<string> {
     const videoId = Redgifs.getVideoId(url);
     const cached = resolvedUrlCache.get(videoId);
     if (cached) {
       return cached;
     }
-    await acquireSlot();
+    await acquireSlot(signal);
     try {
       // Re-check cache: another queued caller for the same id may have resolved it.
       const cachedAfterWait = resolvedUrlCache.get(videoId);
       if (cachedAfterWait) {
         return cachedAfterWait;
       }
-      return await Redgifs.resolveWithRetry(videoId);
+      return await Redgifs.resolveWithRetry(videoId, signal);
     } finally {
       releaseSlot();
     }
   }
 
-  private static async resolveWithRetry(videoId: string): Promise<string> {
+  private static async resolveWithRetry(
+    videoId: string,
+    signal?: AbortSignal,
+  ): Promise<string> {
     let lastError: unknown;
     for (let attempt = 0; attempt < MAX_BACKOFF_ATTEMPTS; attempt++) {
+      // A 429 arms a 30s cooldown that pauses ALL resolutions. Don't hold our
+      // slot through that wait if the caller already scrolled away — bail so a
+      // currently-visible post can take the slot instead of starving behind us.
+      if (signal?.aborted) throw new RedgifsAbortError();
       await waitForCooldown();
+      if (signal?.aborted) throw new RedgifsAbortError();
       let token = Redgifs.getStoredToken();
       if (!token) {
         token = await Redgifs.refreshStoredToken();
@@ -251,6 +309,15 @@ export default class Redgifs {
       .then((json) => json.token);
     KeyStore.set(REDGIFS_TOKEN_STORAGE_KEY, token);
     return token;
+  }
+
+  /**
+   * Synchronously read an already-resolved url for a watch url, if one is
+   * cached. Lets consumers reuse a prior resolution on re-mount/recycle without
+   * kicking off a fresh async resolve (and without flashing a loading tile).
+   */
+  static peekCachedMediaURL(url: string): string | null {
+    return resolvedUrlCache.get(Redgifs.getVideoId(url)) ?? null;
   }
 
   static clearCached(videoId: string): void {

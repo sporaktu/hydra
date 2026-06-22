@@ -8,7 +8,7 @@ jest.mock("../KeyStore", () => ({
 }));
 
 import safeFetch from "../safeFetch";
-import Redgifs, { RedgifsResolutionError } from "../RedGifs";
+import Redgifs, { RedgifsResolutionError, RedgifsAbortError } from "../RedGifs";
 
 const mockSafeFetch = safeFetch as jest.MockedFunction<typeof safeFetch>;
 
@@ -148,6 +148,81 @@ describe("Redgifs concurrency cap", () => {
     );
 
     expect(maxInFlight).toBeLessThanOrEqual(2);
+  });
+});
+
+describe("Redgifs visible-first queue + cancellation", () => {
+  it("serves the most-recently-queued (visible) request first under load", async () => {
+    const order: string[] = [];
+    // Two slots are busy on long requests; the rest queue up. Resolve the busy
+    // ones so the queue drains, recording the order the queued ids actually run.
+    let releaseFirstTwo: (() => void)[] = [];
+    mockSafeFetch.mockImplementation(async (url: string) => {
+      const id = url.split("/").pop()!;
+      order.push(id);
+      if (id === "busy1" || id === "busy2") {
+        await new Promise<void>((r) => releaseFirstTwo.push(r));
+      }
+      return gifResponse(`https://hd.example/${id}.mp4`);
+    });
+
+    // Fill both slots.
+    const b1 = Redgifs.getMediaURL("https://www.redgifs.com/watch/busy1");
+    const b2 = Redgifs.getMediaURL("https://www.redgifs.com/watch/busy2");
+    await new Promise((r) => setTimeout(r, 0)); // let them start + occupy slots
+
+    // Queue three more in scroll order; "third" is the newest = most visible.
+    const q1 = Redgifs.getMediaURL("https://www.redgifs.com/watch/first");
+    const q2 = Redgifs.getMediaURL("https://www.redgifs.com/watch/second");
+    const q3 = Redgifs.getMediaURL("https://www.redgifs.com/watch/third");
+
+    // Free the two busy slots so the queue drains.
+    releaseFirstTwo.forEach((r) => r());
+    await Promise.all([b1, b2, q1, q2, q3]);
+
+    // Of the queued three, the newest ("third") must have run before "first".
+    expect(order.indexOf("third")).toBeLessThan(order.indexOf("first"));
+  });
+
+  it("drops a queued request whose signal aborts before it runs", async () => {
+    let release: (() => void)[] = [];
+    mockSafeFetch.mockImplementation(async (url: string) => {
+      const id = url.split("/").pop()!;
+      if (id === "busy1" || id === "busy2") {
+        await new Promise<void>((r) => release.push(r));
+      }
+      return gifResponse(`https://hd.example/${id}.mp4`);
+    });
+    const b1 = Redgifs.getMediaURL("https://www.redgifs.com/watch/busy1");
+    const b2 = Redgifs.getMediaURL("https://www.redgifs.com/watch/busy2");
+    await new Promise((r) => setTimeout(r, 0));
+
+    const controller = new AbortController();
+    const queued = Redgifs.getMediaURL(
+      "https://www.redgifs.com/watch/scrolledaway",
+      controller.signal,
+    );
+    const settled = Promise.allSettled([queued]);
+    controller.abort(); // post scrolled off-screen while queued
+
+    release.forEach((r) => r());
+    await Promise.all([b1, b2]);
+    const [result] = await settled;
+    expect(result.status).toBe("rejected");
+    expect((result as PromiseRejectedResult).reason).toBeInstanceOf(
+      RedgifsAbortError,
+    );
+  });
+
+  it("rejects immediately if the signal is already aborted", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    await expect(
+      Redgifs.getMediaURL(
+        "https://www.redgifs.com/watch/dead",
+        controller.signal,
+      ),
+    ).rejects.toBeInstanceOf(RedgifsAbortError);
   });
 });
 

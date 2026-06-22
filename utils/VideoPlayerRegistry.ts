@@ -13,7 +13,16 @@ type VideoPlayerRegistryOptions<P> = {
   cancelTick?: (handle: unknown) => void;
 };
 
-const DEFAULT_MAX_LIVE_PLAYERS = 8;
+// iOS allows only ~16 simultaneous AVPlayers before new ones silently fail to
+// decode (permanent black tiles), so we cap the pool below that ceiling. But the
+// cap must also sit ABOVE the number of video cells FlashList keeps mounted at
+// once (its viewport + drawDistance window in a dense all-video feed): eviction
+// only ever reaps idle (refCount 0) off-screen players, so if the cap were below
+// the mounted-cell count, the LRU pick could be a player still bound to an
+// on-screen cell — reaping it blanks a visible video until that cell recycles
+// (the intermittent "every 3rd–4th video is black" symptom). 12 leaves headroom
+// above the realistic mounted-video window while staying safely under ~16.
+const DEFAULT_MAX_LIVE_PLAYERS = 12;
 
 export class VideoPlayerRegistry<P> {
   private entries = new Map<string, RegistryEntry<P>>();
@@ -82,21 +91,31 @@ export class VideoPlayerRegistry<P> {
   }
 
   private evictIfOverCap(): void {
-    if (this.entries.size < this.maxLivePlayers) return;
-    let lruKey: string | null = null;
-    let lruUsed = Infinity;
-    for (const [key, entry] of this.entries) {
-      if (entry.refCount === 0 && entry.lastUsed < lruUsed) {
-        lruUsed = entry.lastUsed;
-        lruKey = key;
+    // A new player is about to be created, so reclaim until there is room for it
+    // (size strictly below the cap). One eviction per acquire isn't enough under
+    // fast scroll: deferred releases let several idle players linger in `entries`
+    // at once, and if we only freed one the live AVPlayer count would creep past
+    // the cap — and past the iOS hardware ceiling — until videos go black for good.
+    // We can only reap idle entries (refCount 0). Off-screen cells that scrolled
+    // away are idle here even when their release timer hasn't fired yet, so this
+    // eagerly reaps the least-recently-used among them.
+    while (this.entries.size >= this.maxLivePlayers) {
+      let lruKey: string | null = null;
+      let lruUsed = Infinity;
+      for (const [key, entry] of this.entries) {
+        if (entry.refCount === 0 && entry.lastUsed < lruUsed) {
+          lruUsed = entry.lastUsed;
+          lruKey = key;
+        }
       }
+      // Nothing idle left to reclaim — every remaining player is on-screen.
+      if (lruKey === null) return;
+      const victim = this.entries.get(lruKey)!;
+      if (victim.releaseTimer !== null) {
+        this.cancelTick(victim.releaseTimer);
+      }
+      this.releasePlayer(victim.player);
+      this.entries.delete(lruKey);
     }
-    if (lruKey === null) return;
-    const victim = this.entries.get(lruKey)!;
-    if (victim.releaseTimer !== null) {
-      this.cancelTick(victim.releaseTimer);
-    }
-    this.releasePlayer(victim.player);
-    this.entries.delete(lruKey);
   }
 }
