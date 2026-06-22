@@ -57,7 +57,9 @@ export default function PulseHighlight({
           pointerEvents="none"
           style={[
             styles.highlight,
-            { backgroundColor: theme.iconSecondary },
+            // `share` is the theme's warm gold/amber accent — a softer
+            // caution color than the red `delete`/danger token.
+            { backgroundColor: theme.share },
             backgroundStyle,
           ]}
         />
