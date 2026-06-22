@@ -2,16 +2,25 @@ import { act, create } from "react-test-renderer";
 import { Text } from "react-native";
 import { useResolvedVideoSource } from "../useResolvedVideoSource";
 
-jest.mock("../RedGifs", () => ({
-  __esModule: true,
-  default: {
-    getMediaURL: jest.fn(),
-    getVideoId: (u: string) => u,
-    clearCached: jest.fn(),
-  },
-}));
+jest.mock("../RedGifs", () => {
+  class RedgifsAbortError extends Error {
+    constructor(message = "Redgifs resolution aborted") {
+      super(message);
+      this.name = "RedgifsAbortError";
+    }
+  }
+  return {
+    __esModule: true,
+    default: {
+      getMediaURL: jest.fn(),
+      getVideoId: (u: string) => u,
+      clearCached: jest.fn(),
+    },
+    RedgifsAbortError,
+  };
+});
 
-import Redgifs from "../RedGifs";
+import Redgifs, { RedgifsAbortError } from "../RedGifs";
 const mockGet = Redgifs.getMediaURL as jest.MockedFunction<
   typeof Redgifs.getMediaURL
 >;
@@ -40,6 +49,34 @@ it("resolves redgifs on mount", async () => {
   });
   expect(last.status).toBe("ready");
   expect(last.uri).toBe("https://hd/resolved.mp4");
+});
+
+it("passes an AbortSignal and aborts the resolution on unmount", async () => {
+  let received: AbortSignal | undefined;
+  mockGet.mockImplementation((_url: string, signal?: AbortSignal) => {
+    received = signal;
+    return new Promise(() => {}); // never resolves
+  });
+  let root: ReturnType<typeof create>;
+  await act(async () => {
+    root = create(<Probe src="https://www.redgifs.com/watch/z" needs />);
+  });
+  expect(received).toBeInstanceOf(AbortSignal);
+  expect(received?.aborted).toBe(false);
+  await act(async () => {
+    root.unmount();
+  });
+  expect(received?.aborted).toBe(true);
+});
+
+it("does NOT flip to error when the resolution aborts", async () => {
+  mockGet.mockRejectedValue(new RedgifsAbortError());
+  await act(async () => {
+    create(<Probe src="https://www.redgifs.com/watch/z" needs />);
+  });
+  // An abort means the post scrolled away, not a failure — stay in loading,
+  // never show the permanent error tile.
+  expect(last.status).toBe("loading");
 });
 
 it("surfaces error and retry re-resolves", async () => {

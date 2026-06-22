@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import Redgifs from "./RedGifs";
+import Redgifs, { RedgifsAbortError } from "./RedGifs";
 
 type ResolvedVideoSource = {
   uri: string | null;
@@ -36,20 +36,27 @@ export function useResolvedVideoSource(
       return;
     }
     let cancelled = false;
+    // Abort the resolution when this post scrolls off-screen (effect cleanup) so
+    // it drops out of the queue and stops starving currently-visible posts under
+    // fast scroll. An abort is NOT an error — the post just went away — so leave
+    // the status as-is rather than flipping to a permanent error tile.
+    const controller = new AbortController();
     setStatus("loading");
-    Redgifs.getMediaURL(rawSource)
+    Redgifs.getMediaURL(rawSource, controller.signal)
       .then((resolved) => {
         if (cancelled || !isMounted.current) return;
         setUri(resolved);
         setStatus("ready");
       })
-      .catch(() => {
+      .catch((err) => {
         if (cancelled || !isMounted.current) return;
+        if (err instanceof RedgifsAbortError) return;
         setUri(null);
         setStatus("error");
       });
     return () => {
       cancelled = true;
+      controller.abort();
     };
   }, [rawSource, needsResolution, attempt]);
 
