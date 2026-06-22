@@ -46,7 +46,6 @@ export default function PostsPage({
 
   const {
     filterPostsByText,
-    filterPostsByAI,
     filterPostsBySubreddit,
     autoMarkAsSeen,
     getHideSeenURLStatus,
@@ -75,7 +74,6 @@ export default function PostsPage({
     filterRules: [
       ...(shouldFilterSeen ? [filterSeenItems] : []),
       filterPostsByText,
-      filterPostsByAI,
       ...(isCombinedSubredditFeed ? [filterPostsBySubreddit] : []),
     ],
     limitRampUp: [10, 20, 40, 70, 100],

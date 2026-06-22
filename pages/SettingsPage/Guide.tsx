@@ -56,7 +56,7 @@ const categoryData: {
   {
     name: "Filters",
     description: "Filtering content and organizing your feeds",
-    docs: ["text_filters", "ai_filters", "hiding_content", "organizing_feeds"],
+    docs: ["text_filters", "hiding_content", "organizing_feeds"],
   },
   {
     name: "Sorting",
@@ -71,18 +71,12 @@ const categoryData: {
   {
     name: "Messages",
     description: "Managing your inbox and private messages",
-    docs: ["inbox", "messages", "inbox_alerts"],
+    docs: ["inbox", "messages"],
   },
   {
     name: "Advanced",
     description: "Power user features and advanced functionality",
-    docs: [
-      "split_view",
-      "stats",
-      "ai_summaries",
-      "live_text",
-      "external_links",
-    ],
+    docs: ["split_view", "stats", "live_text", "external_links"],
   },
   {
     name: "Settings",
@@ -94,11 +88,6 @@ const categoryData: {
       "privacy_settings",
       "advanced_settings",
     ],
-  },
-  {
-    name: "Hydra Pro",
-    description: "Information about Hydra Pro subscription",
-    docs: ["hydra_pro"],
   },
   {
     name: "Troubleshooting",
