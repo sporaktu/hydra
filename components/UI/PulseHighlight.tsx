@@ -1,5 +1,5 @@
 import React, { useContext, useEffect } from "react";
-import { ColorValue } from "react-native";
+import { StyleSheet, View } from "react-native";
 import Animated, {
   cancelAnimation,
   Easing,
@@ -11,25 +11,20 @@ import Animated, {
 
 import { ThemeContext } from "../../contexts/SettingsContexts/ThemeContext";
 
-type PulseHighlightChildren =
-  | React.ReactNode
-  | ((args: { color: ColorValue | undefined }) => React.ReactNode);
-
 type PulseHighlightProps = {
-  // When true the wrapped content slowly pulses to draw the user's attention.
+  // When true a colored background behind the wrapped content slowly pulses to
+  // draw the user's attention.
   active: boolean;
-  // The wrapped content. When passed as a function it receives the theme's
-  // alt (secondary) color while `active` (and `undefined` otherwise) so icons
-  // can render in the attention-grabbing color.
-  children: PulseHighlightChildren;
 };
 
 const PULSE_DURATION = 1400;
+// How much padding the pulsing background extends around the content.
+const HIGHLIGHT_PADDING = 6;
 
 export default function PulseHighlight({
   active,
   children,
-}: PulseHighlightProps) {
+}: React.PropsWithChildren<PulseHighlightProps>) {
   const { theme } = useContext(ThemeContext);
   const progress = useSharedValue(0);
 
@@ -50,18 +45,39 @@ export default function PulseHighlight({
     return () => cancelAnimation(progress);
   }, [active, progress]);
 
-  const animatedStyle = useAnimatedStyle(() => ({
-    opacity: 1 - progress.value * 0.6,
-    transform: [{ scale: 1 - progress.value * 0.08 }],
+  const backgroundStyle = useAnimatedStyle(() => ({
+    opacity: progress.value * 0.35,
+    transform: [{ scale: 0.9 + progress.value * 0.1 }],
   }));
 
-  const altColor = active ? theme.iconSecondary : undefined;
-
   return (
-    <Animated.View style={animatedStyle}>
-      {typeof children === "function"
-        ? children({ color: altColor })
-        : children}
-    </Animated.View>
+    <View style={styles.container}>
+      {active && (
+        <Animated.View
+          pointerEvents="none"
+          style={[
+            styles.highlight,
+            { backgroundColor: theme.iconSecondary },
+            backgroundStyle,
+          ]}
+        />
+      )}
+      {children}
+    </View>
   );
 }
+
+const styles = StyleSheet.create({
+  container: {
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  highlight: {
+    position: "absolute",
+    top: -HIGHLIGHT_PADDING,
+    bottom: -HIGHLIGHT_PADDING,
+    left: -HIGHLIGHT_PADDING,
+    right: -HIGHLIGHT_PADDING,
+    borderRadius: 9999,
+  },
+});

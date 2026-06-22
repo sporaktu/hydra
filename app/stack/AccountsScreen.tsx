@@ -31,22 +31,16 @@ export default function AccountsScreen({
       options={() => ({
         headerRight: () => (
           <PulseHighlight active={accounts.length === 0}>
-            {({ color }) => (
-              <IconButton
-                icon={
-                  <Entypo
-                    name="plus"
-                    size={24}
-                    color={color ?? theme.iconOrTextButton}
-                  />
-                }
-                onPress={() => setModal(<Login />)}
-                touchableOpacityProps={{
-                  accessibilityLabel: "Add account",
-                  accessibilityRole: "button",
-                }}
-              />
-            )}
+            <IconButton
+              icon={
+                <Entypo name="plus" size={24} color={theme.iconOrTextButton} />
+              }
+              onPress={() => setModal(<Login />)}
+              touchableOpacityProps={{
+                accessibilityLabel: "Add account",
+                accessibilityRole: "button",
+              }}
+            />
           </PulseHighlight>
         ),
         headerBackTitle: "Subreddits",
