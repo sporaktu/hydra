@@ -311,6 +311,15 @@ export default class Redgifs {
     return token;
   }
 
+  /**
+   * Synchronously read an already-resolved url for a watch url, if one is
+   * cached. Lets consumers reuse a prior resolution on re-mount/recycle without
+   * kicking off a fresh async resolve (and without flashing a loading tile).
+   */
+  static peekCachedMediaURL(url: string): string | null {
+    return resolvedUrlCache.get(Redgifs.getVideoId(url)) ?? null;
+  }
+
   static clearCached(videoId: string): void {
     resolvedUrlCache.delete(videoId);
   }
