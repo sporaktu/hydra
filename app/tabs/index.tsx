@@ -13,6 +13,7 @@ import { NavigationContainerRef, StackActions } from "@react-navigation/native";
 import * as Haptics from "expo-haptics";
 
 import LoadingSplash from "../../components/UI/LoadingSplash";
+import PulseHighlight from "../../components/UI/PulseHighlight";
 import { AccountContext } from "../../contexts/AccountContext";
 import { InboxContext } from "../../contexts/InboxContext";
 import { TabSettingsContext } from "../../contexts/SettingsContexts/TabSettingsContext";
@@ -200,11 +201,13 @@ export default function Tabs() {
                 title: currentUser?.userName ?? "Accounts",
                 headerShown: false,
                 tabBarIcon: ({ focused, size }) => (
-                  <MaterialIcons
-                    name="account-circle"
-                    size={size}
-                    color={focused ? theme.iconPrimary : theme.subtleText}
-                  />
+                  <PulseHighlight active={accounts.length === 0}>
+                    <MaterialIcons
+                      name="account-circle"
+                      size={size}
+                      color={focused ? theme.iconPrimary : theme.subtleText}
+                    />
+                  </PulseHighlight>
                 ),
                 tabBarActiveTintColor: theme.iconOrTextButton as string,
                 tabBarInactiveTintColor: theme.subtleText as string,
