@@ -1,5 +1,5 @@
-import React, { useContext, useEffect, useState } from "react";
-import { ColorValue, LayoutChangeEvent, StyleSheet, View } from "react-native";
+import React, { useContext, useEffect } from "react";
+import { ColorValue } from "react-native";
 import Animated, {
   cancelAnimation,
   Easing,
@@ -10,16 +10,22 @@ import Animated, {
 } from "react-native-reanimated";
 
 import { ThemeContext } from "../../contexts/SettingsContexts/ThemeContext";
+import { Theme } from "../../constants/Themes";
+
+type PulseHighlightChildren =
+  | React.ReactNode
+  | ((args: { color: ColorValue | undefined }) => React.ReactNode);
 
 type PulseHighlightProps = {
-  // When true a colored background behind the wrapped content slowly pulses to
-  // draw the user's attention.
+  // When true the wrapped icon slowly pulses (opacity + scale) and is tinted
+  // with the theme's attention color to draw the user's attention.
   active: boolean;
+  // The wrapped content. When passed as a function it receives the pulse color
+  // while `active` (and `undefined` otherwise) so the icon can be tinted.
+  children: PulseHighlightChildren;
 };
 
 const PULSE_DURATION = 1400;
-// How much the pulsing circle extends past the wrapped content on each side.
-const HIGHLIGHT_PADDING = 6;
 
 /**
  * Returns true when `color` reads as a red/danger hue, so red-button themes
@@ -53,13 +59,23 @@ function isRedish(color: ColorValue): boolean {
   return (hue <= 20 || hue >= 345) && saturation >= 0.5;
 }
 
+/**
+ * The color the pulse uses for `theme`: red-button themes pulse in their own
+ * red, every other theme uses the softer amber `share` caution color. Exported
+ * so call sites can tint adjacent content (e.g. a tab label) to match.
+ */
+export function getPulseColor(theme: Theme): ColorValue {
+  return isRedish(theme.iconOrTextButton)
+    ? theme.iconOrTextButton
+    : theme.share;
+}
+
 export default function PulseHighlight({
   active,
   children,
-}: React.PropsWithChildren<PulseHighlightProps>) {
+}: PulseHighlightProps) {
   const { theme } = useContext(ThemeContext);
   const progress = useSharedValue(0);
-  const [contentSize, setContentSize] = useState(0);
 
   useEffect(() => {
     if (active) {
@@ -78,52 +94,16 @@ export default function PulseHighlight({
     return () => cancelAnimation(progress);
   }, [active, progress]);
 
-  const backgroundStyle = useAnimatedStyle(() => ({
-    opacity: progress.value * 0.35,
-    transform: [{ scale: 0.9 + progress.value * 0.1 }],
+  const animatedStyle = useAnimatedStyle(() => ({
+    opacity: 1 - progress.value * 0.6,
+    transform: [{ scale: 1 - progress.value * 0.08 }],
   }));
 
-  const onLayout = (e: LayoutChangeEvent) => {
-    const { width, height } = e.nativeEvent.layout;
-    setContentSize(Math.max(width, height));
-  };
-
-  // A circle whose diameter covers the (possibly non-square) content plus
-  // padding, so the glow is always round rather than a rounded rectangle.
-  const diameter = contentSize + HIGHLIGHT_PADDING * 2;
-
-  const pulseColor = isRedish(theme.iconOrTextButton)
-    ? theme.iconOrTextButton
-    : theme.share;
+  const color = active ? getPulseColor(theme) : undefined;
 
   return (
-    <View style={styles.container} onLayout={onLayout}>
-      {active && contentSize > 0 && (
-        <Animated.View
-          pointerEvents="none"
-          style={[
-            styles.highlight,
-            {
-              width: diameter,
-              height: diameter,
-              borderRadius: diameter / 2,
-              backgroundColor: pulseColor,
-            },
-            backgroundStyle,
-          ]}
-        />
-      )}
-      {children}
-    </View>
+    <Animated.View style={animatedStyle}>
+      {typeof children === "function" ? children({ color }) : children}
+    </Animated.View>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  highlight: {
-    position: "absolute",
-  },
-});
