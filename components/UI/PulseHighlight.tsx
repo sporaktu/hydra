@@ -19,8 +19,8 @@ type PulseHighlightProps = {
   // When true the wrapped content slowly pulses to draw the user's attention.
   active: boolean;
   // The wrapped content. When passed as a function it receives the theme's
-  // alert color while `active` (and `undefined` otherwise) so icons can render
-  // in the attention-grabbing color.
+  // alt (secondary) color while `active` (and `undefined` otherwise) so icons
+  // can render in the attention-grabbing color.
   children: PulseHighlightChildren;
 };
 
@@ -55,12 +55,12 @@ export default function PulseHighlight({
     transform: [{ scale: 1 - progress.value * 0.08 }],
   }));
 
-  const alertColor = active ? theme.delete : undefined;
+  const altColor = active ? theme.iconSecondary : undefined;
 
   return (
     <Animated.View style={animatedStyle}>
       {typeof children === "function"
-        ? children({ color: alertColor })
+        ? children({ color: altColor })
         : children}
     </Animated.View>
   );
