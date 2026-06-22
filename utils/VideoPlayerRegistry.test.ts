@@ -118,6 +118,44 @@ describe("VideoPlayerRegistry LRU backstop", () => {
     expect(released[0].id).toBe(0);
   });
 
+  it("evicts MULTIPLE idle players in one acquire to get under the cap", () => {
+    // Simulates a fast scroll: several off-screen players are idle (released but
+    // their deferred reap hasn't fired) and pile up at the cap. A single new
+    // acquire must reclaim enough of them to stay strictly under the cap.
+    const { registry, released } = makeHarness(3); // cap = 3
+    registry.acquire("a");
+    registry.acquire("b");
+    registry.acquire("c");
+    // All three scroll off-screen: refCount -> 0, deferred release scheduled but
+    // NOT yet flushed (so they remain live entries counting against the cap).
+    registry.release("a");
+    registry.release("b");
+    registry.release("c");
+    expect(released).toHaveLength(0); // nothing reaped yet (ticks not flushed)
+    // size is 3 (== cap). Acquiring a new key must reclaim enough idle players
+    // that creating the new one leaves the live count at-or-under the cap.
+    registry.acquire("d");
+    expect(registry.liveCount()).toBeLessThanOrEqual(3);
+    // At least one idle player was reaped to make room.
+    expect(released.length).toBeGreaterThanOrEqual(1);
+    // "a" is the least-recently-used idle player, so it goes first.
+    expect(released[0].id).toBe(0);
+  });
+
+  it("keeps the live count under the cap across a fast-scroll burst", () => {
+    // Acquire/release many distinct keys back-to-back WITHOUT flushing the
+    // deferred-release ticks (the JS thread is busy rendering new cells). The
+    // live player count must never exceed the cap, or iOS would run out of
+    // AVPlayers and new videos would render black forever.
+    const cap = 4;
+    const { registry } = makeHarness(cap);
+    for (let i = 0; i < 50; i++) {
+      registry.acquire(`key-${i}`);
+      registry.release(`key-${i}`);
+      expect(registry.liveCount()).toBeLessThanOrEqual(cap);
+    }
+  });
+
   it("does not evict a player that is still referenced", () => {
     const { registry, released, created } = makeHarness(1); // cap = 1
     registry.acquire("a"); // refCount 1, size 1 == cap
