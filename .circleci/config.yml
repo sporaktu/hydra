@@ -12,7 +12,8 @@
 #               EAS_PROJECT_ID env var. (Skip if you already have a projectId.)
 #   release   : on every `v*` git tag, build iOS on EAS and submit to TestFlight.
 #
-# Required CircleCI environment variables (Project Settings > Environment Variables):
+# Required CircleCI environment variables (provided via the `hydra-cci` context:
+# Organization Settings > Contexts > hydra-cci):
 #   EXPO_TOKEN            Expo access token (expo.dev > Settings > Access Tokens).
 #   EXPO_OWNER            your Expo account/username (used by eas-cli to find the project).
 #   EAS_PROJECT_ID        your EAS project id (from the bootstrap job, or `eas init`).
@@ -123,12 +124,18 @@ workflows:
   bootstrap:
     jobs:
       - eas_bootstrap:
+          # All env vars live in the `hydra-cci` context (Organization Settings >
+          # Contexts), not project-level env vars.
+          context:
+            - hydra-cci
           filters:
             branches:
               only: /^eas-bootstrap$/
   release:
     jobs:
       - ios_build_and_submit:
+          context:
+            - hydra-cci
           # Tags don't run by default in CircleCI; opt in AND ignore all branches
           # so only `v*` tags trigger a release.
           filters:
