@@ -44,12 +44,14 @@ commands:
     steps:
       - run:
           name: Install eas-cli
-          command: npm install -g eas-cli@latest
+          # cimg/node runs as the non-root `circleci` user, so a global install
+          # into /usr/local/lib needs sudo (the image has passwordless sudo).
+          command: sudo npm install -g eas-cli@latest
       - run:
           name: Verify EXPO_TOKEN and show authenticated account
           command: |
             if [ -z "$EXPO_TOKEN" ]; then
-              echo "EXPO_TOKEN is not set. Add it in CircleCI Project Settings > Environment Variables."
+              echo "EXPO_TOKEN is not set. Add it to the hydra-cci context (Organization Settings > Contexts)."
               exit 1
             fi
             eas --version
