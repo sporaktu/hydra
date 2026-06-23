@@ -65,7 +65,9 @@ base64 -i AuthKey_XXXXXXXXXX.p8 | pbcopy   # now in your clipboard → ASC_API_K
 
 1. In CircleCI, **Set Up Project** for this repo (use the existing
    `.circleci/config.yml`).
-2. Project Settings → **Environment Variables** → add:
+2. Create a **context** named `hydra-cci` (Organization Settings → **Contexts**
+   → Create Context) and add the variables below to it. The workflows reference
+   this context, so the vars are shared across jobs rather than set per-project:
 
    | Variable | Value |
    |---|---|

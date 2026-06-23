@@ -12,7 +12,8 @@
 #               EAS_PROJECT_ID env var. (Skip if you already have a projectId.)
 #   release   : on every `v*` git tag, build iOS on EAS and submit to TestFlight.
 #
-# Required CircleCI environment variables (Project Settings > Environment Variables):
+# Required CircleCI environment variables (provided via the `hydra-cci` context:
+# Organization Settings > Contexts > hydra-cci):
 #   EXPO_TOKEN            Expo access token (expo.dev > Settings > Access Tokens).
 #   EXPO_OWNER            your Expo account/username (used by eas-cli to find the project).
 #   EAS_PROJECT_ID        your EAS project id (from the bootstrap job, or `eas init`).
@@ -43,16 +44,25 @@ commands:
     steps:
       - run:
           name: Install eas-cli
-          command: npm install -g eas-cli@latest
+          # cimg/node runs as the non-root `circleci` user, so a global install
+          # into /usr/local/lib needs sudo (the image has passwordless sudo).
+          command: sudo npm install -g eas-cli@latest
       - run:
           name: Verify EXPO_TOKEN and show authenticated account
           command: |
             if [ -z "$EXPO_TOKEN" ]; then
-              echo "EXPO_TOKEN is not set. Add it in CircleCI Project Settings > Environment Variables."
+              echo "EXPO_TOKEN is not set. Add it to the hydra-cci context (Organization Settings > Contexts)."
               exit 1
             fi
             eas --version
             eas whoami
+  install_deps:
+    steps:
+      - run:
+          name: Install project dependencies
+          # eas init/build evaluate app.config.ts, which resolves config plugins
+          # (e.g. expo-router) from node_modules, so deps must be present.
+          command: npm ci
 
 jobs:
   # One-time: create/link the EAS project under your account, then print the id.
@@ -61,6 +71,7 @@ jobs:
     steps:
       - checkout
       - install_eas
+      - install_deps
       - run:
           name: Create/link EAS project and print its id
           command: |
@@ -74,6 +85,7 @@ jobs:
     steps:
       - checkout
       - install_eas
+      - install_deps
       - run:
           name: Verify release env vars are present
           command: |
@@ -123,12 +135,18 @@ workflows:
   bootstrap:
     jobs:
       - eas_bootstrap:
+          # All env vars live in the `hydra-cci` context (Organization Settings >
+          # Contexts), not project-level env vars.
+          context:
+            - hydra-cci
           filters:
             branches:
               only: /^eas-bootstrap$/
   release:
     jobs:
       - ios_build_and_submit:
+          context:
+            - hydra-cci
           # Tags don't run by default in CircleCI; opt in AND ignore all branches
           # so only `v*` tags trigger a release.
           filters:
