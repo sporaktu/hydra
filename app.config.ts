@@ -1,10 +1,13 @@
 import packageJson from './package.json';
 
 // Identity is env-overridable so a fork can point builds at its own Expo
-// project / Apple bundle id (set these in CircleCI env vars — see
+// project / Apple bundle id (set these in the hydra-cci CircleCI context — see
 // docs/ci/circleci-testflight-setup.md) without editing or merge-conflicting
-// this file. Defaults preserve the upstream (dmilin) configuration.
-const projectId = process.env.EAS_PROJECT_ID ?? "7e403d7f-7747-4daa-a3c9-4acb948f7a60";
+// this file. `projectId` has no upstream fallback: when EAS_PROJECT_ID is unset
+// (e.g. the bootstrap run) it stays undefined so `eas init` creates a fresh
+// project under EXPO_OWNER instead of trying to link the inaccessible upstream
+// project.
+const projectId = process.env.EAS_PROJECT_ID;
 const owner = process.env.EXPO_OWNER ?? "dmilin";
 const iosBundleIdentifier = process.env.IOS_BUNDLE_ID ?? "com.dmilin.hydra";
 const androidPackage = process.env.ANDROID_PACKAGE ?? "com.dmilin.hydra";
@@ -48,11 +51,7 @@ module.exports = {
       bundler: "metro",
       favicon: "./assets/images/favicon.png"
     },
-    extra: {
-      eas: {
-        projectId,
-      }
-    },
+    ...(projectId ? { extra: { eas: { projectId } } } : {}),
     owner,
     plugins: [
       "expo-router",
@@ -121,9 +120,11 @@ module.exports = {
       "expo-video",
       "expo-web-browser",
     ],
-    updates: {
-      url: `https://u.expo.dev/${projectId}`,
-      fallbackToCacheTimeout: 5000,
-    }
+    ...(projectId ? {
+      updates: {
+        url: `https://u.expo.dev/${projectId}`,
+        fallbackToCacheTimeout: 5000,
+      }
+    } : {})
   }
 }
