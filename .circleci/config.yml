@@ -56,6 +56,13 @@ commands:
             fi
             eas --version
             eas whoami
+  install_deps:
+    steps:
+      - run:
+          name: Install project dependencies
+          # eas init/build evaluate app.config.ts, which resolves config plugins
+          # (e.g. expo-router) from node_modules, so deps must be present.
+          command: npm ci
 
 jobs:
   # One-time: create/link the EAS project under your account, then print the id.
@@ -64,6 +71,7 @@ jobs:
     steps:
       - checkout
       - install_eas
+      - install_deps
       - run:
           name: Create/link EAS project and print its id
           command: |
@@ -77,6 +85,7 @@ jobs:
     steps:
       - checkout
       - install_eas
+      - install_deps
       - run:
           name: Verify release env vars are present
           command: |
