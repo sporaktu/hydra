@@ -155,6 +155,40 @@ it("shows a 'Loading video…' message (not a blank box) while genuinely loading
   expect(overlayTexts(tree)).toContain("Loading video…");
 });
 
+it("clears the overlay via the live-getter poll when NO events ever fire", () => {
+  // Recycled player that comes up not-ready and never emits any event, but whose
+  // live getters flip to playing shortly after mount (audio audibly plays while
+  // the black tile lingers). The polling fallback must observe this and hide the
+  // overlay even though statusChange/playingChange/timeUpdate never fired.
+  jest.useFakeTimers();
+  const player = makePlayer({
+    status: "loading",
+    playing: false,
+    currentTime: 0,
+  });
+  mockCurrentPlayer = player;
+  let tree!: ReactTestRenderer;
+  act(() => {
+    tree = create(<Video video={baseVideo} />);
+  });
+  // Initially the overlay is up (genuinely loading, nothing playing yet).
+  expect(overlayTexts(tree)).toContain("Loading video…");
+
+  // The underlying player starts presenting frames; only the live getters know.
+  player.status = "readyToPlay";
+  player.playing = true;
+  player.currentTime = 0.3;
+
+  // Advance past one poll interval — the fallback reads the live getters.
+  act(() => {
+    jest.advanceTimersByTime(250);
+  });
+
+  expect(overlayTexts(tree)).toHaveLength(0);
+  expect(tree.root.findAllByType(ActivityIndicator)).toHaveLength(0);
+  jest.useRealTimers();
+});
+
 it("shows 'No player available' when the registry returned no player", () => {
   mockCurrentPlayer = null;
   let tree!: ReactTestRenderer;

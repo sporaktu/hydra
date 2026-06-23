@@ -21,7 +21,10 @@ import {
   nextReloadDelayMs,
   MAX_RELOAD_ATTEMPTS,
 } from "../../../utils/videoWatchdog";
-import { getVideoOverlayState } from "../../../utils/videoOverlayState";
+import {
+  getVideoOverlayState,
+  isVideoVisuallyReady,
+} from "../../../utils/videoOverlayState";
 
 type VideoProps = {
   video: Post["videos"][number];
@@ -93,6 +96,27 @@ function Video({ video }: VideoProps) {
       playingSub.remove();
     };
   }, [player]);
+
+  // Belt-and-suspenders fallback for the recycled-player case above: expo-video's
+  // readiness EVENTS (statusChange / playingChange / timeUpdate) can ALL be missed
+  // for a shared player that was already decoding before this cell mounted on top
+  // of it — the loading->readyToPlay transition and the first playingChange fired
+  // before we subscribed, and the synchronous on-mount snapshot just happened to
+  // catch a not-yet-ready instant. That left the mirrored state pinned at
+  // "not ready" and the opaque black overlay covering an audibly-playing video
+  // forever. Poll the live, non-reactive getters on a short interval until ANY
+  // readiness signal is true, then stop. Writing identical primitives is a no-op
+  // for React, so this neither re-renders nor polls once the video is showing.
+  useEffect(() => {
+    if (!player) return;
+    if (isVideoVisuallyReady({ playerStatus, isPlaying, currentTime })) return;
+    const interval = setInterval(() => {
+      setPlayerStatus(player.status);
+      setIsPlaying(player.playing);
+      setCurrentTime(player.currentTime);
+    }, 200);
+    return () => clearInterval(interval);
+  }, [player, playerStatus, isPlaying, currentTime]);
 
   // When a stale cached redgifs URL is busted and re-resolved, the shared player
   // still holds the old source (the registry key is unchanged), so swap the source
