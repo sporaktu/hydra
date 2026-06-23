@@ -9,6 +9,9 @@ import packageJson from './package.json';
 // project.
 const projectId = process.env.EAS_PROJECT_ID;
 const owner = process.env.EXPO_OWNER ?? "dmilin";
+// Must match the slug of the EAS project EAS_PROJECT_ID points at (a fork's
+// project may use a different slug, e.g. `ghydra`); override via EXPO_SLUG.
+const slug = process.env.EXPO_SLUG ?? "hydra";
 const iosBundleIdentifier = process.env.IOS_BUNDLE_ID ?? "com.dmilin.hydra";
 const androidPackage = process.env.ANDROID_PACKAGE ?? "com.dmilin.hydra";
 const IS_DEV = process.env.APP_VARIANT === 'development';
@@ -16,7 +19,7 @@ const IS_DEV = process.env.APP_VARIANT === 'development';
 module.exports = {
   expo: {
     name: "Hydra",
-    slug: "hydra",
+    slug,
     version: packageJson.version,
     runtimeVersion: {
       policy: 'appVersion',
