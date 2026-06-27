@@ -19,6 +19,7 @@ import VideoCache from "../../../utils/VideoCache";
 import Redgifs from "../../../utils/RedGifs";
 import { useResolvedVideoSource } from "../../../utils/useResolvedVideoSource";
 import { useSharedVideoPlayer } from "../../../contexts/VideoPlayerRegistryContext";
+import { isVideoVisuallyReady } from "../../../utils/videoOverlayState";
 import { Post } from "../../../api/Posts";
 import { AnimatedStyleHandle } from "react-native-reanimated/lib/typescript/hook/commonTypes";
 import { GestureDetector, usePanGesture } from "react-native-gesture-handler";
@@ -131,7 +132,23 @@ function MediaVideoContent(
 
   const [isPlaying, setIsPlaying] = useState(player.playing);
   const [status, setStatus] = useState(player.status);
+  const [currentTime, setCurrentTime] = useState(player.currentTime);
   const [error, setError] = useState<string | null>(null);
+
+  // expo-video's player.status/.playing/.currentTime are non-reactive getters,
+  // and this viewer reuses the SAME shared player as the inline feed. For a
+  // recycled player the loading->readyToPlay transition almost always fires in
+  // the gap between this component's render-time snapshot and its effect-time
+  // event subscription, so the event is missed and never repeats. Worse, a
+  // shared player observed in the wild can sit at status "loading" FOREVER while
+  // actually playing (currentTime advancing) — so status must never alone gate
+  // the overlay. Re-read the live readiness signals on (re)mount to close that
+  // race; isVideoVisuallyReady() then hides the overlay off playing/currentTime.
+  useEffect(() => {
+    setStatus(player.status);
+    setIsPlaying(player.playing);
+    setCurrentTime(player.currentTime);
+  }, [player]);
 
   const dimensions = {
     width: player.videoTrack?.size.width ?? 0,
@@ -207,9 +224,18 @@ function MediaVideoContent(
     if (newIsPlaying !== isPlaying) {
       setIsPlaying(newIsPlaying);
     }
+    // A playing player has by definition decoded a frame — capture the live
+    // currentTime so the readiness gate flips even if no timeUpdate has fired.
+    setCurrentTime(player.currentTime);
   });
 
   useEventListener(player, "timeUpdate", (e) => {
+    // Mirror the first advance past frame 0 into state (once) so the overlay's
+    // readiness gate clears even when statusChange/playingChange were missed for
+    // this recycled cell.
+    if (e.currentTime > 0) {
+      setCurrentTime((prev) => (prev > 0 ? prev : e.currentTime));
+    }
     if (isSeeking.value) return;
     progress.value = e.currentTime / player.duration;
   });
@@ -277,7 +303,14 @@ function MediaVideoContent(
           <View style={styles.notReadyContainer}>
             <Text style={styles.errorText}>{error}</Text>
           </View>
-        ) : status === "loading" ? (
+        ) : !isVideoVisuallyReady({
+            playerStatus: status,
+            isPlaying,
+            currentTime,
+          }) ? (
+          // Gate on the robust readiness signal, never on status alone: a shared,
+          // recycled player can stay at status "loading" forever while actually
+          // playing, which previously left this black box covering a good video.
           <View style={styles.notReadyContainer}>
             <ActivityIndicator color="white" />
           </View>
