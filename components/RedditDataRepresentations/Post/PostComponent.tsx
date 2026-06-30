@@ -21,6 +21,11 @@ import { PostInteractionProvider } from "../../../contexts/PostInteractionContex
 import { PostSettingsContext } from "../../../contexts/SettingsContexts/PostSettingsContext";
 import { ThemeContext } from "../../../contexts/SettingsContexts/ThemeContext";
 import {
+  hidePost,
+  isPostHidden,
+  unhidePost,
+} from "../../../db/functions/HiddenPosts";
+import {
   isPostSeen,
   markPostSeen,
   markPostUnseen,
@@ -71,6 +76,7 @@ export default function PostComponent({
       : true;
 
   const seen = isPostSeen(post);
+  const hidden = isPostHidden(post);
 
   const [_, rerender] = useState(0);
 
@@ -152,6 +158,19 @@ export default function PostComponent({
         }
         toggleFilterSubreddit(post.subreddit, expiresAt);
         deletePost?.();
+      },
+    },
+    {
+      label: hidden ? "Unhide Post" : "Hide Post",
+      isAllowed: !!deletePost,
+      handle: async () => {
+        if (hidden) {
+          await unhidePost(post.id);
+          rerender((prev) => prev + 1);
+        } else {
+          await hidePost(post);
+          deletePost?.();
+        }
       },
     },
     {

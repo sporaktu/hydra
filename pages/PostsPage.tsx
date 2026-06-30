@@ -9,6 +9,7 @@ import SearchBar from "../components/UI/SearchBar";
 import { FiltersContext } from "../contexts/SettingsContexts/FiltersContext";
 import { ThemeContext } from "../contexts/SettingsContexts/ThemeContext";
 import { markPostSeen } from "../db/functions/SeenPosts";
+import { filterHiddenItems } from "../utils/filters/filterHiddenItems";
 import { filterSeenItems } from "../utils/filters/filterSeenItems";
 import useRedditDataState from "../utils/useRedditDataState";
 import RedditURL, { PageType } from "../utils/RedditURL";
@@ -72,6 +73,7 @@ export default function PostsPage({
   } = useRedditDataState<Post, "postLoadingError">({
     loadData: async (after, limit) => await getPosts(url, { after, limit }),
     filterRules: [
+      filterHiddenItems,
       ...(shouldFilterSeen ? [filterSeenItems] : []),
       filterPostsByText,
       ...(isCombinedSubredditFeed ? [filterPostsBySubreddit] : []),

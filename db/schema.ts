@@ -27,6 +27,30 @@ export const SeenPosts = sqliteTable(
   ],
 );
 
+export const HiddenPosts = sqliteTable(
+  "hidden_posts",
+  {
+    id: integer({ mode: "number" }).primaryKey({ autoIncrement: true }),
+    postId: text().notNull(),
+    title: text().notNull(),
+    subreddit: text().notNull(),
+    expiresAt: integer({ mode: "number" }).notNull(),
+    createdAt: text()
+      .notNull()
+      .default(sql`(CURRENT_TIMESTAMP)`),
+    updatedAt: text()
+      .notNull()
+      .default(sql`(CURRENT_TIMESTAMP)`)
+      .$onUpdate(() => sql`(CURRENT_TIMESTAMP)`),
+  },
+  (table) => [
+    uniqueIndex("hidden_posts_postId_idx").on(table.postId),
+    index("hidden_posts_expiresAt_idx").on(table.expiresAt),
+    index("hidden_posts_createdAt_idx").on(table.createdAt),
+    index("hidden_posts_updatedAt_idx").on(table.updatedAt),
+  ],
+);
+
 export const Drafts = sqliteTable(
   "drafts",
   {
