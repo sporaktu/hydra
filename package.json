@@ -11,7 +11,8 @@
     "lint:fix": "eslint **/*.ts **/*.tsx --fix",
     "tsc": "tsc --noEmit",
     "test": "jest",
-    "generate-docs": "bun run generateDocumentation.ts"
+    "generate-docs": "bun run generateDocumentation.ts",
+    "release": "node scripts/release.js"
   },
   "jest": {
     "preset": "jest-expo",
