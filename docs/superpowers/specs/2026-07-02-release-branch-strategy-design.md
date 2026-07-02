@@ -59,34 +59,49 @@ avoids a bash-vs-PowerShell split).
 Usage:
 
 ```
-npm run release -- --patch
-npm run release -- --minor
-npm run release -- --major
+npm run release -- --patch [--dry-run]
+npm run release -- --minor [--dry-run]
+npm run release -- --major [--dry-run]
 ```
 
-Steps, in order, aborting with a clear error message if any check fails:
+Steps, in order, aborting with a clear error message if any check fails.
+**All existence/divergence checks (step 1) run before any mutation** —
+including the tag-existence check, which requires computing the candidate
+version up front (a pure semver calculation, not a package.json write) so it
+can be checked before anything is touched:
 
-1. **Preconditions**
+1. **Preconditions** (no mutation happens until this step passes in full)
    - Current branch must be `master`. Abort otherwise.
    - `git status --porcelain` must be empty (clean working tree).
-   - `git fetch origin master` then compare local `master` to
-     `origin/master`; abort if they've diverged (local must be up to date).
-2. **Version bump**
    - Read the bump type from `process.argv` (`--patch` / `--minor` /
      `--major`); require exactly one.
+   - One combined `git fetch origin master --tags` (single round-trip,
+     covers both checks below).
+   - Compare local `master` to `origin/master`; abort if they've diverged
+     (local must be up to date).
+   - Compute the candidate version from the current `package.json` version
+     + bump type using plain semver arithmetic (no `npm version` call yet).
+     Abort if tag `vX.Y.Z` for that candidate version already exists,
+     locally or on `origin` (now known, since tags were just fetched).
+2. **Version bump**
    - Run `npm version <type> --no-git-tag-version` — updates `package.json`
      and `package-lock.json` in place, does **not** commit or tag (that's
      npm's default behavior we're opting out of, since we want our own
      branch/commit/tag sequencing).
-   - Read the resulting version back from `package.json` (e.g. `4.1.0`).
+   - Read the resulting version back from `package.json` and assert it
+     equals the candidate version computed in step 1 (sanity check the two
+     semver calculations agree).
 3. **Branch**
    - `git checkout -b release/v4.1.0`
    - `git add package.json package-lock.json`
    - `git commit -m "chore: bump version to 4.1.0"`
 4. **Tag**
-   - Abort if tag `v4.1.0` already exists locally or on `origin` (fetch tags
-     first to check).
-   - `git tag -a v4.1.0 -m "Release v4.1.0"`
+   - `git tag -a v4.1.0 -m "Release v4.1.0"` (existence already ruled out in
+     step 1, so this cannot collide).
+   - **If `--dry-run` was passed, stop here.** Print the branch name, tag
+     name, and commit SHA that would be pushed, and instructions to inspect
+     and then clean up (`git checkout master && git branch -D release/v4.1.0
+     && git tag -d v4.1.0`). Steps 5-6 do not run.
 5. **Push**
    - `git push origin release/v4.1.0`
    - `git push origin v4.1.0` — this is what triggers CircleCI's `release`
@@ -135,7 +150,16 @@ Scoped to what can actually happen, not speculative cases:
 ## Testing
 
 This is a release-orchestration script, not application logic — no unit
-tests. Verification is a live dry run against the current repo state
-(`master` clean, at `v4.0.1`) as part of executing this plan: run `npm run
-release -- --patch`, confirm the branch/tag/push/PR sequence behaves as
-designed, then merge the resulting PR.
+tests. Verification is staged so a sequencing bug can't burn a real EAS
+build/TestFlight submission before it's caught:
+
+1. **Dry run first:** `npm run release -- --patch --dry-run` runs steps 1-4
+   (preconditions, version bump, branch, commit, tag) entirely locally — no
+   push, no PR, no CircleCI trigger. Confirm the printed branch name, tag
+   name, and commit look right, then clean up the local branch/tag as
+   instructed before proceeding.
+2. **Live run:** once the dry run looks correct, run `npm run release --
+   patch` for real against the current repo state (`master` clean, at
+   `v4.0.1`) as part of executing this plan. This is a deliberate real
+   release — it will push a real tag, trigger a real CircleCI EAS build, and
+   auto-submit to TestFlight — not a throwaway test.
