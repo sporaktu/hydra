@@ -10,8 +10,8 @@ import { useMigrations } from "drizzle-orm/expo-sqlite/migrator";
 import { registerRootComponent } from "expo";
 import { useFonts } from "expo-font";
 import { SplashScreen } from "expo-router";
-import React, { useEffect, useState } from "react";
-import { AppState, LogBox } from "react-native";
+import React, { useEffect } from "react";
+import { AppState, InteractionManager, LogBox } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { enableFreeze } from "react-native-screens";
 import * as ExpoOrientation from "expo-screen-orientation";
@@ -78,17 +78,15 @@ function RootLayout() {
     if (error) throw error;
   }, [error]);
 
-  const [dbMaintenanceDone, setDbMaintenanceDone] = useState(false);
-
-  const doDBMaintenanceAsync = async () => {
-    await doDBMaintenance();
-    await VideoCache.clearCacheIfRequested();
-    setDbMaintenanceDone(true);
-  };
-
   useEffect(() => {
     if (migrationsComplete) {
-      doDBMaintenanceAsync();
+      // Maintenance work (pruning old rows, clearing the video cache) does
+      // not need to finish before the UI is usable, so defer it until after
+      // startup interactions instead of blocking the first render on it.
+      InteractionManager.runAfterInteractions(async () => {
+        await doDBMaintenance();
+        await VideoCache.clearCacheIfRequested();
+      });
       modifyStat(Stat.APP_LAUNCHES, 1);
       modifyStat(Stat.APP_FOREGROUNDS, 1);
       const appStateChangeListener = AppState.addEventListener(
@@ -107,8 +105,7 @@ function RootLayout() {
 
   return (
     migrationsComplete &&
-    fontsLoaded &&
-    dbMaintenanceDone && (
+    fontsLoaded && (
       <SafeAreaProvider>
         <AccountProvider>
           <SubscriptionsProvider>

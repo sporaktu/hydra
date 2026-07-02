@@ -1,5 +1,11 @@
 import { setStatusBarStyle } from "expo-status-bar";
-import { createContext, useEffect, useState } from "react";
+import {
+  createContext,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 import { useMMKVBoolean, useMMKVString } from "react-native-mmkv";
 
 import Themes, {
@@ -51,60 +57,85 @@ export function ThemeProvider({ children }: React.PropsWithChildren) {
       : storedDarkTheme) ?? initialThemeContext.currentTheme;
 
   // Every theme is free, so any theme can always be used.
-  const cantUseTheme = (_themeKey: string) => false;
+  const cantUseTheme = useCallback((_themeKey: string) => false, []);
 
-  const setCurrentTheme = (
-    themeKey: string,
-    colorScheme: ColorSchemeName | undefined = useDifferentDarkTheme
-      ? systemColorScheme
-      : "unspecified",
-  ) => {
-    if (colorScheme === "unspecified" || colorScheme === "light") {
-      setStoredTheme(themeKey);
+  const setCurrentTheme = useCallback(
+    (
+      themeKey: string,
+      colorScheme: ColorSchemeName | undefined = useDifferentDarkTheme
+        ? systemColorScheme
+        : "unspecified",
+    ) => {
+      if (colorScheme === "unspecified" || colorScheme === "light") {
+        setStoredTheme(themeKey);
+      } else {
+        setStoredDarkTheme(themeKey);
+      }
+    },
+    [
+      useDifferentDarkTheme,
+      systemColorScheme,
+      setStoredTheme,
+      setStoredDarkTheme,
+    ],
+  );
+
+  const { theme, baseTheme } = useMemo(() => {
+    let theme = DEFAULT_THEME;
+    let baseTheme = DEFAULT_THEME;
+    if (currentTheme in Themes) {
+      theme = Themes[currentTheme as keyof typeof Themes];
+      baseTheme = Themes[currentTheme as keyof typeof Themes];
     } else {
-      setStoredDarkTheme(themeKey);
+      const customTheme = getCustomTheme(currentTheme);
+      if (customTheme && customTheme.extends in Themes) {
+        theme = {
+          ...Themes[customTheme.extends as keyof typeof Themes],
+          ...customTheme,
+          isPro: true,
+        };
+      }
     }
-  };
-
-  let theme = DEFAULT_THEME;
-  let baseTheme = DEFAULT_THEME;
-  if (currentTheme in Themes) {
-    theme = Themes[currentTheme as keyof typeof Themes];
-    baseTheme = Themes[currentTheme as keyof typeof Themes];
-  } else {
-    const customTheme = getCustomTheme(currentTheme);
-    if (customTheme && customTheme.extends in Themes) {
-      theme = {
-        ...Themes[customTheme.extends as keyof typeof Themes],
-        ...customTheme,
-        isPro: true,
-      };
-    }
-  }
-  theme = { ...theme, ...customThemeData };
+    theme = { ...theme, ...customThemeData };
+    return { theme, baseTheme };
+  }, [currentTheme, customThemeData]);
 
   useEffect(() => {
     setStatusBarStyle(theme.statusBar);
   }, [theme.statusBar]);
 
+  const value = useMemo(
+    () => ({
+      systemColorScheme,
+      lightTheme,
+      darkTheme,
+      currentTheme,
+      setCurrentTheme,
+      useDifferentDarkTheme,
+      setUseDifferentDarkTheme,
+      theme,
+      baseTheme,
+      cantUseTheme,
+      customThemeData,
+      setCustomThemeData,
+    }),
+    [
+      systemColorScheme,
+      lightTheme,
+      darkTheme,
+      currentTheme,
+      setCurrentTheme,
+      useDifferentDarkTheme,
+      setUseDifferentDarkTheme,
+      theme,
+      baseTheme,
+      cantUseTheme,
+      customThemeData,
+      setCustomThemeData,
+    ],
+  );
+
   return (
-    <ThemeContext.Provider
-      value={{
-        systemColorScheme,
-        lightTheme,
-        darkTheme,
-        currentTheme,
-        setCurrentTheme,
-        useDifferentDarkTheme,
-        setUseDifferentDarkTheme,
-        theme,
-        baseTheme,
-        cantUseTheme,
-        customThemeData,
-        setCustomThemeData,
-      }}
-    >
-      {children}
-    </ThemeContext.Provider>
+    <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>
   );
 }
