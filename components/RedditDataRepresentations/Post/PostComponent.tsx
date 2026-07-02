@@ -1,5 +1,6 @@
 import { AntDesign, Feather, FontAwesome } from "@expo/vector-icons";
-import React, { useContext, useMemo, useState } from "react";
+import { useRecyclingState } from "@shopify/flash-list";
+import React, { memo, useContext, useEffect, useMemo } from "react";
 import {
   StyleSheet,
   View,
@@ -24,6 +25,7 @@ import {
   isPostSeen,
   markPostSeen,
   markPostUnseen,
+  subscribeToSeenChange,
 } from "../../../db/functions/SeenPosts";
 import URL from "../../../utils/URL";
 import RedditURL from "../../../utils/RedditURL";
@@ -37,11 +39,11 @@ import useContextMenu from "../../../utils/useContextMenu";
 type PostComponentProps = {
   post: Post;
   setPost: (post: Post) => void;
-  deletePost?: () => void;
+  deletePost?: (post: Post) => void;
   onPostOpen?: (url: string) => void;
 };
 
-export default function PostComponent({
+function PostComponent({
   post,
   setPost,
   deletePost,
@@ -70,9 +72,17 @@ export default function PostComponent({
       ? new RedditURL(params.url).isCombinedSubredditFeed()
       : true;
 
-  const seen = isPostSeen(post);
+  // useRecyclingState resets synchronously when FlashList recycles this cell
+  // onto a different post, so a recycled cell never renders a frame with the
+  // previous post's seen-dimming.
+  const [seen, setSeen] = useRecyclingState(() => isPostSeen(post), [post.id]);
 
-  const [_, rerender] = useState(0);
+  useEffect(() => {
+    // The subscription keeps this cell in sync when the post is marked seen
+    // from elsewhere (e.g. scrolled-past auto-marking) without re-rendering
+    // the rest of the list.
+    return subscribeToSeenChange(post.id, setSeen);
+  }, [post.id, setSeen]);
 
   const {
     accessibilityActions,
@@ -151,7 +161,7 @@ export default function PostComponent({
           expiresAt = true;
         }
         toggleFilterSubreddit(post.subreddit, expiresAt);
-        deletePost?.();
+        deletePost?.(post);
       },
     },
     {
@@ -182,7 +192,6 @@ export default function PostComponent({
     } else {
       await markPostUnseen(post);
     }
-    rerender((prev) => prev + 1);
   };
 
   const voteOnPost = async (voteOption: VoteOption) => {
@@ -521,6 +530,8 @@ export default function PostComponent({
     </PostInteractionProvider>
   );
 }
+
+export default memo(PostComponent);
 
 const styles = StyleSheet.create({
   postContainer: {

@@ -39,6 +39,18 @@ export function MediaImage({ item, setIsScrollLocked }: MediaImageProps) {
     },
   );
 
+  /**
+   * Only decode the full-resolution original once the user actually zooms.
+   * By default expo-image downscales the decode to fit the container, which
+   * keeps memory bounded inside the paging viewer. Zooming needs the extra
+   * detail, so we latch this on the first zoom and never turn it back off —
+   * flipping `allowDownscaling` re-decodes the already-loaded source in place,
+   * so the downscaled bitmap stays on screen until the full-res one is ready.
+   */
+  const [needsFullRes, setNeedsFullRes] = useRecyclingState(false, [
+    item.source,
+  ]);
+
   const highestResSource =
     typeof item.source === "string"
       ? item.source
@@ -118,6 +130,9 @@ export function MediaImage({ item, setIsScrollLocked }: MediaImageProps) {
           setIsZoomed(newIsZoomed);
           setIsScrollLocked(newIsZoomed);
         }
+        if (newIsZoomed && !needsFullRes) {
+          setNeedsFullRes(true);
+        }
       }}
     >
       <Image
@@ -135,7 +150,7 @@ export function MediaImage({ item, setIsScrollLocked }: MediaImageProps) {
         contentFit="contain"
         onLoad={() => setIsLoaded(true)}
         transition={150}
-        allowDownscaling={false}
+        allowDownscaling={!needsFullRes}
         recyclingKey={
           typeof highestResSource === "string"
             ? highestResSource

@@ -1,4 +1,10 @@
-import React, { useContext, useEffect, useState } from "react";
+import React, {
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import { StyleSheet, View } from "react-native";
 import { getPosts, Post } from "../api/Posts";
 
@@ -55,7 +61,6 @@ export default function PostsPage({
 
   const showSplitView = splitViewEnabled && windowSupportsSplitView;
 
-  const [rerenderCount, rerender] = useState(0);
   const [postDetailsURL, setPostDetailsURL] = useState<string | null>(null);
 
   const shouldFilterSeen = getHideSeenURLStatus(url);
@@ -82,10 +87,44 @@ export default function PostsPage({
 
   useOfferGalleryMode({ url, posts });
 
+  // Bridge the (identity-unstable) data callbacks through refs so the
+  // renderItem props below stay referentially stable and React.memo on
+  // PostComponent can skip re-renders during scroll.
+  const modifyPostsRef = useRef(modifyPosts);
+  modifyPostsRef.current = modifyPosts;
+  const deletePostsRef = useRef(deletePosts);
+  deletePostsRef.current = deletePosts;
+
+  const setPost = useCallback(
+    (newPost: Post) => modifyPostsRef.current([newPost]),
+    [],
+  );
+  const deletePost = useCallback(
+    (post: Post) => deletePostsRef.current([post]),
+    [],
+  );
+  const openSplitViewPost = useCallback(
+    (url: string) => setPostDetailsURL(url),
+    [],
+  );
+
+  const renderPost = useCallback(
+    ({ item }: { item: Post }) => (
+      <PostComponent
+        post={item}
+        setPost={setPost}
+        deletePost={deletePost}
+        onPostOpen={showSplitView ? openSplitViewPost : undefined}
+      />
+    ),
+    [setPost, deletePost, openSplitViewPost, showSplitView],
+  );
+
   const handleScrolledPastPost = async (post: Post) => {
     if (autoMarkAsSeen) {
+      // PostComponent subscribes to seen changes, so only the affected cell
+      // re-renders (no list-wide extraData bump).
       await markPostSeen(post);
-      rerender((prev) => prev + 1);
     }
   };
 
@@ -175,25 +214,7 @@ export default function PostsPage({
           fullyLoaded={fullyLoaded}
           hitFilterLimit={hitFilterLimit}
           data={posts}
-          extraData={rerenderCount} // This triggers a rerender of the visible list items
-          renderItem={({ item }) => (
-            <PostComponent
-              post={item}
-              setPost={(newPost) => {
-                modifyPosts([newPost]);
-              }}
-              deletePost={() => {
-                deletePosts([item]);
-              }}
-              onPostOpen={
-                showSplitView
-                  ? (url) => {
-                      setPostDetailsURL(url);
-                    }
-                  : undefined
-              }
-            />
-          )}
+          renderItem={renderPost}
           onViewableItemsChanged={(data) => {
             const maxVisibleItem =
               data.viewableItems[data.viewableItems.length - 1]?.index ?? -1;

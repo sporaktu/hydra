@@ -62,6 +62,20 @@ function RedditDataScroller<T extends RedditDataObject>(
 
   const lastScrollPosition = useRef(0);
 
+  // Scroll distance is accumulated in a ref during scrolling and flushed to
+  // SQLite only when scrolling comes to rest (or on unmount), so no DB I/O is
+  // initiated while a scroll gesture is active.
+  const unflushedScrollDistance = useRef(0);
+  const flushScrollDistance = () => {
+    if (unflushedScrollDistance.current > 0) {
+      modifyStat(Stat.SCROLL_DISTANCE, unflushedScrollDistance.current);
+      unflushedScrollDistance.current = 0;
+    }
+  };
+  useEffect(() => {
+    return flushScrollDistance;
+  }, []);
+
   const loadMoreData = async (refresh = false) => {
     if (props.fullyLoaded && !refresh) return;
     setIsLoadingMore(true);
@@ -107,11 +121,18 @@ function RedditDataScroller<T extends RedditDataObject>(
       onScroll={(e) => {
         handleScrollForTabBar(e);
         const scrollPosition = e.nativeEvent.contentOffset.y;
-        modifyStat(
-          Stat.SCROLL_DISTANCE,
-          Math.abs(scrollPosition - lastScrollPosition.current),
+        unflushedScrollDistance.current += Math.abs(
+          scrollPosition - lastScrollPosition.current,
         );
         lastScrollPosition.current = scrollPosition;
+      }}
+      onScrollEndDrag={(e) => {
+        props.onScrollEndDrag?.(e);
+        flushScrollDistance();
+      }}
+      onMomentumScrollEnd={(e) => {
+        props.onMomentumScrollEnd?.(e);
+        flushScrollDistance();
       }}
       onEndReachedThreshold={2}
       onEndReached={() => {

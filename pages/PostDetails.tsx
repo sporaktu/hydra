@@ -314,6 +314,7 @@ function PostDetails(props: PostDetailsProps) {
             />
           }
           scrollEnabled={!scrollDisabled}
+          scrollEventThrottle={100}
           onScroll={(e) => handleScrollForTabBar(e)}
           contentContainerStyle={{
             paddingBottom: 100,

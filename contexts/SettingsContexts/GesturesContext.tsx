@@ -1,4 +1,4 @@
-import { createContext } from "react";
+import { createContext, useCallback, useMemo } from "react";
 import { useMMKVBoolean, useMMKVObject } from "react-native-mmkv";
 
 const initialValues = {
@@ -127,78 +127,100 @@ export function GesturesProvider({ children }: React.PropsWithChildren) {
   const commentSwipeOptions =
     storedCommentSwipeOptions ?? initialValues.commentSwipeOptions;
 
-  const getKeyToSwitchWith = (
-    options: PostSwipeOptions | CommentSwipeOptions,
-    option: keyof PostSwipeOptions | keyof CommentSwipeOptions,
-    value: PostSwipeOption | CommentSwipeOption,
-  ) => {
-    if (value === DISABLED_SWIPE_OPTION.value) return null;
+  const getKeyToSwitchWith = useCallback(
+    (
+      options: PostSwipeOptions | CommentSwipeOptions,
+      option: keyof PostSwipeOptions | keyof CommentSwipeOptions,
+      value: PostSwipeOption | CommentSwipeOption,
+    ) => {
+      if (value === DISABLED_SWIPE_OPTION.value) return null;
 
-    let keyToSwitchWith:
-      | null
-      | keyof PostSwipeOptions
-      | keyof CommentSwipeOptions = null;
-    for (const key in options) {
-      const currentKey = key as
+      let keyToSwitchWith:
+        | null
         | keyof PostSwipeOptions
-        | keyof CommentSwipeOptions;
-      if (currentKey === option) continue;
-      if (options[currentKey] === value) {
-        keyToSwitchWith = currentKey;
-        break;
+        | keyof CommentSwipeOptions = null;
+      for (const key in options) {
+        const currentKey = key as
+          | keyof PostSwipeOptions
+          | keyof CommentSwipeOptions;
+        if (currentKey === option) continue;
+        if (options[currentKey] === value) {
+          keyToSwitchWith = currentKey;
+          break;
+        }
       }
-    }
-    return keyToSwitchWith;
-  };
+      return keyToSwitchWith;
+    },
+    [],
+  );
 
-  const setPostSwipeOption = (
-    option: keyof PostSwipeOptions,
-    value: PostSwipeOption,
-  ) => {
-    const keyToSwitchWith = getKeyToSwitchWith(postSwipeOptions, option, value);
-    setPostSwipeOptions({
-      ...postSwipeOptions,
-      [option]: value,
-      ...(keyToSwitchWith
-        ? {
-            [keyToSwitchWith]: postSwipeOptions[option],
-          }
-        : {}),
-    });
-  };
+  const toggleSwipeAnywhereToNavigate = useCallback(
+    (newValue = !swipeAnywhereToNavigate) =>
+      setSwipeAnywhereToNavigate(newValue),
+    [swipeAnywhereToNavigate, setSwipeAnywhereToNavigate],
+  );
 
-  const setCommentSwipeOption = (
-    option: keyof CommentSwipeOptions,
-    value: CommentSwipeOption,
-  ) => {
-    const keyToSwitchWith = getKeyToSwitchWith(
+  const setPostSwipeOption = useCallback(
+    (option: keyof PostSwipeOptions, value: PostSwipeOption) => {
+      const keyToSwitchWith = getKeyToSwitchWith(
+        postSwipeOptions,
+        option,
+        value,
+      );
+      setPostSwipeOptions({
+        ...postSwipeOptions,
+        [option]: value,
+        ...(keyToSwitchWith
+          ? {
+              [keyToSwitchWith]: postSwipeOptions[option],
+            }
+          : {}),
+      });
+    },
+    [postSwipeOptions, setPostSwipeOptions, getKeyToSwitchWith],
+  );
+
+  const setCommentSwipeOption = useCallback(
+    (option: keyof CommentSwipeOptions, value: CommentSwipeOption) => {
+      const keyToSwitchWith = getKeyToSwitchWith(
+        commentSwipeOptions,
+        option,
+        value,
+      );
+      setCommentSwipeOptions({
+        ...commentSwipeOptions,
+        [option]: value,
+        ...(keyToSwitchWith
+          ? {
+              [keyToSwitchWith]: commentSwipeOptions[option],
+            }
+          : {}),
+      });
+    },
+    [commentSwipeOptions, setCommentSwipeOptions, getKeyToSwitchWith],
+  );
+
+  const value = useMemo(
+    () => ({
+      swipeAnywhereToNavigate,
+      toggleSwipeAnywhereToNavigate,
+      postSwipeOptions,
+      setPostSwipeOption,
       commentSwipeOptions,
-      option,
-      value,
-    );
-    setCommentSwipeOptions({
-      ...commentSwipeOptions,
-      [option]: value,
-      ...(keyToSwitchWith
-        ? {
-            [keyToSwitchWith]: commentSwipeOptions[option],
-          }
-        : {}),
-    });
-  };
+      setCommentSwipeOption,
+    }),
+    [
+      swipeAnywhereToNavigate,
+      toggleSwipeAnywhereToNavigate,
+      postSwipeOptions,
+      setPostSwipeOption,
+      commentSwipeOptions,
+      setCommentSwipeOption,
+    ],
+  );
 
   return (
-    <GesturesContext.Provider
-      value={{
-        swipeAnywhereToNavigate,
-        toggleSwipeAnywhereToNavigate: (newValue = !swipeAnywhereToNavigate) =>
-          setSwipeAnywhereToNavigate(newValue),
-        postSwipeOptions,
-        setPostSwipeOption,
-        commentSwipeOptions,
-        setCommentSwipeOption,
-      }}
-    >
+    <GesturesContext.Provider value={value}>
       {children}
     </GesturesContext.Provider>
   );

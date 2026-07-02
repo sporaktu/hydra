@@ -1,4 +1,4 @@
-import { createContext } from "react";
+import { createContext, useCallback, useMemo } from "react";
 import { useMMKVBoolean } from "react-native-mmkv";
 
 const initialValues = {
@@ -23,17 +23,33 @@ export function TabSettingsProvider({ children }: React.PropsWithChildren) {
   const hideTabsOnScroll =
     storedHideTabsOnScroll ?? initialValues.hideTabsOnScroll;
 
+  const toggleShowUsername = useCallback(
+    (newValue = !showUsername) => setShowUsername(newValue),
+    [showUsername, setShowUsername],
+  );
+
+  const toggleHideTabsOnScroll = useCallback(
+    (newValue = !hideTabsOnScroll) => setHideTabsOnScroll(newValue),
+    [hideTabsOnScroll, setHideTabsOnScroll],
+  );
+
+  const value = useMemo(
+    () => ({
+      showUsername: showUsername ?? initialValues.showUsername,
+      toggleShowUsername,
+      hideTabsOnScroll,
+      toggleHideTabsOnScroll,
+    }),
+    [
+      showUsername,
+      toggleShowUsername,
+      hideTabsOnScroll,
+      toggleHideTabsOnScroll,
+    ],
+  );
+
   return (
-    <TabSettingsContext.Provider
-      value={{
-        showUsername: showUsername ?? initialValues.showUsername,
-        toggleShowUsername: (newValue = !showUsername) =>
-          setShowUsername(newValue),
-        hideTabsOnScroll,
-        toggleHideTabsOnScroll: (newValue = !hideTabsOnScroll) =>
-          setHideTabsOnScroll(newValue),
-      }}
-    >
+    <TabSettingsContext.Provider value={value}>
       {children}
     </TabSettingsContext.Provider>
   );

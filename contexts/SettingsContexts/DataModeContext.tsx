@@ -2,7 +2,13 @@ import NetInfo, {
   NetInfoState,
   NetInfoStateType,
 } from "@react-native-community/netinfo";
-import { createContext, useEffect, useState } from "react";
+import {
+  createContext,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 import { useMMKVObject } from "react-native-mmkv";
 
 export type DataMode = "normal" | "lowData";
@@ -46,16 +52,17 @@ export function DataModeProvider({ children }: React.PropsWithChildren) {
       connectionType === NetInfoStateType.wifi ? "wifi" : "cellular"
     ];
 
-  const changeDataModeSetting: DataModeContextType["changeDataModeSetting"] = (
-    setting,
-    value,
-  ) => {
-    const newSettings = {
-      ...dataModeSettings,
-      [setting]: value,
-    };
-    setDataModeSettings(newSettings);
-  };
+  const changeDataModeSetting: DataModeContextType["changeDataModeSetting"] =
+    useCallback(
+      (setting, value) => {
+        const newSettings = {
+          ...dataModeSettings,
+          [setting]: value,
+        };
+        setDataModeSettings(newSettings);
+      },
+      [dataModeSettings, setDataModeSettings],
+    );
 
   useEffect(() => {
     const unsubscribe = NetInfo.addEventListener((state) => {
@@ -64,14 +71,17 @@ export function DataModeProvider({ children }: React.PropsWithChildren) {
     return () => unsubscribe();
   }, []);
 
+  const value = useMemo(
+    () => ({
+      currentDataMode,
+      dataModeSettings,
+      changeDataModeSetting,
+    }),
+    [currentDataMode, dataModeSettings, changeDataModeSetting],
+  );
+
   return (
-    <DataModeContext.Provider
-      value={{
-        currentDataMode,
-        dataModeSettings,
-        changeDataModeSetting,
-      }}
-    >
+    <DataModeContext.Provider value={value}>
       {children}
     </DataModeContext.Provider>
   );
