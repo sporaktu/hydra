@@ -116,6 +116,11 @@ export default function Slideable<SlideName extends string>({
 
   const engageDistance = xScrollToEngage ?? 20;
   const lastBand = useSharedValue<SwipeBand>(0);
+  // Whether THIS row's pan actually activated. onFinalize fires even for
+  // gestures that failed before activating (e.g. a vertical drag), and each
+  // row has its own recognizer — an unconditional reset there could clear
+  // scrollDisabled while another row's swipe is still active.
+  const activated = useSharedValue(false);
 
   const panGesture = Gesture.Pan()
     // Mostly-horizontal movement activates; vertical movement fails the pan
@@ -128,6 +133,7 @@ export default function Slideable<SlideName extends string>({
     )
     .failOffsetY([-10, 10])
     .onStart(() => {
+      activated.value = true;
       lastBand.value = 0;
       runOnJS(setScrollDisabled)(true);
     })
@@ -152,6 +158,8 @@ export default function Slideable<SlideName extends string>({
       }
     })
     .onFinalize(() => {
+      if (!activated.value) return;
+      activated.value = false;
       translateX.value = withSpring(
         0,
         { damping: 100, stiffness: 300, overshootClamping: true },
