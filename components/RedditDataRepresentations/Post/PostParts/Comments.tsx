@@ -6,16 +6,9 @@ import {
   MaterialCommunityIcons,
   Octicons,
 } from "@expo/vector-icons";
+import { useRecyclingState } from "@shopify/flash-list";
 import { Image } from "expo-image";
-import React, {
-  useContext,
-  useState,
-  useMemo,
-  forwardRef,
-  ForwardedRef,
-  useRef,
-  ComponentRef,
-} from "react";
+import React, { useContext, useMemo, useRef, ComponentRef } from "react";
 import {
   StyleSheet,
   View,
@@ -56,8 +49,12 @@ import NativeContextMenu, {
 import { GesturesContext } from "../../../../contexts/SettingsContexts/GesturesContext";
 import Time from "../../../../utils/Time";
 
+/**
+ * Renders a SINGLE comment row. The comment tree is flattened into rows by
+ * pages/PostDetails.tsx (see flattenComments.ts) and rendered in a
+ * virtualized FlashList — this component no longer recurses into children.
+ */
 interface CommentProps {
-  loadMoreComments?: LoadMoreCommentsFunc;
   comment: PostDetail | Comment;
   index: number;
   scrollChange?: (y: number) => void;
@@ -66,15 +63,9 @@ interface CommentProps {
   deleteComment: (comment: Comment) => void;
   collapseThread?: (comment: Comment) => void;
   interactionDisabledStatus?: PostDetail["interactionDisabledStatus"];
-
-  // This comment prop ref thing is horrific. Don't do it. We're using it so
-  // the post details page can reach into the comments inside of it to get to
-  // the element it needs to scroll to.
-  commentPropRef?: { current: ComponentRef<typeof TouchableHighlight> | null };
 }
 
 export function CommentComponent({
-  loadMoreComments,
   comment,
   index,
   scrollChange,
@@ -83,7 +74,6 @@ export function CommentComponent({
   deleteComment,
   collapseThread,
   interactionDisabledStatus = null,
-  commentPropRef,
 }: CommentProps) {
   const { theme } = useContext(ThemeContext);
   const {
@@ -105,12 +95,6 @@ export function CommentComponent({
     !doesCommentPassTextFilter(comment);
 
   const commentRef = useRef<ComponentRef<typeof TouchableHighlight>>(null);
-
-  if (commentPropRef) {
-    commentPropRef.current = commentRef.current;
-  }
-
-  const [loadingMore, setLoadingMore] = useState(false);
 
   const toggleCollapse = () => {
     if (comment.type !== "comment") return;
@@ -346,12 +330,7 @@ export function CommentComponent({
             >
               <NativeContextMenu actions={commentMenuOptions}>
                 <TouchableHighlight
-                  ref={(ref) => {
-                    commentRef.current = ref;
-                    if (commentPropRef) {
-                      commentPropRef.current = ref;
-                    }
-                  }}
+                  ref={commentRef}
                   activeOpacity={1}
                   underlayColor={
                     tapToCollapseComment || displayInList
@@ -618,107 +597,6 @@ export function CommentComponent({
               </NativeContextMenu>
             </Slideable>
           )}
-          {!comment.collapsed ? (
-            <>
-              {comment.comments.length > 0 &&
-                comment.comments.map((childComment, childIndex) => (
-                  <CommentComponent
-                    key={childComment.id}
-                    loadMoreComments={loadMoreComments}
-                    comment={childComment}
-                    index={childIndex}
-                    scrollChange={scrollChange}
-                    changeComment={changeComment}
-                    deleteComment={deleteComment}
-                    collapseThread={collapseThread}
-                    commentPropRef={{ current: null }}
-                    interactionDisabledStatus={interactionDisabledStatus}
-                  />
-                ))}
-              {comment.loadMore && comment.loadMore.childIds.length > 0 && (
-                <TouchableOpacity
-                  activeOpacity={0.5}
-                  onPress={async () => {
-                    setLoadingMore(true);
-                    if (comment.loadMore && loadMoreComments) {
-                      await loadMoreComments(
-                        comment.loadMore.childIds.slice(0, 10),
-                        comment.path,
-                        comment.comments.length,
-                      );
-                    }
-                    setLoadingMore(false);
-                  }}
-                  style={[
-                    styles.outerCommentContainer,
-                    {
-                      marginLeft: 10 * (comment.depth + 1),
-                      borderTopColor: theme.divider,
-                    },
-                  ]}
-                >
-                  <View
-                    style={[
-                      styles.commentContainer,
-                      {
-                        borderLeftWidth: comment.depth === -1 ? 0 : 1,
-                        borderLeftColor:
-                          theme.commentDepthColors[
-                            comment.depth % theme.commentDepthColors.length
-                          ],
-                      },
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.upvoteText,
-                        {
-                          color: theme.iconOrTextButton,
-                        },
-                      ]}
-                    >
-                      {loadingMore
-                        ? "Loading..."
-                        : `${comment.loadMore.childIds.length} more replies`}
-                    </Text>
-                  </View>
-                </TouchableOpacity>
-              )}
-            </>
-          ) : collapseChildrenOnly && comment.comments.length ? (
-            <TouchableOpacity
-              activeOpacity={0.5}
-              onPress={() => toggleCollapse()}
-              style={{
-                marginLeft: 10 * (comment.depth + 1),
-                borderTopWidth: 1,
-                borderTopColor: theme.divider,
-              }}
-            >
-              <View
-                style={{
-                  borderLeftWidth: comment.depth === -1 ? 0 : 1,
-                  borderLeftColor:
-                    theme.commentDepthColors[
-                      comment.depth % theme.commentDepthColors.length
-                    ],
-                  marginVertical: 10,
-                  paddingLeft: 15,
-                }}
-              >
-                <Text
-                  style={[
-                    styles.upvoteText,
-                    {
-                      color: theme.iconOrTextButton,
-                    },
-                  ]}
-                >
-                  {comment.comments.length} more replies
-                </Text>
-              </View>
-            </TouchableOpacity>
-          ) : null}
           {displayInList && (
             <View
               style={[
@@ -734,7 +612,6 @@ export function CommentComponent({
     [
       isFiltered,
       commentFlairs,
-      loadingMore,
       comment.collapsed,
       comment,
       comment.renderCount,
@@ -743,58 +620,127 @@ export function CommentComponent({
   );
 }
 
-interface CommentsProps {
+/**
+ * "N more replies" link row: loads the next batch of a comment's unloaded
+ * children. Uses useRecyclingState so a recycled cell never shows another
+ * row's transient "Loading..." text.
+ */
+export function LoadMoreCommentsRow({
+  parent,
+  loadMoreComments,
+}: {
+  parent: PostDetail | Comment;
   loadMoreComments: LoadMoreCommentsFunc;
-  postDetail: PostDetail;
-  scrollChange: (y: number) => void;
-  changeComment: (comment: Comment) => void;
-  deleteComment: (comment: Comment) => void;
-  collapseThread: (comment: Comment) => void;
-  interactionDisabledStatus?: PostDetail["interactionDisabledStatus"];
-}
+}) {
+  const { theme } = useContext(ThemeContext);
+  const [loadingMore, setLoadingMore] = useRecyclingState(false, [parent.id]);
 
-const Comments = forwardRef(
-  (
-    {
-      loadMoreComments,
-      postDetail,
-      scrollChange,
-      changeComment,
-      deleteComment,
-      collapseThread,
-      interactionDisabledStatus = null,
-    }: CommentsProps,
-    ref: ForwardedRef<View>,
-  ) => {
-    const { theme } = useContext(ThemeContext);
+  if (!parent.loadMore) return null;
 
-    return (
+  return (
+    <TouchableOpacity
+      activeOpacity={0.5}
+      onPress={async () => {
+        if (!parent.loadMore) return;
+        setLoadingMore(true);
+        await loadMoreComments(
+          parent.loadMore.childIds.slice(0, 10),
+          parent.path,
+          parent.comments.length,
+        );
+        setLoadingMore(false);
+      }}
+      style={[
+        styles.outerCommentContainer,
+        {
+          marginLeft: 10 * (parent.depth + 1),
+          borderTopColor: theme.divider,
+        },
+      ]}
+    >
       <View
         style={[
-          styles.commentsContainer,
+          styles.commentContainer,
           {
-            borderBottomColor: theme.divider,
+            borderLeftWidth: parent.depth === -1 ? 0 : 1,
+            borderLeftColor:
+              theme.commentDepthColors[
+                parent.depth % theme.commentDepthColors.length
+              ],
           },
         ]}
-        ref={ref}
       >
-        <CommentComponent
-          key={postDetail.id}
-          loadMoreComments={loadMoreComments}
-          comment={postDetail}
-          index={0}
-          scrollChange={scrollChange}
-          changeComment={changeComment}
-          deleteComment={deleteComment}
-          collapseThread={collapseThread}
-          interactionDisabledStatus={interactionDisabledStatus}
-        />
+        <Text
+          style={[
+            styles.upvoteText,
+            {
+              color: theme.iconOrTextButton,
+            },
+          ]}
+        >
+          {loadingMore
+            ? "Loading..."
+            : `${parent.loadMore.childIds.length} more replies`}
+        </Text>
       </View>
-    );
-  },
-);
+    </TouchableOpacity>
+  );
+}
 
-export default Comments;
+/**
+ * The "N more replies" stub a collapsed comment shows in place of its
+ * children when collapseChildrenOnly is on; tapping expands the comment.
+ */
+export function CollapsedRepliesRow({
+  comment,
+  changeComment,
+}: {
+  comment: Comment;
+  changeComment: (comment: Comment) => void;
+}) {
+  const { theme } = useContext(ThemeContext);
+
+  return (
+    <TouchableOpacity
+      activeOpacity={0.5}
+      onPress={() =>
+        changeComment({
+          ...comment,
+          collapsed: !comment.collapsed,
+          renderCount: comment.renderCount + 1,
+        })
+      }
+      style={{
+        marginLeft: 10 * (comment.depth + 1),
+        borderTopWidth: 1,
+        borderTopColor: theme.divider,
+      }}
+    >
+      <View
+        style={{
+          borderLeftWidth: comment.depth === -1 ? 0 : 1,
+          borderLeftColor:
+            theme.commentDepthColors[
+              comment.depth % theme.commentDepthColors.length
+            ],
+          marginVertical: 10,
+          paddingLeft: 15,
+        }}
+      >
+        <Text
+          style={[
+            styles.upvoteText,
+            {
+              color: theme.iconOrTextButton,
+            },
+          ]}
+        >
+          {comment.comments.length} more replies
+        </Text>
+      </View>
+    </TouchableOpacity>
+  );
+}
 
 const styles = StyleSheet.create({
   commentsContainer: {
