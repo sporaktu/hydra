@@ -3,13 +3,51 @@
 
 const { execSync } = require('child_process');
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 
 const PACKAGE_JSON_PATH = path.join(__dirname, '..', 'package.json');
 const VALID_BUMPS = ['--patch', '--minor', '--major'];
 
+function resolveShell() {
+  if (os.platform() !== 'win32') {
+    return undefined;
+  }
+  try {
+    const gitExecPath = execSync('git --exec-path', {
+      encoding: 'utf8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+    }).trim();
+    const gitRoot = path.dirname(path.dirname(gitExecPath));
+    const derived = path.join(gitRoot, 'bin', 'bash.exe');
+    if (fs.existsSync(derived)) {
+      return derived;
+    }
+  } catch (_err) {
+    // fall through to hardcoded candidates below
+  }
+  const gitBashCandidates = [
+    'C:\\Program Files\\Git\\bin\\bash.exe',
+    'C:\\Program Files (x86)\\Git\\bin\\bash.exe',
+    path.join(os.homedir(), 'AppData', 'Local', 'Programs', 'Git', 'bin', 'bash.exe'),
+  ];
+  const found = gitBashCandidates.find((candidate) => fs.existsSync(candidate));
+  if (!found) {
+    console.warn(
+      'release.js: git-bash not found; falling back to cmd.exe as the execSync shell (less robust for quoting).'
+    );
+  }
+  return found;
+}
+
+const SHELL = resolveShell();
+
 function run(cmd) {
-  return execSync(cmd, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
+  const options = { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] };
+  if (SHELL) {
+    options.shell = SHELL;
+  }
+  return execSync(cmd, options).trim();
 }
 
 function fail(message) {
