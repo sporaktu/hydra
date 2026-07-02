@@ -1,5 +1,6 @@
 import { AntDesign, Feather, FontAwesome } from "@expo/vector-icons";
-import React, { memo, useContext, useEffect, useMemo, useState } from "react";
+import { useRecyclingState } from "@shopify/flash-list";
+import React, { memo, useContext, useEffect, useMemo } from "react";
 import {
   StyleSheet,
   View,
@@ -71,16 +72,17 @@ function PostComponent({
       ? new RedditURL(params.url).isCombinedSubredditFeed()
       : true;
 
-  const [seen, setSeen] = useState(() => isPostSeen(post));
+  // useRecyclingState resets synchronously when FlashList recycles this cell
+  // onto a different post, so a recycled cell never renders a frame with the
+  // previous post's seen-dimming.
+  const [seen, setSeen] = useRecyclingState(() => isPostSeen(post), [post.id]);
 
   useEffect(() => {
-    // A recycled cell keeps its state, so re-read when the post changes. The
-    // subscription keeps this cell in sync when the post is marked seen from
-    // elsewhere (e.g. scrolled-past auto-marking) without re-rendering the
-    // rest of the list.
-    setSeen(isPostSeen(post));
+    // The subscription keeps this cell in sync when the post is marked seen
+    // from elsewhere (e.g. scrolled-past auto-marking) without re-rendering
+    // the rest of the list.
     return subscribeToSeenChange(post.id, setSeen);
-  }, [post.id]);
+  }, [post.id, setSeen]);
 
   const {
     accessibilityActions,

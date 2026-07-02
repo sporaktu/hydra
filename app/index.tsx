@@ -10,7 +10,7 @@ import { useMigrations } from "drizzle-orm/expo-sqlite/migrator";
 import { registerRootComponent } from "expo";
 import { useFonts } from "expo-font";
 import { SplashScreen } from "expo-router";
-import React, { useEffect } from "react";
+import React, { useEffect, useState } from "react";
 import { AppState, InteractionManager, LogBox } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { enableFreeze } from "react-native-screens";
@@ -78,14 +78,22 @@ function RootLayout() {
     if (error) throw error;
   }, [error]);
 
+  // The video cache can only be cleared while no video components are
+  // mounted, so a requested clear must finish before the first render. This
+  // is a synchronous key check that resolves immediately unless the user
+  // actually requested a clear, so it doesn't meaningfully delay startup.
+  const [videoCacheReady, setVideoCacheReady] = useState(false);
+  useEffect(() => {
+    VideoCache.clearCacheIfRequested().then(() => setVideoCacheReady(true));
+  }, []);
+
   useEffect(() => {
     if (migrationsComplete) {
-      // Maintenance work (pruning old rows, clearing the video cache) does
-      // not need to finish before the UI is usable, so defer it until after
-      // startup interactions instead of blocking the first render on it.
-      InteractionManager.runAfterInteractions(async () => {
-        await doDBMaintenance();
-        await VideoCache.clearCacheIfRequested();
+      // DB maintenance (pruning old rows past their caps) does not need to
+      // finish before the UI is usable, so defer it until after startup
+      // interactions instead of blocking the first render on it.
+      InteractionManager.runAfterInteractions(() => {
+        doDBMaintenance();
       });
       modifyStat(Stat.APP_LAUNCHES, 1);
       modifyStat(Stat.APP_FOREGROUNDS, 1);
@@ -105,7 +113,8 @@ function RootLayout() {
 
   return (
     migrationsComplete &&
-    fontsLoaded && (
+    fontsLoaded &&
+    videoCacheReady && (
       <SafeAreaProvider>
         <AccountProvider>
           <SubscriptionsProvider>
