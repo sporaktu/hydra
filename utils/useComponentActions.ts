@@ -43,29 +43,35 @@ export default function useComponentActions<ActionLabel extends string>(
       ?.handle?.();
   };
 
+  const longPressActions = actions.filter(
+    (action) => action.isAllowed && action.isLongPressOption,
+  );
+
   const handleLongPress = async () => {
-    const longPressOptions = actions
-      .filter((action) => action.isAllowed && action.isLongPressOption)
-      .map((action) => action.label);
     const result = await openContextMenu<ActionLabel[]>({
-      options: longPressOptions,
+      options: longPressActions.map((action) => action.label),
     });
     if (result) {
-      await actions
-        .find(
-          (action) =>
-            action.isAllowed &&
-            action.isLongPressOption &&
-            action.label === result,
-        )
-        ?.handle?.();
+      await longPressActions
+        .find((action) => action.label === result)
+        ?.handle();
     }
   };
+
+  // Resolved long-press options for the native iOS context menu (Zeego), which
+  // needs the handlers up front rather than resolving a label after selection.
+  const longPressOptions = longPressActions.map((action) => ({
+    label: action.label,
+    handle: () => {
+      action.handle();
+    },
+  }));
 
   return {
     accessibilityActions,
     handleAction,
     handleAccessibilityAction,
     handleLongPress,
+    longPressOptions,
   };
 }

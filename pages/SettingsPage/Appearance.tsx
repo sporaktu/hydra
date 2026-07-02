@@ -47,6 +47,8 @@ export default function Appearance() {
     toggleBlurSpoilers,
     autoPlayVideos,
     toggleAutoPlayVideos,
+    feedVideoAudio,
+    toggleFeedVideoAudio,
     liveTextInteraction,
     toggleLiveTextInteraction,
     tapToCollapsePost,
@@ -301,6 +303,24 @@ export default function Appearance() {
             ),
             text: "Auto play videos",
             onPress: () => toggleAutoPlayVideos(),
+          },
+          {
+            key: "feedVideoAudio",
+            icon: (
+              <MaterialIcons name="volume-up" size={24} color={theme.text} />
+            ),
+            rightIcon: (
+              <Switch
+                trackColor={{
+                  false: theme.iconSecondary,
+                  true: theme.iconPrimary,
+                }}
+                value={feedVideoAudio}
+                onValueChange={() => toggleFeedVideoAudio()}
+              />
+            ),
+            text: "Focused video audio",
+            onPress: () => toggleFeedVideoAudio(),
           },
           {
             key: "liveTextInteraction",

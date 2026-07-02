@@ -1,4 +1,4 @@
-import { createContext } from "react";
+import { createContext, useCallback, useMemo } from "react";
 import { useMMKVBoolean, useMMKVNumber } from "react-native-mmkv";
 import { deviceSupportsSplitView } from "../../utils/useSplitViewSupport";
 
@@ -15,6 +15,7 @@ const initialValues = {
   blurNSFW: true,
   showPostSummary: true,
   autoPlayVideos: true,
+  feedVideoAudio: false,
   liveTextInteraction: false,
   tapToCollapsePost: true,
 };
@@ -33,6 +34,7 @@ const initialPostSettingsContext = {
   toggleBlurNSFW: (_newValue?: boolean) => {},
   toggleShowPostSummary: (_newValue?: boolean) => {},
   toggleAutoPlayVideos: (_newValue?: boolean) => {},
+  toggleFeedVideoAudio: (_newValue?: boolean) => {},
   toggleLiveTextInteraction: (_newValue?: boolean) => {},
   toggleTapToCollapsePost: (_newValue?: boolean) => {},
 };
@@ -93,6 +95,10 @@ export function PostSettingsProvider({ children }: React.PropsWithChildren) {
     useMMKVBoolean("autoPlayVideos");
   const autoPlayVideos = storedAutoPlayVideos ?? initialValues.autoPlayVideos;
 
+  const [storedFeedVideoAudio, setFeedVideoAudio] =
+    useMMKVBoolean("feedVideoAudio");
+  const feedVideoAudio = storedFeedVideoAudio ?? initialValues.feedVideoAudio;
+
   const [storedliveTextInteraction, setliveTextInteraction] = useMMKVBoolean(
     "liveTextInteraction",
   );
@@ -104,68 +110,168 @@ export function PostSettingsProvider({ children }: React.PropsWithChildren) {
   const tapToCollapsePost =
     storedTapToCollapsePost ?? initialValues.tapToCollapsePost;
 
+  const togglePostCompactMode = useCallback(
+    (newValue = !postCompactMode) => setPostCompactMode(newValue),
+    [postCompactMode, setPostCompactMode],
+  );
+
+  const toggleShowThumbnailsOnRightSide = useCallback(
+    (newValue = !showThumbnailsOnRightSide) =>
+      setShowThumbnailsOnRightSide(newValue),
+    [showThumbnailsOnRightSide, setShowThumbnailsOnRightSide],
+  );
+
+  const toggleSubredditAtTop = useCallback(
+    (newValue = !subredditAtTop) => setSubredditAtTop(newValue),
+    [subredditAtTop, setSubredditAtTop],
+  );
+
+  const toggleSubredditIcon = useCallback(
+    (newValue = !showSubredditIcon) => setShowSubredditIcon(newValue),
+    [showSubredditIcon, setShowSubredditIcon],
+  );
+
+  const changePostTitleLength = useCallback(
+    (newValue: number) => setPostTitleLength(newValue),
+    [setPostTitleLength],
+  );
+
+  const changePostTextLength = useCallback(
+    (newValue: number) => setPostTextLength(newValue),
+    [setPostTextLength],
+  );
+
+  const changeLinkDescriptionLength = useCallback(
+    (newValue: number) => setLinkDescriptionLength(newValue),
+    [setLinkDescriptionLength],
+  );
+
+  const toggleShowPostFlair = useCallback(
+    (newValue = !showPostFlair) => setShowPostFlair(newValue),
+    [showPostFlair, setShowPostFlair],
+  );
+
+  const toggleBlurSpoilers = useCallback(
+    (newValue = !blurSpoilers) => setBlurSpoilers(newValue),
+    [blurSpoilers, setBlurSpoilers],
+  );
+
+  const toggleBlurNSFW = useCallback(
+    (newValue = !blurNSFW) => setBlurNSFW(newValue),
+    [blurNSFW, setBlurNSFW],
+  );
+
+  const toggleShowPostSummary = useCallback(
+    (newValue = !showPostSummary) => setShowPostSummary(newValue),
+    [showPostSummary, setShowPostSummary],
+  );
+
+  const toggleAutoPlayVideos = useCallback(
+    (newValue = !autoPlayVideos) => setAutoPlayVideos(newValue),
+    [autoPlayVideos, setAutoPlayVideos],
+  );
+
+  const toggleFeedVideoAudio = useCallback(
+    (newValue = !feedVideoAudio) => setFeedVideoAudio(newValue),
+    [feedVideoAudio, setFeedVideoAudio],
+  );
+
+  const toggleLiveTextInteraction = useCallback(
+    (newValue = !liveTextInteraction) => setliveTextInteraction(newValue),
+    [liveTextInteraction, setliveTextInteraction],
+  );
+
+  const toggleTapToCollapsePost = useCallback(
+    (newValue = !tapToCollapsePost) => setTapToCollapsePost(newValue),
+    [tapToCollapsePost, setTapToCollapsePost],
+  );
+
+  const value = useMemo(
+    () => ({
+      postCompactMode: postCompactMode ?? initialValues.postCompactMode,
+      togglePostCompactMode,
+
+      showThumbnailsOnRightSide:
+        showThumbnailsOnRightSide ?? initialValues.showThumbnailsOnRightSide,
+      toggleShowThumbnailsOnRightSide,
+
+      subredditAtTop: subredditAtTop ?? initialValues.subredditAtTop,
+      toggleSubredditAtTop,
+
+      showSubredditIcon: showSubredditIcon ?? initialValues.showSubredditIcon,
+      toggleSubredditIcon,
+
+      postTitleLength: postTitleLength ?? initialValues.postTitleLength,
+      changePostTitleLength,
+
+      postTextLength: postTextLength ?? initialValues.postTextLength,
+      changePostTextLength,
+
+      linkDescriptionLength:
+        linkDescriptionLength ?? initialValues.linkDescriptionLength,
+      changeLinkDescriptionLength,
+
+      showPostFlair: showPostFlair ?? initialValues.showPostFlair,
+      toggleShowPostFlair,
+
+      blurSpoilers: blurSpoilers ?? initialValues.blurSpoilers,
+      toggleBlurSpoilers,
+
+      blurNSFW: blurNSFW ?? initialValues.blurNSFW,
+      toggleBlurNSFW,
+
+      showPostSummary: showPostSummary ?? initialValues.showPostSummary,
+      toggleShowPostSummary,
+
+      autoPlayVideos: autoPlayVideos ?? initialValues.autoPlayVideos,
+      toggleAutoPlayVideos,
+
+      feedVideoAudio: feedVideoAudio ?? initialValues.feedVideoAudio,
+      toggleFeedVideoAudio,
+
+      liveTextInteraction:
+        liveTextInteraction ?? initialValues.liveTextInteraction,
+      toggleLiveTextInteraction,
+
+      tapToCollapsePost: tapToCollapsePost ?? initialValues.tapToCollapsePost,
+      toggleTapToCollapsePost,
+    }),
+    [
+      postCompactMode,
+      togglePostCompactMode,
+      showThumbnailsOnRightSide,
+      toggleShowThumbnailsOnRightSide,
+      subredditAtTop,
+      toggleSubredditAtTop,
+      showSubredditIcon,
+      toggleSubredditIcon,
+      postTitleLength,
+      changePostTitleLength,
+      postTextLength,
+      changePostTextLength,
+      linkDescriptionLength,
+      changeLinkDescriptionLength,
+      showPostFlair,
+      toggleShowPostFlair,
+      blurSpoilers,
+      toggleBlurSpoilers,
+      blurNSFW,
+      toggleBlurNSFW,
+      showPostSummary,
+      toggleShowPostSummary,
+      autoPlayVideos,
+      toggleAutoPlayVideos,
+      feedVideoAudio,
+      toggleFeedVideoAudio,
+      liveTextInteraction,
+      toggleLiveTextInteraction,
+      tapToCollapsePost,
+      toggleTapToCollapsePost,
+    ],
+  );
+
   return (
-    <PostSettingsContext.Provider
-      value={{
-        postCompactMode: postCompactMode ?? initialValues.postCompactMode,
-        togglePostCompactMode: (newValue = !postCompactMode) =>
-          setPostCompactMode(newValue),
-
-        showThumbnailsOnRightSide:
-          showThumbnailsOnRightSide ?? initialValues.showThumbnailsOnRightSide,
-        toggleShowThumbnailsOnRightSide: (
-          newValue = !showThumbnailsOnRightSide,
-        ) => setShowThumbnailsOnRightSide(newValue),
-
-        subredditAtTop: subredditAtTop ?? initialValues.subredditAtTop,
-        toggleSubredditAtTop: (newValue = !subredditAtTop) =>
-          setSubredditAtTop(newValue),
-
-        showSubredditIcon: showSubredditIcon ?? initialValues.showSubredditIcon,
-        toggleSubredditIcon: (newValue = !showSubredditIcon) =>
-          setShowSubredditIcon(newValue),
-
-        postTitleLength: postTitleLength ?? initialValues.postTitleLength,
-        changePostTitleLength: (newValue: number) =>
-          setPostTitleLength(newValue),
-
-        postTextLength: postTextLength ?? initialValues.postTextLength,
-        changePostTextLength: (newValue: number) => setPostTextLength(newValue),
-
-        linkDescriptionLength:
-          linkDescriptionLength ?? initialValues.linkDescriptionLength,
-        changeLinkDescriptionLength: (newValue: number) =>
-          setLinkDescriptionLength(newValue),
-
-        showPostFlair: showPostFlair ?? initialValues.showPostFlair,
-        toggleShowPostFlair: (newValue = !showPostFlair) =>
-          setShowPostFlair(newValue),
-
-        blurSpoilers: blurSpoilers ?? initialValues.blurSpoilers,
-        toggleBlurSpoilers: (newValue = !blurSpoilers) =>
-          setBlurSpoilers(newValue),
-
-        blurNSFW: blurNSFW ?? initialValues.blurNSFW,
-        toggleBlurNSFW: (newValue = !blurNSFW) => setBlurNSFW(newValue),
-
-        showPostSummary: showPostSummary ?? initialValues.showPostSummary,
-        toggleShowPostSummary: (newValue = !showPostSummary) =>
-          setShowPostSummary(newValue),
-
-        autoPlayVideos: autoPlayVideos ?? initialValues.autoPlayVideos,
-        toggleAutoPlayVideos: (newValue = !autoPlayVideos) =>
-          setAutoPlayVideos(newValue),
-
-        liveTextInteraction:
-          liveTextInteraction ?? initialValues.liveTextInteraction,
-        toggleLiveTextInteraction: (newValue = !liveTextInteraction) =>
-          setliveTextInteraction(newValue),
-
-        tapToCollapsePost: tapToCollapsePost ?? initialValues.tapToCollapsePost,
-        toggleTapToCollapsePost: (newValue = !tapToCollapsePost) =>
-          setTapToCollapsePost(newValue),
-      }}
-    >
+    <PostSettingsContext.Provider value={value}>
       {children}
     </PostSettingsContext.Provider>
   );

@@ -17,6 +17,7 @@ import { act, create, ReactTestRenderer } from "react-test-renderer";
 import { Text, ActivityIndicator } from "react-native";
 
 import Video from "../Video";
+import { getRememberedPlaybackPosition } from "../../../../utils/FeedVideoFocus";
 
 // --- mocks for the component's dependency tree -----------------------------
 jest.mock("expo-video", () => ({
@@ -162,4 +163,44 @@ it("shows 'No player available' when the registry returned no player", () => {
     tree = create(<Video video={baseVideo} />);
   });
   expect(overlayTexts(tree)).toContain("No player available");
+});
+
+// --- feed-audio + focused-playback behavior (spec 02) ----------------------
+// The real FeedVideoFocus module is used (not mocked) so remembered positions
+// written by the component are observable here. A distinct video.source per
+// test keeps those remembered positions from bleeding across tests.
+
+it("plays unmuted when audioEnabled is true (Focused Post with feed audio on)", () => {
+  mockCurrentPlayer = makePlayer({ status: "readyToPlay", playing: true });
+  const video = { source: "audio-on", needsResolution: false } as never;
+  act(() => {
+    create(<Video video={video} audioEnabled />);
+  });
+  expect(mockCurrentPlayer!.muted).toBe(false);
+  expect(mockCurrentPlayer!.audioMixingMode).toBe("doNotMix");
+});
+
+it("stays muted by default (audio off is the standard feed behavior)", () => {
+  mockCurrentPlayer = makePlayer({ status: "readyToPlay", playing: true });
+  const video = { source: "audio-off", needsResolution: false } as never;
+  act(() => {
+    create(<Video video={video} />);
+  });
+  expect(mockCurrentPlayer!.muted).toBe(true);
+  expect(mockCurrentPlayer!.audioMixingMode).toBe("mixWithOthers");
+});
+
+it("pauses and remembers the position on unmount so an LRU-cached player stops playing", () => {
+  mockCurrentPlayer = makePlayer({ status: "readyToPlay", currentTime: 4.2 });
+  const video = { source: "unmount-remember", needsResolution: false } as never;
+  let tree!: ReactTestRenderer;
+  act(() => {
+    tree = create(<Video video={video} />);
+  });
+  act(() => {
+    tree.unmount();
+  });
+  expect(mockCurrentPlayer!.pause).toHaveBeenCalled();
+  expect(mockCurrentPlayer!.muted).toBe(true);
+  expect(getRememberedPlaybackPosition("unmount-remember")).toBe(4.2);
 });

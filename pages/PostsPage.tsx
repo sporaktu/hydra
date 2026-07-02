@@ -1,9 +1,16 @@
-import React, { useContext, useEffect, useState } from "react";
+import React, {
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import { StyleSheet, View } from "react-native";
 import { getPosts, Post } from "../api/Posts";
 
 import { StackPageProps } from "../app/stack";
 import PostComponent from "../components/RedditDataRepresentations/Post/PostComponent";
+import FeedAudioFAB from "../components/UI/FeedAudioFAB";
 import RedditDataScroller from "../components/UI/RedditDataScroller";
 import SearchBar from "../components/UI/SearchBar";
 import { FiltersContext } from "../contexts/SettingsContexts/FiltersContext";
@@ -55,7 +62,6 @@ export default function PostsPage({
 
   const showSplitView = splitViewEnabled && windowSupportsSplitView;
 
-  const [rerenderCount, rerender] = useState(0);
   const [postDetailsURL, setPostDetailsURL] = useState<string | null>(null);
 
   const shouldFilterSeen = getHideSeenURLStatus(url);
@@ -82,10 +88,44 @@ export default function PostsPage({
 
   useOfferGalleryMode({ url, posts });
 
+  // Bridge the (identity-unstable) data callbacks through refs so the
+  // renderItem props below stay referentially stable and React.memo on
+  // PostComponent can skip re-renders during scroll.
+  const modifyPostsRef = useRef(modifyPosts);
+  modifyPostsRef.current = modifyPosts;
+  const deletePostsRef = useRef(deletePosts);
+  deletePostsRef.current = deletePosts;
+
+  const setPost = useCallback(
+    (newPost: Post) => modifyPostsRef.current([newPost]),
+    [],
+  );
+  const deletePost = useCallback(
+    (post: Post) => deletePostsRef.current([post]),
+    [],
+  );
+  const openSplitViewPost = useCallback(
+    (url: string) => setPostDetailsURL(url),
+    [],
+  );
+
+  const renderPost = useCallback(
+    ({ item }: { item: Post }) => (
+      <PostComponent
+        post={item}
+        setPost={setPost}
+        deletePost={deletePost}
+        onPostOpen={showSplitView ? openSplitViewPost : undefined}
+      />
+    ),
+    [setPost, deletePost, openSplitViewPost, showSplitView],
+  );
+
   const handleScrolledPastPost = async (post: Post) => {
     if (autoMarkAsSeen) {
+      // PostComponent subscribes to seen changes, so only the affected cell
+      // re-renders (no list-wide extraData bump).
       await markPostSeen(post);
-      rerender((prev) => prev + 1);
     }
   };
 
@@ -152,63 +192,50 @@ export default function PostsPage({
         accessFailure={accessFailure}
         contentName={subreddit}
       >
-        <RedditDataScroller<Post>
-          ListHeaderComponent={
-            route.name === "PostsPage" ? (
-              <SearchBar
-                clearOnSearch={true}
-                searchOnBlur={false}
-                onSearch={(text) => {
-                  if (!text) return;
-                  const newURL = new RedditURL(
-                    `https://www.reddit.com/r/${subreddit}/search/`,
-                  );
-                  newURL.changeQueryParam("q", text);
-                  newURL.changeQueryParam("restrict_sr", "true");
-                  navigation.pushURL(newURL.toString());
-                }}
-              />
-            ) : null
-          }
-          loadMore={loadMorePosts}
-          refresh={refreshPosts}
-          fullyLoaded={fullyLoaded}
-          hitFilterLimit={hitFilterLimit}
-          data={posts}
-          extraData={rerenderCount} // This triggers a rerender of the visible list items
-          renderItem={({ item }) => (
-            <PostComponent
-              post={item}
-              setPost={(newPost) => {
-                modifyPosts([newPost]);
-              }}
-              deletePost={() => {
-                deletePosts([item]);
-              }}
-              onPostOpen={
-                showSplitView
-                  ? (url) => {
-                      setPostDetailsURL(url);
-                    }
-                  : undefined
-              }
-            />
-          )}
-          onViewableItemsChanged={(data) => {
-            const maxVisibleItem =
-              data.viewableItems[data.viewableItems.length - 1]?.index ?? -1;
-            const changedItems = data.changed;
-            changedItems
-              .filter(
-                (item) =>
-                  !item.isViewable && (item?.index ?? 0) < maxVisibleItem,
-              )
-              .forEach((viewToken) => {
-                const post = viewToken.item as Post;
-                handleScrolledPastPost(post);
-              });
-          }}
-        />
+        {/* Positioned wrapper scopes the audio FAB to the feed column so it
+            doesn't float over the split-view PostDetails pane. */}
+        <View style={styles.feedColumn}>
+          <RedditDataScroller<Post>
+            ListHeaderComponent={
+              route.name === "PostsPage" ? (
+                <SearchBar
+                  clearOnSearch={true}
+                  searchOnBlur={false}
+                  onSearch={(text) => {
+                    if (!text) return;
+                    const newURL = new RedditURL(
+                      `https://www.reddit.com/r/${subreddit}/search/`,
+                    );
+                    newURL.changeQueryParam("q", text);
+                    newURL.changeQueryParam("restrict_sr", "true");
+                    navigation.pushURL(newURL.toString());
+                  }}
+                />
+              ) : null
+            }
+            loadMore={loadMorePosts}
+            refresh={refreshPosts}
+            fullyLoaded={fullyLoaded}
+            hitFilterLimit={hitFilterLimit}
+            data={posts}
+            renderItem={renderPost}
+            onViewableItemsChanged={(data) => {
+              const maxVisibleItem =
+                data.viewableItems[data.viewableItems.length - 1]?.index ?? -1;
+              const changedItems = data.changed;
+              changedItems
+                .filter(
+                  (item) =>
+                    !item.isViewable && (item?.index ?? 0) < maxVisibleItem,
+                )
+                .forEach((viewToken) => {
+                  const post = viewToken.item as Post;
+                  handleScrolledPastPost(post);
+                });
+            }}
+          />
+          <FeedAudioFAB />
+        </View>
         {postDetailsURL && showSplitView && (
           <>
             <View
@@ -245,6 +272,10 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: "center",
     flexDirection: "row",
+  },
+  feedColumn: {
+    flex: 1,
+    position: "relative",
   },
   accessFailureText: {
     fontSize: 16,
