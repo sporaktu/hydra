@@ -224,7 +224,10 @@ function PostDetails(props: PostDetailsProps) {
             (childId) => !commentIds.includes(childId),
           );
         }
-        return oldPostDetail;
+        // New top-level identity so the flattened row array recomputes and
+        // the loaded comments actually appear (returning the same object
+        // would make React bail out of the re-render).
+        return { ...oldPostDetail };
       }
     });
   };
@@ -270,7 +273,13 @@ function PostDetails(props: PostDetailsProps) {
       (row) => row.kind === "comment" && row.comment.id === topOfThread.id,
     );
     if (threadIndex !== -1) {
-      listRef.current?.scrollToIndex({ index: threadIndex, animated: true });
+      // The thread head's index is stable across the collapse (only rows
+      // after it are removed); pin it to the viewport top explicitly.
+      listRef.current?.scrollToIndex({
+        index: threadIndex,
+        animated: true,
+        viewPosition: 0,
+      });
     }
     changeComment({
       ...topOfThread,
