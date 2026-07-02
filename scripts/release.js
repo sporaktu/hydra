@@ -125,6 +125,15 @@ function pushBranchAndTag(branch, version) {
   run(`git push --atomic origin ${branch} v${version}`);
 }
 
+function getOriginRepoSlug() {
+  const url = run('git remote get-url origin');
+  const match = url.match(/github\.com[:/]([^/]+\/[^/]+?)(?:\.git)?$/);
+  if (!match) {
+    fail(`could not parse a GitHub "owner/repo" slug from origin remote URL: ${url}`);
+  }
+  return match[1];
+}
+
 function createPullRequest(branch, version) {
   const title = `Release v${version}`;
   const body =
@@ -132,15 +141,18 @@ function createPullRequest(branch, version) {
     `Tag v${version} has already been pushed and CircleCI's release workflow has started ` +
     `(EAS build + TestFlight submit). Merge this PR to bring the version bump back into master.`;
   const bodyFile = path.join(require('os').tmpdir(), `release-pr-body-${version}.md`);
+  // origin may be a fork whose upstream is `gh`'s repo-local default (e.g. `gh repo set-default`
+  // pointed at the parent repo) — pass --repo explicitly so the PR always targets origin, not that default.
+  const repo = getOriginRepoSlug();
   try {
     fs.writeFileSync(bodyFile, body, 'utf8');
     const output = run(
-      `gh pr create --base master --head ${branch} --title "${title}" --body-file "${bodyFile}"`
+      `gh pr create --repo ${repo} --base master --head ${branch} --title "${title}" --body-file "${bodyFile}"`
     );
     console.log(output);
   } catch (_err) {
     console.error('release.js: tag was pushed and CircleCI has started, but `gh pr create` failed.');
-    console.error(`Create the PR manually: gh pr create --base master --head ${branch} --title "${title}"`);
+    console.error(`Create the PR manually: gh pr create --repo ${repo} --base master --head ${branch} --title "${title}"`);
     process.exit(1);
   } finally {
     fs.rmSync(bodyFile, { force: true });
