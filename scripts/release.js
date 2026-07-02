@@ -95,7 +95,7 @@ function assertBranchDoesNotExist(branch) {
   if (local !== '') {
     fail(`branch ${branch} already exists locally (leftover from a previous run? clean it up with "git branch -D ${branch}")`);
   }
-  const remote = run(`git ls-remote --heads origin ${branch}`);
+  const remote = run(`git ls-remote --heads origin refs/heads/${branch}`);
   if (remote !== '') {
     fail(`branch ${branch} already exists on origin`);
   }
@@ -153,6 +153,7 @@ function createPullRequest(branch, version) {
   } catch (_err) {
     console.error('release.js: tag was pushed and CircleCI has started, but `gh pr create` failed.');
     console.error(`Create the PR manually: gh pr create --repo ${repo} --base master --head ${branch} --title "${title}"`);
+    fs.rmSync(bodyFile, { force: true });
     process.exit(1);
   } finally {
     fs.rmSync(bodyFile, { force: true });
