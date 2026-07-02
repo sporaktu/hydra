@@ -10,6 +10,7 @@ import { getPosts, Post } from "../api/Posts";
 
 import { StackPageProps } from "../app/stack";
 import PostComponent from "../components/RedditDataRepresentations/Post/PostComponent";
+import FeedAudioFAB from "../components/UI/FeedAudioFAB";
 import RedditDataScroller from "../components/UI/RedditDataScroller";
 import SearchBar from "../components/UI/SearchBar";
 import { FiltersContext } from "../contexts/SettingsContexts/FiltersContext";
@@ -230,6 +231,7 @@ export default function PostsPage({
               });
           }}
         />
+        <FeedAudioFAB />
         {postDetailsURL && showSplitView && (
           <>
             <View

@@ -15,6 +15,7 @@ const initialValues = {
   blurNSFW: true,
   showPostSummary: true,
   autoPlayVideos: true,
+  feedVideoAudio: false,
   liveTextInteraction: false,
   tapToCollapsePost: true,
 };
@@ -33,6 +34,7 @@ const initialPostSettingsContext = {
   toggleBlurNSFW: (_newValue?: boolean) => {},
   toggleShowPostSummary: (_newValue?: boolean) => {},
   toggleAutoPlayVideos: (_newValue?: boolean) => {},
+  toggleFeedVideoAudio: (_newValue?: boolean) => {},
   toggleLiveTextInteraction: (_newValue?: boolean) => {},
   toggleTapToCollapsePost: (_newValue?: boolean) => {},
 };
@@ -92,6 +94,10 @@ export function PostSettingsProvider({ children }: React.PropsWithChildren) {
   const [storedAutoPlayVideos, setAutoPlayVideos] =
     useMMKVBoolean("autoPlayVideos");
   const autoPlayVideos = storedAutoPlayVideos ?? initialValues.autoPlayVideos;
+
+  const [storedFeedVideoAudio, setFeedVideoAudio] =
+    useMMKVBoolean("feedVideoAudio");
+  const feedVideoAudio = storedFeedVideoAudio ?? initialValues.feedVideoAudio;
 
   const [storedliveTextInteraction, setliveTextInteraction] = useMMKVBoolean(
     "liveTextInteraction",
@@ -165,6 +171,11 @@ export function PostSettingsProvider({ children }: React.PropsWithChildren) {
     [autoPlayVideos, setAutoPlayVideos],
   );
 
+  const toggleFeedVideoAudio = useCallback(
+    (newValue = !feedVideoAudio) => setFeedVideoAudio(newValue),
+    [feedVideoAudio, setFeedVideoAudio],
+  );
+
   const toggleLiveTextInteraction = useCallback(
     (newValue = !liveTextInteraction) => setliveTextInteraction(newValue),
     [liveTextInteraction, setliveTextInteraction],
@@ -215,6 +226,9 @@ export function PostSettingsProvider({ children }: React.PropsWithChildren) {
       autoPlayVideos: autoPlayVideos ?? initialValues.autoPlayVideos,
       toggleAutoPlayVideos,
 
+      feedVideoAudio: feedVideoAudio ?? initialValues.feedVideoAudio,
+      toggleFeedVideoAudio,
+
       liveTextInteraction:
         liveTextInteraction ?? initialValues.liveTextInteraction,
       toggleLiveTextInteraction,
@@ -247,6 +261,8 @@ export function PostSettingsProvider({ children }: React.PropsWithChildren) {
       toggleShowPostSummary,
       autoPlayVideos,
       toggleAutoPlayVideos,
+      feedVideoAudio,
+      toggleFeedVideoAudio,
       liveTextInteraction,
       toggleLiveTextInteraction,
       tapToCollapsePost,
