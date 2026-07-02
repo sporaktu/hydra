@@ -19,9 +19,11 @@ export default function ThemedRefreshControl(
 
   const [tintColor, setTintColor] = useState<ColorValue>();
   useEffect(() => {
-    setTimeout(() => {
+    const timer = setTimeout(() => {
       setTintColor(theme.text);
     }, 500);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return <RefreshControl tintColor={tintColor} {...props} />;
