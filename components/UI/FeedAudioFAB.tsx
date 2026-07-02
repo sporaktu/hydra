@@ -1,8 +1,10 @@
 import { Feather } from "@expo/vector-icons";
+import { useBottomTabBarHeight } from "@react-navigation/bottom-tabs";
 import * as Haptics from "expo-haptics";
 import { useContext } from "react";
 import { StyleSheet, TouchableOpacity } from "react-native";
 
+import { TAB_BAR_REMOVED_PADDING_BOTTOM } from "../../constants/TabBarPadding";
 import { PostSettingsContext } from "../../contexts/SettingsContexts/PostSettingsContext";
 import { ThemeContext } from "../../contexts/SettingsContexts/ThemeContext";
 
@@ -16,6 +18,7 @@ export default function FeedAudioFAB() {
   const { theme } = useContext(ThemeContext);
   const { feedVideoAudio, toggleFeedVideoAudio, autoPlayVideos } =
     useContext(PostSettingsContext);
+  const tabBarHeight = useBottomTabBarHeight();
 
   // Without autoplay there is never a playing feed video to hear.
   if (!autoPlayVideos) return null;
@@ -27,6 +30,7 @@ export default function FeedAudioFAB() {
         {
           backgroundColor: theme.background,
           borderColor: theme.divider,
+          bottom: tabBarHeight - TAB_BAR_REMOVED_PADDING_BOTTOM + 20,
         },
       ]}
       activeOpacity={0.8}
@@ -51,7 +55,6 @@ const styles = StyleSheet.create({
   fab: {
     position: "absolute",
     right: 16,
-    bottom: 24,
     width: 44,
     height: 44,
     borderRadius: 22,

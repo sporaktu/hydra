@@ -192,46 +192,50 @@ export default function PostsPage({
         accessFailure={accessFailure}
         contentName={subreddit}
       >
-        <RedditDataScroller<Post>
-          ListHeaderComponent={
-            route.name === "PostsPage" ? (
-              <SearchBar
-                clearOnSearch={true}
-                searchOnBlur={false}
-                onSearch={(text) => {
-                  if (!text) return;
-                  const newURL = new RedditURL(
-                    `https://www.reddit.com/r/${subreddit}/search/`,
-                  );
-                  newURL.changeQueryParam("q", text);
-                  newURL.changeQueryParam("restrict_sr", "true");
-                  navigation.pushURL(newURL.toString());
-                }}
-              />
-            ) : null
-          }
-          loadMore={loadMorePosts}
-          refresh={refreshPosts}
-          fullyLoaded={fullyLoaded}
-          hitFilterLimit={hitFilterLimit}
-          data={posts}
-          renderItem={renderPost}
-          onViewableItemsChanged={(data) => {
-            const maxVisibleItem =
-              data.viewableItems[data.viewableItems.length - 1]?.index ?? -1;
-            const changedItems = data.changed;
-            changedItems
-              .filter(
-                (item) =>
-                  !item.isViewable && (item?.index ?? 0) < maxVisibleItem,
-              )
-              .forEach((viewToken) => {
-                const post = viewToken.item as Post;
-                handleScrolledPastPost(post);
-              });
-          }}
-        />
-        <FeedAudioFAB />
+        {/* Positioned wrapper scopes the audio FAB to the feed column so it
+            doesn't float over the split-view PostDetails pane. */}
+        <View style={styles.feedColumn}>
+          <RedditDataScroller<Post>
+            ListHeaderComponent={
+              route.name === "PostsPage" ? (
+                <SearchBar
+                  clearOnSearch={true}
+                  searchOnBlur={false}
+                  onSearch={(text) => {
+                    if (!text) return;
+                    const newURL = new RedditURL(
+                      `https://www.reddit.com/r/${subreddit}/search/`,
+                    );
+                    newURL.changeQueryParam("q", text);
+                    newURL.changeQueryParam("restrict_sr", "true");
+                    navigation.pushURL(newURL.toString());
+                  }}
+                />
+              ) : null
+            }
+            loadMore={loadMorePosts}
+            refresh={refreshPosts}
+            fullyLoaded={fullyLoaded}
+            hitFilterLimit={hitFilterLimit}
+            data={posts}
+            renderItem={renderPost}
+            onViewableItemsChanged={(data) => {
+              const maxVisibleItem =
+                data.viewableItems[data.viewableItems.length - 1]?.index ?? -1;
+              const changedItems = data.changed;
+              changedItems
+                .filter(
+                  (item) =>
+                    !item.isViewable && (item?.index ?? 0) < maxVisibleItem,
+                )
+                .forEach((viewToken) => {
+                  const post = viewToken.item as Post;
+                  handleScrolledPastPost(post);
+                });
+            }}
+          />
+          <FeedAudioFAB />
+        </View>
         {postDetailsURL && showSplitView && (
           <>
             <View
@@ -268,6 +272,10 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: "center",
     flexDirection: "row",
+  },
+  feedColumn: {
+    flex: 1,
+    position: "relative",
   },
   accessFailureText: {
     fontSize: 16,

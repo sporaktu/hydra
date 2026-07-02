@@ -93,7 +93,12 @@ function RedditDataScroller<T extends RedditDataObject>(
     setFocusedVideo(key);
   };
 
+  // Snapshot of the latest viewable items so focus can be re-evaluated
+  // without a scroll event (e.g. returning to this screen after a blur).
+  const lastViewableItems = useRef<ViewToken<T>[]>([]);
+
   const handleViewableVideosChanged = (viewableItems: ViewToken<T>[]) => {
+    lastViewableItems.current = viewableItems;
     const viewableIndices: number[] = [];
     const videoIndices: { index: number; key: string }[] = [];
     viewableItems.forEach((token) => {
@@ -135,7 +140,12 @@ function RedditDataScroller<T extends RedditDataObject>(
   // next screen.
   const isScreenFocused = useIsFocused();
   useEffect(() => {
-    if (isScreenFocused) return;
+    if (isScreenFocused) {
+      // Returning to this screen: no scroll event will fire, so replay the
+      // last viewability snapshot to restore the Focused Post.
+      handleViewableVideosChanged(lastViewableItems.current);
+      return;
+    }
     if (ownsFocus()) {
       commitFocus(null);
     }

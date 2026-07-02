@@ -17,6 +17,11 @@
 
 type FocusListener = (isFocused: boolean) => void;
 
+// A single global focus key is sufficient because at most one focus-managed
+// feed list is on a screen-focused screen at a time (split view pairs a feed
+// with an unmanaged PostDetails; blurred screens release their focus). If a
+// future layout mounts two focus-managed feeds simultaneously, this needs to
+// become per-scroller scoped.
 let focusedVideoKey: string | null = null;
 const focusListeners = new Map<string, Set<FocusListener>>();
 
@@ -94,8 +99,9 @@ export function pickCenterMostVideo(
   videoIndices: { index: number; key: string }[],
 ): string | null {
   if (viewableIndices.length === 0 || videoIndices.length === 0) return null;
+  // Don't rely on FlashList delivering view tokens in index order.
   const center =
-    (viewableIndices[0] + viewableIndices[viewableIndices.length - 1]) / 2;
+    (Math.min(...viewableIndices) + Math.max(...viewableIndices)) / 2;
   let best = videoIndices[0];
   let bestDistance = Math.abs(best.index - center);
   for (const candidate of videoIndices) {
