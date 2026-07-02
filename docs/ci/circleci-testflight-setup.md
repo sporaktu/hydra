@@ -116,20 +116,39 @@ This creates the EAS project under your account without any local tooling.
 
 ## 5. Cut a release
 
-1. Bump the app version in `package.json` (`version` drives the iOS marketing
-   version; EAS auto-increments the build number — `eas.json` sets
-   `appVersionSource: remote` + `production.autoIncrement`).
-2. Tag and push:
+Requires the [`gh` CLI](https://cli.github.com/) installed and authenticated
+(`gh auth status`) — the script's last step shells out to `gh pr create`.
+
+1. From a clean, up-to-date `master`, run:
 
    ```bash
-   git tag v4.0.2
-   git push origin v4.0.2
+   npm run release -- --patch   # or --minor / --major
    ```
 
-3. CircleCI runs the `release` workflow → EAS builds iOS, generates signing
-   credentials from your ASC API key, and `--auto-submit` uploads to App Store
-   Connect. After Apple finishes processing it appears in **TestFlight**; add it
-   to a TestFlight group to reach testers.
+   This computes the next version, creates a `release/vX.Y.Z` branch, commits
+   the version bump, tags it, and pushes both the branch and the tag. The tag
+   push alone triggers CircleCI's `release` workflow — EAS builds iOS,
+   generates signing credentials from your ASC API key, and `--auto-submit`
+   uploads to App Store Connect. It then opens a PR from `release/vX.Y.Z`
+   into `master` via `gh pr create` and prints the PR URL.
+
+   `package.json`'s `version` drives the iOS marketing version; EAS
+   auto-increments the build number itself (`eas.json` sets
+   `appVersionSource: "remote"` and `production.autoIncrement`), so bumping
+   `--patch`/`--minor`/`--major` never requires touching a build number by
+   hand.
+
+   To rehearse the branch/commit/tag sequence without pushing anything or
+   touching CircleCI, add `--dry-run` first: `npm run release -- --patch
+   --dry-run`. It prints what would be pushed and how to clean up the local
+   branch/tag it created.
+
+2. After Apple finishes processing the CircleCI-triggered build, it appears
+   in **TestFlight**; add it to a TestFlight group to reach testers.
+
+3. Review and merge the PR the script opened, on your own time — this brings
+   the version bump commit back into `master`. Merging is manual; the script
+   never auto-merges.
 
 ---
 
