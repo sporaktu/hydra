@@ -1,12 +1,12 @@
 import { Feather } from "@expo/vector-icons";
 import { useBottomTabBarHeight } from "@react-navigation/bottom-tabs";
-import * as Haptics from "expo-haptics";
 import { useContext } from "react";
 import { StyleSheet, TouchableOpacity } from "react-native";
 
 import { TAB_BAR_REMOVED_PADDING_BOTTOM } from "../../constants/TabBarPadding";
 import { PostSettingsContext } from "../../contexts/SettingsContexts/PostSettingsContext";
 import { ThemeContext } from "../../contexts/SettingsContexts/ThemeContext";
+import { hapticSelection } from "../../utils/haptics";
 
 /**
  * Floating toggle for feed video audio: when on, the Focused Post's video
@@ -38,7 +38,7 @@ export default function FeedAudioFAB() {
       accessibilityState={{ checked: feedVideoAudio }}
       accessibilityLabel="Play sound for the centered video"
       onPress={() => {
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+        hapticSelection();
         toggleFeedVideoAudio();
       }}
     >

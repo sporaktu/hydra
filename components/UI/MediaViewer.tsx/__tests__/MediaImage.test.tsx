@@ -45,6 +45,37 @@ jest.mock("react-native-safe-area-context", () => ({
   useSafeAreaFrame: () => ({ width: 400, height: 800 }),
 }));
 
+// The viewer's pinch/pan/double-tap stack is exercised on-device, not here;
+// these tests only assert the expo-image props. Stub the gesture + worklet layer
+// so the component renders under jest.
+jest.mock("react-native-gesture-handler", () => ({
+  __esModule: true,
+  GestureDetector: ({ children }: { children: React.ReactNode }) => children,
+  usePanGesture: () => ({}),
+  usePinchGesture: () => ({}),
+  useTapGesture: () => ({}),
+  useSimultaneousGestures: () => ({}),
+}));
+
+jest.mock("react-native-worklets", () => ({
+  __esModule: true,
+  runOnJS: (fn: unknown) => fn,
+}));
+
+jest.mock("react-native-reanimated", () => {
+  const { View } = require("react-native");
+  return {
+    __esModule: true,
+    default: { View },
+    Easing: { out: () => (t: number) => t, ease: (t: number) => t },
+    useSharedValue: (initial: unknown) => ({ value: initial }),
+    useAnimatedStyle: (fn: () => unknown) => fn(),
+    useAnimatedReaction: () => {},
+    withTiming: (value: unknown) => value,
+    withDecay: () => 0,
+  };
+});
+
 import { MediaImage } from "../MediaImage.ios";
 
 beforeEach(() => {

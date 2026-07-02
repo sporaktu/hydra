@@ -8,6 +8,7 @@ import {
   TouchableOpacity,
   Share,
   AccessibilityInfo,
+  Platform,
 } from "react-native";
 import { openExternalLink } from "../../../utils/openExternalLink";
 
@@ -31,6 +32,7 @@ import URL from "../../../utils/URL";
 import RedditURL from "../../../utils/RedditURL";
 import { useRoute, useURLNavigation } from "../../../utils/navigation";
 import Slideable from "../../UI/Slideable";
+import NativeContextMenu from "../../UI/NativeContextMenu";
 import { FiltersContext } from "../../../contexts/SettingsContexts/FiltersContext";
 import { GesturesContext } from "../../../contexts/SettingsContexts/GesturesContext";
 import useComponentActions from "../../../utils/useComponentActions";
@@ -89,6 +91,7 @@ function PostComponent({
     handleAction,
     handleAccessibilityAction,
     handleLongPress,
+    longPressOptions,
   } = useComponentActions([
     {
       label: "Read post contents",
@@ -278,248 +281,256 @@ function PostComponent({
         shortRightName={postSwipeOptions.left}
         longRightName={postSwipeOptions.farLeft}
       >
-        <TouchableOpacity
-          accessible={true}
-          accessibilityLabel={accessibilityLabel}
-          accessibilityRole="button"
-          accessibilityHint="Open the post"
-          accessibilityActions={accessibilityActions}
-          onAccessibilityAction={handleAccessibilityAction}
-          activeOpacity={0.8}
-          style={[
-            styles.postContainer,
-            {
-              backgroundColor: theme.background,
-              flexDirection: postCompactMode
-                ? showThumbnailsOnRightSide
-                  ? "row-reverse"
-                  : "row"
-                : "column",
-              justifyContent: showThumbnailsOnRightSide
-                ? "space-between"
-                : "flex-start",
-              opacity: seen ? 0.75 : 1,
-            },
-          ]}
-          onPress={() => {
-            setSeenValue(true);
-            if (onPostOpen) {
-              onPostOpen(post.link);
-            } else {
-              pushURL(post.link);
+        <NativeContextMenu actions={longPressOptions}>
+          <TouchableOpacity
+            accessible={true}
+            accessibilityLabel={accessibilityLabel}
+            accessibilityRole="button"
+            accessibilityHint="Open the post"
+            accessibilityActions={accessibilityActions}
+            onAccessibilityAction={handleAccessibilityAction}
+            activeOpacity={0.8}
+            style={[
+              styles.postContainer,
+              {
+                backgroundColor: theme.background,
+                flexDirection: postCompactMode
+                  ? showThumbnailsOnRightSide
+                    ? "row-reverse"
+                    : "row"
+                  : "column",
+                justifyContent: showThumbnailsOnRightSide
+                  ? "space-between"
+                  : "flex-start",
+                opacity: seen ? 0.75 : 1,
+              },
+            ]}
+            onPress={() => {
+              setSeenValue(true);
+              if (onPostOpen) {
+                onPostOpen(post.link);
+              } else {
+                pushURL(post.link);
+              }
+            }}
+            onLongPress={
+              // iOS uses the native context menu (NativeContextMenu) instead of
+              // the action sheet, so the touchable's long press must not fire.
+              Platform.OS === "ios"
+                ? undefined
+                : async (e) => {
+                    if (e.nativeEvent.touches.length > 1) return;
+                    handleLongPress();
+                  }
             }
-          }}
-          onLongPress={async (e) => {
-            if (e.nativeEvent.touches.length > 1) return;
-            handleLongPress();
-          }}
-        >
-          {postCompactMode && (
-            <View>
-              <CompactPostMedia post={post} />
-            </View>
-          )}
-          <View style={styles.bodyContainer}>
-            {subredditAtTop && isOnMultiSubredditPage && (
-              <TouchableOpacity
-                style={[
-                  styles.subredditAtTopContainer,
-                  styles.subredditContainer,
-                ]}
-                activeOpacity={0.5}
-                onPress={() =>
-                  pushURL(`https://www.reddit.com/r/${post.subreddit}`)
-                }
-              >
-                <SubredditIcon subredditIcon={post.subredditIcon} />
-                <Text
+          >
+            {postCompactMode && (
+              <View>
+                <CompactPostMedia post={post} />
+              </View>
+            )}
+            <View style={styles.bodyContainer}>
+              {subredditAtTop && isOnMultiSubredditPage && (
+                <TouchableOpacity
                   style={[
-                    styles.subredditAtTopText,
+                    styles.subredditAtTopContainer,
+                    styles.subredditContainer,
+                  ]}
+                  activeOpacity={0.5}
+                  onPress={() =>
+                    pushURL(`https://www.reddit.com/r/${post.subreddit}`)
+                  }
+                >
+                  <SubredditIcon subredditIcon={post.subredditIcon} />
+                  <Text
+                    style={[
+                      styles.subredditAtTopText,
+                      {
+                        color: theme.subtleText,
+                      },
+                    ]}
+                  >
+                    {post.subreddit}
+                  </Text>
+                </TouchableOpacity>
+              )}
+              <Text
+                numberOfLines={postTitleLength}
+                style={{
+                  fontSize: postCompactMode ? 16 : 17,
+                  color: theme.text,
+                }}
+              >
+                {post.title.trim()}
+              </Text>
+              {showPostFlair && post.postFlair && (
+                <View
+                  style={[
+                    styles.postFlairContainer,
                     {
-                      color: theme.subtleText,
+                      marginTop: postCompactMode ? 2 : 5,
+                      marginBottom: postCompactMode ? -3 : -5,
+                      backgroundColor: theme.divider,
                     },
                   ]}
                 >
-                  {post.subreddit}
-                </Text>
-              </TouchableOpacity>
-            )}
-            <Text
-              numberOfLines={postTitleLength}
-              style={{
-                fontSize: postCompactMode ? 16 : 17,
-                color: theme.text,
-              }}
-            >
-              {post.title.trim()}
-            </Text>
-            {showPostFlair && post.postFlair && (
+                  <Text
+                    style={[
+                      styles.postFlair,
+                      {
+                        color: theme.text,
+                      },
+                    ]}
+                  >
+                    {post.postFlair.text}
+                  </Text>
+                </View>
+              )}
               <View
                 style={[
-                  styles.postFlairContainer,
+                  styles.postBody,
                   {
-                    marginTop: postCompactMode ? 2 : 5,
-                    marginBottom: postCompactMode ? -3 : -5,
-                    backgroundColor: theme.divider,
+                    marginVertical: postCompactMode ? 3 : 5,
+                    marginHorizontal: -10,
                   },
                 ]}
               >
-                <Text
-                  style={[
-                    styles.postFlair,
-                    {
-                      color: theme.text,
-                    },
-                  ]}
-                >
-                  {post.postFlair.text}
-                </Text>
+                {!postCompactMode && (
+                  <PostMedia
+                    post={post}
+                    maxLines={postTextLength}
+                    renderHTML={false}
+                  />
+                )}
               </View>
-            )}
-            <View
-              style={[
-                styles.postBody,
-                {
-                  marginVertical: postCompactMode ? 3 : 5,
-                  marginHorizontal: -10,
-                },
-              ]}
-            >
-              {!postCompactMode && (
-                <PostMedia
-                  post={post}
-                  maxLines={postTextLength}
-                  renderHTML={false}
-                />
-              )}
-            </View>
-            <View>
-              <View style={styles.footerLeft}>
-                <View style={styles.subAndAuthorContainer}>
-                  {post.isStickied && (
-                    <AntDesign
-                      name="pushpin"
+              <View>
+                <View style={styles.footerLeft}>
+                  <View style={styles.subAndAuthorContainer}>
+                    {post.isStickied && (
+                      <AntDesign
+                        name="pushpin"
+                        style={[
+                          styles.stickiedIcon,
+                          {
+                            color: theme.moderator,
+                          },
+                        ]}
+                      />
+                    )}
+                    {!subredditAtTop && isOnMultiSubredditPage && (
+                      <TouchableOpacity
+                        style={styles.subredditContainer}
+                        activeOpacity={0.5}
+                        onPress={() =>
+                          pushURL(`https://www.reddit.com/r/${post.subreddit}`)
+                        }
+                      >
+                        <SubredditIcon subredditIcon={post.subredditIcon} />
+                        <Text
+                          style={[
+                            styles.boldedSmallText,
+                            {
+                              color: theme.subtleText,
+                            },
+                          ]}
+                        >
+                          {post.subreddit}{" "}
+                        </Text>
+                      </TouchableOpacity>
+                    )}
+                    <Text
                       style={[
-                        styles.stickiedIcon,
+                        styles.smallText,
                         {
-                          color: theme.moderator,
+                          color: theme.subtleText,
                         },
                       ]}
-                    />
-                  )}
-                  {!subredditAtTop && isOnMultiSubredditPage && (
+                    >
+                      by{" "}
+                    </Text>
                     <TouchableOpacity
-                      style={styles.subredditContainer}
-                      activeOpacity={0.5}
+                      activeOpacity={0.8}
                       onPress={() =>
-                        pushURL(`https://www.reddit.com/r/${post.subreddit}`)
+                        pushURL(`https://www.reddit.com/user/${post.author}`)
                       }
                     >
-                      <SubredditIcon subredditIcon={post.subredditIcon} />
                       <Text
                         style={[
                           styles.boldedSmallText,
                           {
-                            color: theme.subtleText,
+                            color: post.isModerator
+                              ? theme.moderator
+                              : theme.subtleText,
                           },
                         ]}
                       >
-                        {post.subreddit}{" "}
+                        {post.author}
                       </Text>
                     </TouchableOpacity>
-                  )}
-                  <Text
-                    style={[
-                      styles.smallText,
-                      {
-                        color: theme.subtleText,
-                      },
-                    ]}
-                  >
-                    by{" "}
-                  </Text>
-                  <TouchableOpacity
-                    activeOpacity={0.8}
-                    onPress={() =>
-                      pushURL(`https://www.reddit.com/user/${post.author}`)
-                    }
-                  >
+                  </View>
+                  <View style={styles.metadataContainer}>
+                    <Feather
+                      name={
+                        post.userVote === VoteOption.DownVote
+                          ? "arrow-down"
+                          : "arrow-up"
+                      }
+                      size={18}
+                      color={currentVoteColor}
+                    />
                     <Text
                       style={[
-                        styles.boldedSmallText,
+                        styles.metadataText,
                         {
-                          color: post.isModerator
-                            ? theme.moderator
-                            : theme.subtleText,
+                          color: currentVoteColor,
                         },
                       ]}
                     >
-                      {post.author}
+                      {post.upvotes}
                     </Text>
-                  </TouchableOpacity>
+                    <Feather
+                      name="message-square"
+                      size={18}
+                      color={theme.subtleText}
+                    />
+                    <Text
+                      style={[
+                        styles.metadataText,
+                        {
+                          color: theme.subtleText,
+                        },
+                      ]}
+                    >
+                      {post.commentCount}
+                    </Text>
+                    <Feather name="clock" size={18} color={theme.subtleText} />
+                    <Text
+                      style={[
+                        styles.metadataText,
+                        {
+                          color: theme.subtleText,
+                        },
+                      ]}
+                    >
+                      {post.timeSince}
+                    </Text>
+                  </View>
                 </View>
-                <View style={styles.metadataContainer}>
-                  <Feather
-                    name={
-                      post.userVote === VoteOption.DownVote
-                        ? "arrow-down"
-                        : "arrow-up"
-                    }
-                    size={18}
-                    color={currentVoteColor}
-                  />
-                  <Text
-                    style={[
-                      styles.metadataText,
-                      {
-                        color: currentVoteColor,
-                      },
-                    ]}
-                  >
-                    {post.upvotes}
-                  </Text>
-                  <Feather
-                    name="message-square"
-                    size={18}
-                    color={theme.subtleText}
-                  />
-                  <Text
-                    style={[
-                      styles.metadataText,
-                      {
-                        color: theme.subtleText,
-                      },
-                    ]}
-                  >
-                    {post.commentCount}
-                  </Text>
-                  <Feather name="clock" size={18} color={theme.subtleText} />
-                  <Text
-                    style={[
-                      styles.metadataText,
-                      {
-                        color: theme.subtleText,
-                      },
-                    ]}
-                  >
-                    {post.timeSince}
-                  </Text>
-                </View>
+                <View style={styles.footerRight} />
               </View>
-              <View style={styles.footerRight} />
             </View>
-          </View>
-          {post.saved && (
-            <View
-              style={[
-                styles.bookmarkNotch,
-                {
-                  borderColor: theme.bookmark,
-                },
-              ]}
-            />
-          )}
-        </TouchableOpacity>
+            {post.saved && (
+              <View
+                style={[
+                  styles.bookmarkNotch,
+                  {
+                    borderColor: theme.bookmark,
+                  },
+                ]}
+              />
+            )}
+          </TouchableOpacity>
+        </NativeContextMenu>
         <View
           style={{
             backgroundColor: theme.divider,

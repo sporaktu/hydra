@@ -12,6 +12,7 @@ import { useFonts } from "expo-font";
 import { SplashScreen } from "expo-router";
 import React, { useEffect, useState } from "react";
 import { AppState, InteractionManager, LogBox } from "react-native";
+import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { enableFreeze } from "react-native-screens";
 import * as ExpoOrientation from "expo-screen-orientation";
@@ -115,36 +116,38 @@ function RootLayout() {
     migrationsComplete &&
     fontsLoaded &&
     videoCacheReady && (
-      <SafeAreaProvider>
-        <AccountProvider>
-          <SubscriptionsProvider>
-            <SettingsProvider>
-              <TabScrollProvider>
-                <NavigationProvider>
-                  <ActionSheetProvider>
-                    <ActionSheetBgProvider>
-                      <InboxProvider>
-                        <ModalProvider>
-                          <VideoPlayerRegistryProvider>
-                            <MediaViewerProvider>
-                              <SubredditProvider>
-                                <StartupModalProvider>
-                                  <SubscribeToHydra />
-                                  <Tabs />
-                                </StartupModalProvider>
-                              </SubredditProvider>
-                            </MediaViewerProvider>
-                          </VideoPlayerRegistryProvider>
-                        </ModalProvider>
-                      </InboxProvider>
-                    </ActionSheetBgProvider>
-                  </ActionSheetProvider>
-                </NavigationProvider>
-              </TabScrollProvider>
-            </SettingsProvider>
-          </SubscriptionsProvider>
-        </AccountProvider>
-      </SafeAreaProvider>
+      <GestureHandlerRootView style={{ flex: 1 }}>
+        <SafeAreaProvider>
+          <AccountProvider>
+            <SubscriptionsProvider>
+              <SettingsProvider>
+                <TabScrollProvider>
+                  <NavigationProvider>
+                    <ActionSheetProvider>
+                      <ActionSheetBgProvider>
+                        <InboxProvider>
+                          <ModalProvider>
+                            <VideoPlayerRegistryProvider>
+                              <MediaViewerProvider>
+                                <SubredditProvider>
+                                  <StartupModalProvider>
+                                    <SubscribeToHydra />
+                                    <Tabs />
+                                  </StartupModalProvider>
+                                </SubredditProvider>
+                              </MediaViewerProvider>
+                            </VideoPlayerRegistryProvider>
+                          </ModalProvider>
+                        </InboxProvider>
+                      </ActionSheetBgProvider>
+                    </ActionSheetProvider>
+                  </NavigationProvider>
+                </TabScrollProvider>
+              </SettingsProvider>
+            </SubscriptionsProvider>
+          </AccountProvider>
+        </SafeAreaProvider>
+      </GestureHandlerRootView>
     )
   );
 }

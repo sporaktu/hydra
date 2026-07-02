@@ -24,6 +24,7 @@ import {
   TouchableHighlight,
   Alert,
   Share,
+  Platform,
 } from "react-native";
 
 import {
@@ -49,6 +50,9 @@ import EditComment from "../../../Modals/EditComment";
 import NewComment from "../../../Modals/NewComment";
 import SelectText from "../../../Modals/SelectText";
 import Slideable from "../../../UI/Slideable";
+import NativeContextMenu, {
+  NativeContextMenuAction,
+} from "../../../UI/NativeContextMenu";
 import { GesturesContext } from "../../../../contexts/SettingsContexts/GesturesContext";
 import Time from "../../../../utils/Time";
 
@@ -200,41 +204,67 @@ export function CommentComponent({
     );
   };
 
-  const showCommentOptions = async () => {
-    const options = [
-      "Upvote",
-      "Downvote",
-      ...(displayInList ? [] : comment.collapsed ? ["Expand"] : ["Collapse"]),
-      ...(displayInList ? [] : ["Collapse Thread"]),
-      "Select Text",
-      "Reply",
-      ...(comment.saved ? ["Unsave"] : ["Save"]),
-      ...(currentUser?.userName === comment.author ? ["Edit", "Delete"] : []),
-      "Share",
-    ];
-    const result = await showContextMenu({ options });
+  const commentMenuOptions: NativeContextMenuAction[] = [
+    {
+      label: "Upvote",
+      handle: () => voteOnComment(VoteOption.UpVote),
+    },
+    {
+      label: "Downvote",
+      handle: () => voteOnComment(VoteOption.DownVote),
+    },
+    ...(displayInList
+      ? []
+      : [
+          {
+            label: comment.collapsed ? "Expand" : "Collapse",
+            handle: () => toggleCollapse(),
+          },
+          {
+            label: "Collapse Thread",
+            handle: () => {
+              if (comment.type === "comment") collapseThread?.(comment);
+            },
+          },
+        ]),
+    {
+      label: "Select Text",
+      handle: () => setModal(<SelectText text={comment.text} />),
+    },
+    {
+      label: "Reply",
+      handle: () => replyToComment(),
+    },
+    {
+      label: comment.saved ? "Unsave" : "Save",
+      handle: () => saveComment(),
+    },
+    ...(currentUser?.userName === comment.author
+      ? [
+          {
+            label: "Edit",
+            handle: () => editComment(),
+          },
+          {
+            label: "Delete",
+            destructive: true,
+            handle: () => confirmDeleteComment(),
+          },
+        ]
+      : []),
+    {
+      label: "Share",
+      handle: () => {
+        Share.share({ url: new RedditURL(comment.link).toString() });
+      },
+    },
+  ];
 
-    if (result === "Upvote") {
-      await voteOnComment(VoteOption.UpVote);
-    } else if (result === "Downvote") {
-      await voteOnComment(VoteOption.DownVote);
-    } else if (result === "Collapse" || result === "Expand") {
-      toggleCollapse();
-    } else if (result === "Collapse Thread" && comment.type === "comment") {
-      collapseThread?.(comment);
-    } else if (result === "Reply") {
-      replyToComment();
-    } else if (result === "Save" || result === "Unsave") {
-      saveComment();
-    } else if (result === "Edit") {
-      editComment();
-    } else if (result === "Delete") {
-      confirmDeleteComment();
-    } else if (result === "Select Text") {
-      setModal(<SelectText text={comment.text} />);
-    } else if (result === "Share") {
-      Share.share({ url: new RedditURL(comment.link).toString() });
-    }
+  const showCommentOptions = async () => {
+    const result = await showContextMenu({
+      options: commentMenuOptions.map((option) => option.label),
+    });
+    commentMenuOptions.find((option) => option.label === result)?.handle();
   };
 
   return useMemo(
@@ -314,266 +344,278 @@ export function CommentComponent({
               shortRightName={commentSwipeOptions.left}
               longRightName={commentSwipeOptions.farLeft}
             >
-              <TouchableHighlight
-                ref={(ref) => {
-                  commentRef.current = ref;
-                  if (commentPropRef) {
-                    commentPropRef.current = ref;
-                  }
-                }}
-                activeOpacity={1}
-                underlayColor={
-                  tapToCollapseComment || displayInList ? theme.tint : undefined
-                }
-                onPress={() => {
-                  if (displayInList) {
-                    if (comment.type === "comment") {
-                      pushURL(
-                        new RedditURL(comment.link)
-                          .setQueryParams({ context: "10" })
-                          .toString(),
-                      );
+              <NativeContextMenu actions={commentMenuOptions}>
+                <TouchableHighlight
+                  ref={(ref) => {
+                    commentRef.current = ref;
+                    if (commentPropRef) {
+                      commentPropRef.current = ref;
                     }
-                  } else if (tapToCollapseComment) {
-                    commentRef.current?.measureInWindow(
-                      (_x, y, _width_, _height) => {
-                        if (!comment.collapsed && scrollChange) {
-                          scrollChange(y);
-                        }
-                      },
-                    );
-                    toggleCollapse();
+                  }}
+                  activeOpacity={1}
+                  underlayColor={
+                    tapToCollapseComment || displayInList
+                      ? theme.tint
+                      : undefined
                   }
-                }}
-                onLongPress={() => showCommentOptions()}
-                style={[
-                  styles.outerCommentContainer,
-                  displayInList
-                    ? styles.outerCommentContainerDisplayInList
-                    : {},
-                  {
-                    marginLeft: 10 * comment.depth,
-                    borderTopColor: theme.divider,
-                  },
-                ]}
-              >
-                <View
-                  key={index}
+                  onPress={() => {
+                    if (displayInList) {
+                      if (comment.type === "comment") {
+                        pushURL(
+                          new RedditURL(comment.link)
+                            .setQueryParams({ context: "10" })
+                            .toString(),
+                        );
+                      }
+                    } else if (tapToCollapseComment) {
+                      commentRef.current?.measureInWindow(
+                        (_x, y, _width_, _height) => {
+                          if (!comment.collapsed && scrollChange) {
+                            scrollChange(y);
+                          }
+                        },
+                      );
+                      toggleCollapse();
+                    }
+                  }}
+                  onLongPress={
+                    // iOS uses the native context menu (NativeContextMenu); the
+                    // action sheet stays as the Android long-press path.
+                    Platform.OS === "ios"
+                      ? undefined
+                      : () => showCommentOptions()
+                  }
                   style={[
-                    styles.commentContainer,
-                    displayInList ? styles.commentContainerDisplayInList : {},
+                    styles.outerCommentContainer,
+                    displayInList
+                      ? styles.outerCommentContainerDisplayInList
+                      : {},
                     {
-                      borderLeftWidth: comment.depth === 0 ? 0 : 1,
-                      borderLeftColor:
-                        theme.commentDepthColors[
-                          (comment.depth - 1) % theme.commentDepthColors.length
-                        ],
-                      borderRightColor:
-                        comment.userVote === VoteOption.UpVote
-                          ? theme.upvote
-                          : theme.downvote,
-                      borderRightWidth:
-                        voteIndicator && comment.userVote !== VoteOption.NoVote
-                          ? 1
-                          : 0,
+                      marginLeft: 10 * comment.depth,
+                      borderTopColor: theme.divider,
                     },
                   ]}
                 >
                   <View
+                    key={index}
                     style={[
-                      styles.topBar,
+                      styles.commentContainer,
+                      displayInList ? styles.commentContainerDisplayInList : {},
                       {
-                        marginBottom:
-                          comment.collapsed && !collapseChildrenOnly ? 0 : 8,
+                        borderLeftWidth: comment.depth === 0 ? 0 : 1,
+                        borderLeftColor:
+                          theme.commentDepthColors[
+                            (comment.depth - 1) %
+                              theme.commentDepthColors.length
+                          ],
+                        borderRightColor:
+                          comment.userVote === VoteOption.UpVote
+                            ? theme.upvote
+                            : theme.downvote,
+                        borderRightWidth:
+                          voteIndicator &&
+                          comment.userVote !== VoteOption.NoVote
+                            ? 1
+                            : 0,
                       },
                     ]}
                   >
-                    {comment.isStickied && (
-                      <AntDesign
-                        name="pushpin"
-                        style={[
-                          styles.stickiedIcon,
-                          {
-                            color: theme.moderator,
-                          },
-                        ]}
-                      />
-                    )}
-                    <TouchableOpacity
-                      onPress={() => pushURL(`/user/${comment.author}`)}
-                    >
-                      <Text
-                        style={[
-                          styles.author,
-                          {
-                            color: comment.isOP
-                              ? theme.iconOrTextButton
-                              : comment.isModerator
-                                ? theme.moderator
-                                : theme.text,
-                          },
-                        ]}
-                      >
-                        {comment.author}
-                      </Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={styles.upvoteContainer}
-                      onPress={() => voteOnComment(VoteOption.UpVote)}
-                    >
-                      <AntDesign
-                        name={
-                          comment.userVote === VoteOption.DownVote
-                            ? "arrow-down"
-                            : "arrow-up"
-                        }
-                        size={14}
-                        color={
-                          comment.userVote === VoteOption.UpVote
-                            ? theme.upvote
-                            : comment.userVote === VoteOption.DownVote
-                              ? theme.downvote
-                              : theme.subtleText
-                        }
-                      />
-                      <Text
-                        style={[
-                          styles.upvoteText,
-                          {
-                            color:
-                              comment.userVote === VoteOption.UpVote
-                                ? theme.upvote
-                                : comment.userVote === VoteOption.DownVote
-                                  ? theme.downvote
-                                  : theme.subtleText,
-                          },
-                        ]}
-                      >
-                        {comment.scoreHidden && !comment.userVote
-                          ? "-"
-                          : comment.upvotes}
-                      </Text>
-                    </TouchableOpacity>
-                    {comment.editedAt && (
-                      <TouchableOpacity
-                        style={styles.editedAtContainer}
-                        onPress={() => {
-                          if (!comment.editedAt) return;
-                          const timeSinceEdited = new Time(
-                            comment.editedAt,
-                          ).prettyTimeSince();
-                          Alert.alert(
-                            `Edited ${timeSinceEdited} ago`,
-                            `Comment was edited at ${new Date(comment.editedAt).toLocaleString()}`,
-                          );
-                        }}
-                      >
-                        <FontAwesome
-                          name="pencil"
-                          size={14}
-                          color={theme.subtleText}
-                        />
-                      </TouchableOpacity>
-                    )}
-                    {commentFlairs && comment.flair && (
-                      <TouchableOpacity
-                        style={[
-                          styles.flairContainer,
-                          {
-                            backgroundColor: theme.divider,
-                          },
-                        ]}
-                        onPress={() =>
-                          alert(comment.flair?.text ?? "No flair text")
-                        }
-                      >
-                        {comment.flair.emojis.map((emoji, index) => (
-                          <Image
-                            key={index}
-                            source={{ uri: emoji }}
-                            style={styles.flairEmoji}
-                          />
-                        ))}
-                        {comment.flair.text && (
-                          <Text
-                            style={[
-                              styles.flairText,
-                              {
-                                color: theme.text,
-                              },
-                            ]}
-                            numberOfLines={1}
-                          >
-                            {comment.flair.text}
-                          </Text>
-                        )}
-                      </TouchableOpacity>
-                    )}
-                    <View style={styles.topBarEnd}>
-                      <Text
-                        style={[
-                          styles.upvoteText,
-                          {
-                            color: theme.subtleText,
-                          },
-                        ]}
-                      >
-                        {comment.shortTimeSince}
-                      </Text>
-                    </View>
-                  </View>
-                  {collapseChildrenOnly || !comment.collapsed ? (
-                    <View style={styles.textContainer}>
-                      <RenderHtml html={comment.html} />
-                    </View>
-                  ) : null}
-                  {displayInList && (
-                    <TouchableOpacity
-                      style={[
-                        styles.sourceContainer,
-                        {
-                          borderColor: theme.tint,
-                        },
-                      ]}
-                      activeOpacity={0.8}
-                      onPress={() => {
-                        pushURL(comment.postLink);
-                      }}
-                    >
-                      <Text
-                        style={[
-                          styles.sourcePostTitle,
-                          {
-                            color: theme.subtleText,
-                          },
-                        ]}
-                      >
-                        {comment.postTitle}
-                      </Text>
-                      <Text
-                        style={[
-                          styles.sourceSubreddit,
-                          {
-                            color: theme.verySubtleText,
-                          },
-                        ]}
-                      >
-                        {comment.subreddit}
-                      </Text>
-                    </TouchableOpacity>
-                  )}
-                  {comment.saved && (
                     <View
                       style={[
-                        styles.bookmarkNotch,
+                        styles.topBar,
                         {
-                          borderColor: theme.bookmark,
+                          marginBottom:
+                            comment.collapsed && !collapseChildrenOnly ? 0 : 8,
                         },
                       ]}
-                    />
-                  )}
-                </View>
-              </TouchableHighlight>
+                    >
+                      {comment.isStickied && (
+                        <AntDesign
+                          name="pushpin"
+                          style={[
+                            styles.stickiedIcon,
+                            {
+                              color: theme.moderator,
+                            },
+                          ]}
+                        />
+                      )}
+                      <TouchableOpacity
+                        onPress={() => pushURL(`/user/${comment.author}`)}
+                      >
+                        <Text
+                          style={[
+                            styles.author,
+                            {
+                              color: comment.isOP
+                                ? theme.iconOrTextButton
+                                : comment.isModerator
+                                  ? theme.moderator
+                                  : theme.text,
+                            },
+                          ]}
+                        >
+                          {comment.author}
+                        </Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={styles.upvoteContainer}
+                        onPress={() => voteOnComment(VoteOption.UpVote)}
+                      >
+                        <AntDesign
+                          name={
+                            comment.userVote === VoteOption.DownVote
+                              ? "arrow-down"
+                              : "arrow-up"
+                          }
+                          size={14}
+                          color={
+                            comment.userVote === VoteOption.UpVote
+                              ? theme.upvote
+                              : comment.userVote === VoteOption.DownVote
+                                ? theme.downvote
+                                : theme.subtleText
+                          }
+                        />
+                        <Text
+                          style={[
+                            styles.upvoteText,
+                            {
+                              color:
+                                comment.userVote === VoteOption.UpVote
+                                  ? theme.upvote
+                                  : comment.userVote === VoteOption.DownVote
+                                    ? theme.downvote
+                                    : theme.subtleText,
+                            },
+                          ]}
+                        >
+                          {comment.scoreHidden && !comment.userVote
+                            ? "-"
+                            : comment.upvotes}
+                        </Text>
+                      </TouchableOpacity>
+                      {comment.editedAt && (
+                        <TouchableOpacity
+                          style={styles.editedAtContainer}
+                          onPress={() => {
+                            if (!comment.editedAt) return;
+                            const timeSinceEdited = new Time(
+                              comment.editedAt,
+                            ).prettyTimeSince();
+                            Alert.alert(
+                              `Edited ${timeSinceEdited} ago`,
+                              `Comment was edited at ${new Date(comment.editedAt).toLocaleString()}`,
+                            );
+                          }}
+                        >
+                          <FontAwesome
+                            name="pencil"
+                            size={14}
+                            color={theme.subtleText}
+                          />
+                        </TouchableOpacity>
+                      )}
+                      {commentFlairs && comment.flair && (
+                        <TouchableOpacity
+                          style={[
+                            styles.flairContainer,
+                            {
+                              backgroundColor: theme.divider,
+                            },
+                          ]}
+                          onPress={() =>
+                            alert(comment.flair?.text ?? "No flair text")
+                          }
+                        >
+                          {comment.flair.emojis.map((emoji, index) => (
+                            <Image
+                              key={index}
+                              source={{ uri: emoji }}
+                              style={styles.flairEmoji}
+                            />
+                          ))}
+                          {comment.flair.text && (
+                            <Text
+                              style={[
+                                styles.flairText,
+                                {
+                                  color: theme.text,
+                                },
+                              ]}
+                              numberOfLines={1}
+                            >
+                              {comment.flair.text}
+                            </Text>
+                          )}
+                        </TouchableOpacity>
+                      )}
+                      <View style={styles.topBarEnd}>
+                        <Text
+                          style={[
+                            styles.upvoteText,
+                            {
+                              color: theme.subtleText,
+                            },
+                          ]}
+                        >
+                          {comment.shortTimeSince}
+                        </Text>
+                      </View>
+                    </View>
+                    {collapseChildrenOnly || !comment.collapsed ? (
+                      <View style={styles.textContainer}>
+                        <RenderHtml html={comment.html} />
+                      </View>
+                    ) : null}
+                    {displayInList && (
+                      <TouchableOpacity
+                        style={[
+                          styles.sourceContainer,
+                          {
+                            borderColor: theme.tint,
+                          },
+                        ]}
+                        activeOpacity={0.8}
+                        onPress={() => {
+                          pushURL(comment.postLink);
+                        }}
+                      >
+                        <Text
+                          style={[
+                            styles.sourcePostTitle,
+                            {
+                              color: theme.subtleText,
+                            },
+                          ]}
+                        >
+                          {comment.postTitle}
+                        </Text>
+                        <Text
+                          style={[
+                            styles.sourceSubreddit,
+                            {
+                              color: theme.verySubtleText,
+                            },
+                          ]}
+                        >
+                          {comment.subreddit}
+                        </Text>
+                      </TouchableOpacity>
+                    )}
+                    {comment.saved && (
+                      <View
+                        style={[
+                          styles.bookmarkNotch,
+                          {
+                            borderColor: theme.bookmark,
+                          },
+                        ]}
+                      />
+                    )}
+                  </View>
+                </TouchableHighlight>
+              </NativeContextMenu>
             </Slideable>
           )}
           {!comment.collapsed ? (
