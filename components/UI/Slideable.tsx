@@ -1,21 +1,43 @@
-import * as Haptics from "expo-haptics";
 import {
   PropsWithChildren,
   ReactElement,
   cloneElement,
   useContext,
-  useRef,
   useState,
 } from "react";
-import { View, StyleSheet, Animated, ColorValue } from "react-native";
+import { View, StyleSheet, ColorValue } from "react-native";
+import { Gesture, GestureDetector } from "react-native-gesture-handler";
+import Animated, {
+  runOnJS,
+  useAnimatedStyle,
+  useSharedValue,
+  withSpring,
+} from "react-native-reanimated";
 
 import { ScrollerContext } from "../../contexts/ScrollerContext";
 import { ThemeContext } from "../../contexts/SettingsContexts/ThemeContext";
 import { GesturesContext } from "../../contexts/SettingsContexts/GesturesContext";
+import { hapticEngage } from "../../utils/haptics";
 import { IconProps } from "@expo/vector-icons/build/createIconSet";
 
 const SHORT_SWIPE_THRESHOLD = 75;
 const LONG_SWIPE_THRESHOLD = 130;
+
+/**
+ * Threshold band the current drag distance falls in. Positive = rightward
+ * drag (revealing the LEFT options), negative = leftward. Magnitude 1 = the
+ * short threshold, 2 = the long threshold. Computed on the UI thread; the JS
+ * thread is only notified when the band changes.
+ */
+type SwipeBand = -2 | -1 | 0 | 1 | 2;
+
+const bandForDelta = (delta: number): SwipeBand => {
+  "worklet";
+  const absD = Math.abs(delta);
+  if (absD >= LONG_SWIPE_THRESHOLD) return delta > 0 ? 2 : -2;
+  if (absD >= SHORT_SWIPE_THRESHOLD) return delta > 0 ? 1 : -1;
+  return 0;
+};
 
 type SlideItem<SlideName extends string> = {
   name: SlideName;
@@ -47,8 +69,10 @@ export default function Slideable<SlideName extends string>({
   const { setScrollDisabled } = useContext(ScrollerContext);
   const { swipeAnywhereToNavigate } = useContext(GesturesContext);
 
-  const touchStart = useRef<{ x: number; y: number } | null>(null);
-  const touchX = useRef(new Animated.Value(0)).current;
+  // Gesture tracking runs entirely on the UI thread (Reanimated shared
+  // values), so swipes stay at 60fps even when the JS thread is busy
+  // rendering the feed. Only band changes and the released action hop to JS.
+  const translateX = useSharedValue(0);
 
   const [slideItem, setSlideItem] = useState<
     SlideItem<SlideName> & { side: "left" | "right" }
@@ -62,124 +86,135 @@ export default function Slideable<SlideName extends string>({
   const shortRightItem = lookupOption(shortRightName);
   const longRightItem = lookupOption(longRightName);
 
-  const resolveActiveItemForDelta = (delta: number) => {
+  const itemForBand = (band: SwipeBand) => {
+    if (band === 0) return undefined;
     const [shortItem, longItem] =
-      delta > 0
+      band > 0
         ? [shortLeftItem, longLeftItem]
         : [shortRightItem, longRightItem];
-    const absD = Math.abs(delta);
-    if (absD >= LONG_SWIPE_THRESHOLD) return longItem ?? shortItem;
-    if (absD >= SHORT_SWIPE_THRESHOLD) return shortItem;
-    return undefined;
+    return Math.abs(band) === 2 ? (longItem ?? shortItem) : shortItem;
   };
 
+  const handleBandChange = (band: SwipeBand) => {
+    const item = itemForBand(band);
+    if (item?.name !== slideItem?.name) {
+      setSlideItem(
+        item ? { side: band > 0 ? "left" : "right", ...item } : undefined,
+      );
+      if (item) hapticEngage();
+    }
+  };
+
+  const fireActionForBand = (band: SwipeBand) => {
+    const item = itemForBand(band);
+    if (item) {
+      item.action();
+    }
+  };
+
+  const clearSlideItem = () => setSlideItem(undefined);
+
+  const engageDistance = xScrollToEngage ?? 20;
+  const lastBand = useSharedValue<SwipeBand>(0);
+  // Whether THIS row's pan actually activated. onFinalize fires even for
+  // gestures that failed before activating (e.g. a vertical drag), and each
+  // row has its own recognizer — an unconditional reset there could clear
+  // scrollDisabled while another row's swipe is still active.
+  const activated = useSharedValue(false);
+
+  const panGesture = Gesture.Pan()
+    // Mostly-horizontal movement activates; vertical movement fails the pan
+    // so the enclosing list scrolls normally. When swipeAnywhereToNavigate is
+    // on, rightward drags never activate so the OS back gesture wins.
+    .activeOffsetX(
+      swipeAnywhereToNavigate
+        ? [-engageDistance, Number.MAX_SAFE_INTEGER]
+        : [-engageDistance, engageDistance],
+    )
+    .failOffsetY([-10, 10])
+    .onStart(() => {
+      activated.value = true;
+      lastBand.value = 0;
+      runOnJS(setScrollDisabled)(true);
+    })
+    .onUpdate((e) => {
+      const delta = swipeAnywhereToNavigate
+        ? Math.min(e.translationX, 0)
+        : e.translationX;
+      translateX.value = delta;
+      const band = bandForDelta(delta);
+      if (band !== lastBand.value) {
+        lastBand.value = band;
+        runOnJS(handleBandChange)(band);
+      }
+    })
+    .onEnd((e) => {
+      const delta = swipeAnywhereToNavigate
+        ? Math.min(e.translationX, 0)
+        : e.translationX;
+      const band = bandForDelta(delta);
+      if (band !== 0) {
+        runOnJS(fireActionForBand)(band);
+      }
+    })
+    .onFinalize(() => {
+      if (!activated.value) return;
+      activated.value = false;
+      translateX.value = withSpring(
+        0,
+        { damping: 100, stiffness: 300, overshootClamping: true },
+        (finished) => {
+          if (finished) {
+            runOnJS(clearSlideItem)();
+          }
+        },
+      );
+      runOnJS(setScrollDisabled)(false);
+    });
+
+  const animatedSlideStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: translateX.value }],
+  }));
+
   return (
-    <View
-      style={styles.slideableContainer}
-      onStartShouldSetResponderCapture={(e) => {
-        touchStart.current = { x: e.nativeEvent.pageX, y: e.nativeEvent.pageY };
-        return false;
-      }}
-      onResponderGrant={() => setScrollDisabled(true)}
-      onResponderReject={() => setScrollDisabled(false)}
-      onMoveShouldSetResponder={(e) => {
-        if (!touchStart.current) return false;
-        const deltaX = e.nativeEvent.pageX - touchStart.current.x;
-        const deltaY = e.nativeEvent.pageY - touchStart.current.y;
-        const isSwipeAllowed = !swipeAnywhereToNavigate || deltaX < 0;
-        if (
-          Math.abs(deltaX) > (xScrollToEngage ?? 20) &&
-          Math.abs(deltaY) < 10 &&
-          isSwipeAllowed
-        ) {
-          touchStart.current = {
-            x: e.nativeEvent.pageX,
-            y: e.nativeEvent.pageY,
-          };
-          return true;
-        }
-        return false;
-      }}
-      onResponderMove={(e) => {
-        if (touchStart.current) {
-          const delta = Math.min(
-            e.nativeEvent.pageX - touchStart.current.x,
-            swipeAnywhereToNavigate ? 0 : 1000,
-          );
-          touchX.setValue(delta);
-          const item = resolveActiveItemForDelta(delta);
-          if (item?.name !== slideItem?.name) {
-            setSlideItem(
-              item
-                ? { side: delta > 0 ? "left" : "right", ...item }
-                : undefined,
-            );
-            if (item) Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-          }
-        }
-      }}
-      onResponderEnd={(e) => {
-        if (touchStart.current) {
-          const delta = e.nativeEvent.pageX - touchStart.current.x;
-          if (swipeAnywhereToNavigate && delta > 0) {
-            setScrollDisabled(false);
-            return;
-          }
-          const item = resolveActiveItemForDelta(delta);
-          if (item) {
-            item.action();
-          }
-          Animated.spring(touchX, {
-            toValue: 0,
-            bounciness: 0,
-            useNativeDriver: true,
-          }).start(() => {
-            setSlideItem(undefined);
-          });
-        }
-        setScrollDisabled(false);
-      }}
-      onResponderTerminationRequest={() => false}
-    >
-      <Animated.View
-        style={[
-          styles.animatedView,
-          {
-            backgroundColor: theme.background,
-            transform: [
-              {
-                translateX: touchX,
-              },
-            ],
-          },
-        ]}
-      >
-        {children}
-      </Animated.View>
-      <View
-        style={[
-          styles.backgroundContainer,
-          {
-            backgroundColor: slideItem?.color ?? theme.tint,
-          },
-        ]}
-      >
+    <GestureDetector gesture={panGesture}>
+      <View style={styles.slideableContainer}>
+        <Animated.View
+          style={[
+            styles.animatedView,
+            {
+              backgroundColor: theme.background,
+            },
+            animatedSlideStyle,
+          ]}
+        >
+          {children}
+        </Animated.View>
         <View
           style={[
-            styles.iconContainer,
+            styles.backgroundContainer,
             {
-              marginLeft: slideItem?.side === "left" ? 0 : "auto",
+              backgroundColor: slideItem?.color ?? theme.tint,
             },
           ]}
         >
-          {slideItem?.icon &&
-            cloneElement(slideItem.icon, {
-              color: theme.text,
-              size: slideItem.size ?? 32,
-            })}
+          <View
+            style={[
+              styles.iconContainer,
+              {
+                marginLeft: slideItem?.side === "left" ? 0 : "auto",
+              },
+            ]}
+          >
+            {slideItem?.icon &&
+              cloneElement(slideItem.icon, {
+                color: theme.text,
+                size: slideItem.size ?? 32,
+              })}
+          </View>
         </View>
       </View>
-    </View>
+    </GestureDetector>
   );
 }
 
