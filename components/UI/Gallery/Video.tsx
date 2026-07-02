@@ -22,12 +22,27 @@ import {
   MAX_RELOAD_ATTEMPTS,
 } from "../../../utils/videoWatchdog";
 import { getVideoOverlayState } from "../../../utils/videoOverlayState";
+import {
+  getRememberedPlaybackPosition,
+  rememberPlaybackPosition,
+} from "../../../utils/FeedVideoFocus";
 
 type VideoProps = {
   video: Post["videos"][number];
+  /**
+   * When true (the Focused Post with feed audio on), the player plays unmuted
+   * and interrupts background audio. Defaults to muted feed behavior.
+   */
+  audioEnabled?: boolean;
+  /**
+   * Poster shown inside the loading overlay instead of a bare black tile, so
+   * a focus-gained video crossfades from its thumbnail rather than flashing
+   * black (see docs/specs/02-focused-video-playback.md).
+   */
+  poster?: React.ReactNode;
 };
 
-function Video({ video }: VideoProps) {
+function Video({ video, audioEnabled = false, poster }: VideoProps) {
   const { theme } = useContext(ThemeContext);
   const { subscribeToVisibility } = useContext(MediaViewerContext);
   const progress = useRef(new Animated.Value(0)).current;
@@ -38,12 +53,19 @@ function Video({ video }: VideoProps) {
     retry,
   } = useResolvedVideoSource(video.source, video.needsResolution);
 
+  // Keep the latest audio preference readable from long-lived
+  // callbacks/cleanups without resubscribing them.
+  const audioEnabledRef = useRef(audioEnabled);
+  audioEnabledRef.current = audioEnabled;
+
   const player = useSharedVideoPlayer(
     video.source,
     resolvedUri ? VideoCache.makeCachedVideoSource(resolvedUri) : null,
     (player) => {
-      player.audioMixingMode = "mixWithOthers";
-      player.muted = true;
+      player.audioMixingMode = audioEnabledRef.current
+        ? "doNotMix"
+        : "mixWithOthers";
+      player.muted = !audioEnabledRef.current;
       player.loop = true;
       player.timeUpdateEventInterval = 1 / 15;
       player.bufferOptions = {
@@ -116,20 +138,61 @@ function Video({ video }: VideoProps) {
   // pauses the inline feed playback while it owns the player).
   const isViewerShowing = useRef(false);
 
-  // The feed always wants the player muted, looping, and playing — even if a
-  // fullscreen viewer session left the SAME shared player unmuted or paused.
+  // The feed always wants the player looping and playing (muted unless this
+  // is the Focused Post with feed audio on) — even if a fullscreen viewer
+  // session left the SAME shared player in another state.
   // Re-run on status changes too: streaming sources (e.g. v.redd.it HLS) aren't
   // "readyToPlay" yet when the player is first acquired, so the configure-time
   // play() never starts them. Once they reach readyToPlay we (re-)issue play(),
   // otherwise they sit paused inline as a black box until tapped into fullscreen.
   useEffect(() => {
     if (!player) return;
-    player.muted = true;
+    player.muted = !audioEnabled;
+    player.audioMixingMode = audioEnabled ? "doNotMix" : "mixWithOthers";
     player.loop = true;
     if (player.status === "readyToPlay" && !isViewerShowing.current) {
       player.play();
     }
-  }, [player, playerStatus]);
+  }, [player, playerStatus, audioEnabled]);
+
+  // Resume where this video left off (positions survive player release — see
+  // FeedVideoFocus). Only seek a fresh player still at the start; a player
+  // that stayed alive in the registry already carries its position.
+  const hasRestoredPosition = useRef(false);
+  useEffect(() => {
+    hasRestoredPosition.current = false;
+  }, [player, video.source]);
+  useEffect(() => {
+    if (!player || hasRestoredPosition.current) return;
+    if (playerStatus !== "readyToPlay") return;
+    hasRestoredPosition.current = true;
+    const remembered = getRememberedPlaybackPosition(video.source);
+    if (remembered > 0 && player.currentTime < 0.05) {
+      player.currentTime = remembered;
+    }
+  }, [player, playerStatus, video.source]);
+
+  // On unmount (focus lost, scrolled away, app backgrounded): remember the
+  // position and stop playback. Without the pause, a refcount-0 player kept
+  // alive by the registry's LRU would keep playing invisibly — silent when
+  // muted, but audible with feed audio on. Skip while the fullscreen viewer
+  // owns the player (it manages playback itself and stays mounted).
+  useEffect(() => {
+    if (!player) return;
+    return () => {
+      try {
+        if (player.currentTime > 0) {
+          rememberPlaybackPosition(video.source, player.currentTime);
+        }
+        if (!isViewerShowing.current) {
+          player.muted = true;
+          player.pause();
+        }
+      } catch {
+        // The registry may have already released the player; nothing to do.
+      }
+    };
+  }, [player, video.source]);
 
   // Self-healing watchdog for stuck on-screen players. During a fast fling the
   // registry churns players faster than iOS asynchronously frees the underlying
@@ -226,7 +289,7 @@ function Video({ video }: VideoProps) {
       if (isShowing) {
         player.pause();
       } else {
-        player.muted = true;
+        player.muted = !audioEnabledRef.current;
         player.play();
       }
     });
@@ -263,6 +326,15 @@ function Video({ video }: VideoProps) {
           style={styles.notReadyContainer}
           pointerEvents={overlay.tappable ? "auto" : "none"}
         >
+          {poster && overlay.kind !== "resolveError" && (
+            // The Poster fills the tile under the diagnostic spinner/text so a
+            // focus-gained video shows its thumbnail (not a black box) until
+            // the player has a real frame, at which point the whole overlay
+            // (poster included) is removed by the readiness gate above.
+            <View style={styles.posterContainer} pointerEvents="none">
+              {poster}
+            </View>
+          )}
           {overlay.tappable ? (
             <Text
               style={styles.diagnosticText}
@@ -341,6 +413,9 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     backgroundColor: "black",
     zIndex: 1,
+  },
+  posterContainer: {
+    ...StyleSheet.absoluteFillObject,
   },
   diagnosticText: {
     color: "white",
