@@ -1,4 +1,4 @@
-import { createContext, useMemo } from "react";
+import { createContext, useCallback, useMemo } from "react";
 import { Alert } from "react-native";
 import {
   useMMKVBoolean,
@@ -81,79 +81,129 @@ export function FiltersProvider({ children }: React.PropsWithChildren) {
     [filterText],
   );
 
-  const filterPostsByText: FilterFunction<Post> = (posts) =>
-    posts.filter((post) => doesPostPassTextFilterMap(textFilterMap, post));
+  const filterPostsByText: FilterFunction<Post> = useCallback(
+    (posts) =>
+      posts.filter((post) => doesPostPassTextFilterMap(textFilterMap, post)),
+    [textFilterMap],
+  );
 
-  const doesCommentPassTextFilter = (comment: Comment) =>
-    doesCommentPassTextFilterMap(textFilterMap, comment);
+  const doesCommentPassTextFilter = useCallback(
+    (comment: Comment) => doesCommentPassTextFilterMap(textFilterMap, comment),
+    [textFilterMap],
+  );
 
-  const filterPostsBySubreddit: FilterFunction<Post> = (posts) => {
-    const now = Date.now();
-    return posts.filter((post) => {
-      const filterValue = hideFilteredSubreddits[post.subreddit];
-      if (!filterValue) return true;
-      if (filterValue === true) return false;
-      return now >= filterValue;
-    });
-  };
+  const filterPostsBySubreddit: FilterFunction<Post> = useCallback(
+    (posts) => {
+      const now = Date.now();
+      return posts.filter((post) => {
+        const filterValue = hideFilteredSubreddits[post.subreddit];
+        if (!filterValue) return true;
+        if (filterValue === true) return false;
+        return now >= filterValue;
+      });
+    },
+    [hideFilteredSubreddits],
+  );
+
+  const toggleFilterSeenPosts = useCallback(
+    (newValue = !filterSeenPosts) => setFilterSeenPosts(newValue),
+    [filterSeenPosts, setFilterSeenPosts],
+  );
+
+  const getHideSeenURLStatus = useCallback(
+    (url: string) => {
+      const baseURL = new RedditURL(url).getBasePage();
+      return hideSeenURLs[baseURL] ?? filterSeenPosts;
+    },
+    [hideSeenURLs, filterSeenPosts],
+  );
+
+  const toggleHideSeenURL = useCallback(
+    (url: string) => {
+      const baseURL = new RedditURL(url).getBasePage();
+      const newSetting = !(hideSeenURLs[baseURL] ?? filterSeenPosts);
+      if (newSetting === filterSeenPosts) {
+        delete hideSeenURLs[baseURL];
+      } else {
+        hideSeenURLs[baseURL] = newSetting;
+      }
+      setHideSeenURLs(hideSeenURLs);
+    },
+    [hideSeenURLs, filterSeenPosts, setHideSeenURLs],
+  );
+
+  const toggleFilterSubreddit = useCallback(
+    (subreddit: string, expiresAt?: number | true) => {
+      const newFilteredSubreddits = { ...hideFilteredSubreddits };
+      if (expiresAt === undefined) {
+        delete newFilteredSubreddits[subreddit];
+      } else {
+        newFilteredSubreddits[subreddit] = expiresAt;
+      }
+      setHideFilteredSubreddits(newFilteredSubreddits);
+    },
+    [hideFilteredSubreddits, setHideFilteredSubreddits],
+  );
+
+  const toggleAutoMarkAsSeen = useCallback(
+    (newValue = !autoMarkAsSeen) => {
+      Alert.alert(
+        "Restart the app for this change to take effect.",
+        newValue && filterSeenPosts
+          ? "You may notice slower loads with this setting enabled because all the hidden posts still have to be loaded in the background."
+          : undefined,
+      );
+      setAutoMarkAsSeen(newValue);
+    },
+    [autoMarkAsSeen, filterSeenPosts, setAutoMarkAsSeen],
+  );
+
+  const setFilterTextValue = useCallback(
+    (newValue = "") => setFilterText(newValue),
+    [setFilterText],
+  );
+
+  const value = useMemo(
+    () => ({
+      filterSeenPosts,
+      toggleFilterSeenPosts,
+
+      hideSeenURLs,
+      getHideSeenURLStatus,
+      toggleHideSeenURL,
+
+      hideFilteredSubreddits,
+      toggleFilterSubreddit,
+      filterPostsBySubreddit,
+
+      autoMarkAsSeen,
+      toggleAutoMarkAsSeen,
+
+      filterText,
+      setFilterText: setFilterTextValue,
+
+      filterPostsByText,
+      doesCommentPassTextFilter,
+    }),
+    [
+      filterSeenPosts,
+      toggleFilterSeenPosts,
+      hideSeenURLs,
+      getHideSeenURLStatus,
+      toggleHideSeenURL,
+      hideFilteredSubreddits,
+      toggleFilterSubreddit,
+      filterPostsBySubreddit,
+      autoMarkAsSeen,
+      toggleAutoMarkAsSeen,
+      filterText,
+      setFilterTextValue,
+      filterPostsByText,
+      doesCommentPassTextFilter,
+    ],
+  );
 
   return (
-    <FiltersContext.Provider
-      value={{
-        filterSeenPosts,
-        toggleFilterSeenPosts: (newValue = !filterSeenPosts) =>
-          setFilterSeenPosts(newValue),
-
-        hideSeenURLs,
-        getHideSeenURLStatus: (url: string) => {
-          const baseURL = new RedditURL(url).getBasePage();
-          return hideSeenURLs[baseURL] ?? filterSeenPosts;
-        },
-        toggleHideSeenURL: (url: string) => {
-          const baseURL = new RedditURL(url).getBasePage();
-          const newSetting = !(hideSeenURLs[baseURL] ?? filterSeenPosts);
-          if (newSetting === filterSeenPosts) {
-            delete hideSeenURLs[baseURL];
-          } else {
-            hideSeenURLs[baseURL] = newSetting;
-          }
-          setHideSeenURLs(hideSeenURLs);
-        },
-
-        hideFilteredSubreddits,
-        toggleFilterSubreddit: (
-          subreddit: string,
-          expiresAt?: number | true,
-        ) => {
-          const newFilteredSubreddits = { ...hideFilteredSubreddits };
-          if (expiresAt === undefined) {
-            delete newFilteredSubreddits[subreddit];
-          } else {
-            newFilteredSubreddits[subreddit] = expiresAt;
-          }
-          setHideFilteredSubreddits(newFilteredSubreddits);
-        },
-        filterPostsBySubreddit,
-
-        autoMarkAsSeen,
-        toggleAutoMarkAsSeen: (newValue = !autoMarkAsSeen) => {
-          Alert.alert(
-            "Restart the app for this change to take effect.",
-            newValue && filterSeenPosts
-              ? "You may notice slower loads with this setting enabled because all the hidden posts still have to be loaded in the background."
-              : undefined,
-          );
-          setAutoMarkAsSeen(newValue);
-        },
-
-        filterText,
-        setFilterText: (newValue = "") => setFilterText(newValue),
-
-        filterPostsByText,
-        doesCommentPassTextFilter,
-      }}
-    >
-      {children}
-    </FiltersContext.Provider>
+    <FiltersContext.Provider value={value}>{children}</FiltersContext.Provider>
   );
 }

@@ -27,6 +27,7 @@
     "@expo/vector-icons": "^15.0.3",
     "@preeternal/react-native-cookie-manager": "^6.3.2",
     "@react-native-community/netinfo": "11.5.2",
+    "@react-native-menu/menu": "^1.2.2",
     "@react-navigation/bottom-tabs": "^7.4.0",
     "@react-navigation/native": "^7.1.8",
     "@react-navigation/native-stack": "^7.3.16",
@@ -68,6 +69,8 @@
     "react-dom": "19.2.0",
     "react-native": "0.83.2",
     "react-native-gesture-handler": "3.0.0",
+    "react-native-ios-context-menu": "^3.1.0",
+    "react-native-ios-utilities": "^5.1.2",
     "react-native-mmkv": "^4.2.0",
     "react-native-nitro-modules": "^0.35.0",
     "react-native-reanimated": "4.4.0",
@@ -77,7 +80,8 @@
     "react-native-web": "^0.21.0",
     "react-native-webview": "13.16.0",
     "react-native-worklets": "0.9.1",
-    "typescript-eslint": "^8.39.0"
+    "typescript-eslint": "^8.39.0",
+    "zeego": "^3.0.6"
   },
   "devDependencies": {
     "@types/jest": "^29.5.14",

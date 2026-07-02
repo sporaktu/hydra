@@ -11,7 +11,8 @@ import { registerRootComponent } from "expo";
 import { useFonts } from "expo-font";
 import { SplashScreen } from "expo-router";
 import React, { useEffect, useState } from "react";
-import { AppState, LogBox } from "react-native";
+import { AppState, InteractionManager, LogBox } from "react-native";
+import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { enableFreeze } from "react-native-screens";
 import * as ExpoOrientation from "expo-screen-orientation";
@@ -78,17 +79,23 @@ function RootLayout() {
     if (error) throw error;
   }, [error]);
 
-  const [dbMaintenanceDone, setDbMaintenanceDone] = useState(false);
-
-  const doDBMaintenanceAsync = async () => {
-    await doDBMaintenance();
-    await VideoCache.clearCacheIfRequested();
-    setDbMaintenanceDone(true);
-  };
+  // The video cache can only be cleared while no video components are
+  // mounted, so a requested clear must finish before the first render. This
+  // is a synchronous key check that resolves immediately unless the user
+  // actually requested a clear, so it doesn't meaningfully delay startup.
+  const [videoCacheReady, setVideoCacheReady] = useState(false);
+  useEffect(() => {
+    VideoCache.clearCacheIfRequested().then(() => setVideoCacheReady(true));
+  }, []);
 
   useEffect(() => {
     if (migrationsComplete) {
-      doDBMaintenanceAsync();
+      // DB maintenance (pruning old rows past their caps) does not need to
+      // finish before the UI is usable, so defer it until after startup
+      // interactions instead of blocking the first render on it.
+      InteractionManager.runAfterInteractions(() => {
+        doDBMaintenance();
+      });
       modifyStat(Stat.APP_LAUNCHES, 1);
       modifyStat(Stat.APP_FOREGROUNDS, 1);
       const appStateChangeListener = AppState.addEventListener(
@@ -108,37 +115,39 @@ function RootLayout() {
   return (
     migrationsComplete &&
     fontsLoaded &&
-    dbMaintenanceDone && (
-      <SafeAreaProvider>
-        <AccountProvider>
-          <SubscriptionsProvider>
-            <SettingsProvider>
-              <TabScrollProvider>
-                <NavigationProvider>
-                  <ActionSheetProvider>
-                    <ActionSheetBgProvider>
-                      <InboxProvider>
-                        <ModalProvider>
-                          <VideoPlayerRegistryProvider>
-                            <MediaViewerProvider>
-                              <SubredditProvider>
-                                <StartupModalProvider>
-                                  <SubscribeToHydra />
-                                  <Tabs />
-                                </StartupModalProvider>
-                              </SubredditProvider>
-                            </MediaViewerProvider>
-                          </VideoPlayerRegistryProvider>
-                        </ModalProvider>
-                      </InboxProvider>
-                    </ActionSheetBgProvider>
-                  </ActionSheetProvider>
-                </NavigationProvider>
-              </TabScrollProvider>
-            </SettingsProvider>
-          </SubscriptionsProvider>
-        </AccountProvider>
-      </SafeAreaProvider>
+    videoCacheReady && (
+      <GestureHandlerRootView style={{ flex: 1 }}>
+        <SafeAreaProvider>
+          <AccountProvider>
+            <SubscriptionsProvider>
+              <SettingsProvider>
+                <TabScrollProvider>
+                  <NavigationProvider>
+                    <ActionSheetProvider>
+                      <ActionSheetBgProvider>
+                        <InboxProvider>
+                          <ModalProvider>
+                            <VideoPlayerRegistryProvider>
+                              <MediaViewerProvider>
+                                <SubredditProvider>
+                                  <StartupModalProvider>
+                                    <SubscribeToHydra />
+                                    <Tabs />
+                                  </StartupModalProvider>
+                                </SubredditProvider>
+                              </MediaViewerProvider>
+                            </VideoPlayerRegistryProvider>
+                          </ModalProvider>
+                        </InboxProvider>
+                      </ActionSheetBgProvider>
+                    </ActionSheetProvider>
+                  </NavigationProvider>
+                </TabScrollProvider>
+              </SettingsProvider>
+            </SubscriptionsProvider>
+          </AccountProvider>
+        </SafeAreaProvider>
+      </GestureHandlerRootView>
     )
   );
 }

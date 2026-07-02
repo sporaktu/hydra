@@ -11,7 +11,6 @@ import React, { useContext, useEffect, useState } from "react";
 import { Text } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { NavigationContainerRef, StackActions } from "@react-navigation/native";
-import * as Haptics from "expo-haptics";
 
 import LoadingSplash from "../../components/UI/LoadingSplash";
 import PulseHighlight, {
@@ -31,6 +30,7 @@ import { useDrizzleStudio } from "expo-drizzle-studio-plugin";
 import QuickAccountSwap from "../../components/Modals/QuickAccountSwap";
 import QuickSubredditSearch from "../../components/Modals/QuickSubredditSearch";
 import { oneTimeAlert } from "../../utils/oneTimeAlert";
+import { hapticSelection } from "../../utils/haptics";
 import {
   SubredditSwitcherProvider,
   SubredditSwitcherContext,
@@ -127,9 +127,7 @@ export default function Tabs() {
                   outputRange: [1, 0],
                 }),
               },
-              // This is broken in the latest version of react-navigation:
-              // https://github.com/react-navigation/react-navigation/issues/12755
-              // animation: 'fade',
+              // Tab fade animation is blocked on https://github.com/react-navigation/react-navigation/issues/12755
             }}
             screenListeners={() => ({
               tabPress: (e) => {
@@ -152,11 +150,11 @@ export default function Tabs() {
               tabLongPress: (e) => {
                 if (e.target?.startsWith("Search")) {
                   setShowSubredditSearch(true);
-                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  hapticSelection();
                 }
                 if (e.target?.startsWith("Account") && accounts.length > 0) {
                   setShowAccountSwap(true);
-                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  hapticSelection();
                 }
               },
             })}
