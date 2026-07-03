@@ -10,7 +10,9 @@
 #   bootstrap : run ONCE, manually, by pushing the `eas-bootstrap` branch. Creates
 #               your EAS project and prints its projectId for you to copy into the
 #               EAS_PROJECT_ID env var. (Skip if you already have a projectId.)
-#   release   : on every `v*` git tag, build iOS on EAS and submit to TestFlight.
+#   release   : on every `v*` git tag: build iOS on EAS and submit it to
+#               TestFlight, and (in parallel) build an installable Android APK
+#               on EAS and print/store its direct download link.
 #
 # Required CircleCI environment variables (provided via the `hydra-cci` context:
 # Organization Settings > Contexts > hydra-cci):
@@ -63,6 +65,20 @@ commands:
           # eas init/build evaluate app.config.ts, which resolves config plugins
           # (e.g. expo-router) from node_modules, so deps must be present.
           command: npm ci
+  verify_env_vars:
+    parameters:
+      var_names:
+        type: string
+        description: Space-separated list of required env var names.
+    steps:
+      - run:
+          name: Verify required env vars are present
+          command: |
+            missing=0
+            for v in << parameters.var_names >>; do
+              if [ -z "$(eval echo \$$v)" ]; then echo "Missing env var: $v"; missing=1; fi
+            done
+            [ "$missing" = "0" ] || { echo "Set the missing vars in CircleCI Project Settings."; exit 1; }
 
 jobs:
   # One-time: create/link the EAS project under your account, then print the id.
@@ -86,16 +102,11 @@ jobs:
       - checkout
       - install_eas
       - install_deps
-      - run:
-          name: Verify release env vars are present
-          command: |
-            missing=0
-            for v in EXPO_OWNER EAS_PROJECT_ID IOS_BUNDLE_ID ASC_API_KEY_BASE64 \
-                     EXPO_ASC_KEY_ID EXPO_ASC_ISSUER_ID EXPO_APPLE_TEAM_ID \
-                     EXPO_APPLE_TEAM_TYPE ASC_APP_ID; do
-              if [ -z "$(eval echo \$$v)" ]; then echo "Missing env var: $v"; missing=1; fi
-            done
-            [ "$missing" = "0" ] || { echo "Set the missing vars in CircleCI Project Settings."; exit 1; }
+      - verify_env_vars:
+          var_names: >-
+            EXPO_OWNER EAS_PROJECT_ID IOS_BUNDLE_ID ASC_API_KEY_BASE64
+            EXPO_ASC_KEY_ID EXPO_ASC_ISSUER_ID EXPO_APPLE_TEAM_ID
+            EXPO_APPLE_TEAM_TYPE ASC_APP_ID
       - run:
           name: Write App Store Connect API key (.p8) from env
           command: |
@@ -131,6 +142,49 @@ jobs:
               --non-interactive \
               --auto-submit
 
+  android_build:
+    executor: node
+    steps:
+      - checkout
+      - install_eas
+      - install_deps
+      - verify_env_vars:
+          var_names: EXPO_OWNER EAS_PROJECT_ID
+      - run:
+          name: Build Android APK on EAS (non-interactive)
+          # No signing setup needed: EAS auto-generates and manages an Android
+          # upload keystore on first non-interactive build. --json suppresses
+          # the interactive progress UI and prints machine-readable build
+          # results instead, which we parse below for the download link.
+          command: |
+            eas build \
+              --platform android \
+              --profile production \
+              --non-interactive \
+              --json > eas-android-build.json
+      - run:
+          name: Extract APK download link
+          # Fails the job (rather than silently writing an empty/undefined
+          # link) if the build didn't finish successfully, e.g. it errored,
+          # timed out, or was canceled.
+          command: |
+            node -e '
+              const fs = require("fs");
+              const builds = JSON.parse(fs.readFileSync("eas-android-build.json", "utf8"));
+              const build = Array.isArray(builds) ? builds[0] : builds;
+              const url = build && build.artifacts && build.artifacts.buildUrl;
+              if (!build || build.status !== "FINISHED" || !url) {
+                console.error("EAS Android build did not finish successfully.");
+                console.error("status:", build && build.status);
+                console.error(JSON.stringify(build, null, 2));
+                process.exit(1);
+              }
+              fs.writeFileSync("android-apk-download-link.txt", url + "\n");
+              console.log("Android APK download link: " + url);
+            '
+      - store_artifacts:
+          path: android-apk-download-link.txt
+
 workflows:
   bootstrap:
     jobs:
@@ -149,6 +203,14 @@ workflows:
             - hydra-cci
           # Tags don't run by default in CircleCI; opt in AND ignore all branches
           # so only `v*` tags trigger a release.
+          filters:
+            tags:
+              only: /^v.*/
+            branches:
+              ignore: /.*/
+      - android_build:
+          context:
+            - hydra-cci
           filters:
             tags:
               only: /^v.*/
