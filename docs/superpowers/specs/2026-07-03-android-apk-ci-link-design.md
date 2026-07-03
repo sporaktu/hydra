@@ -36,27 +36,44 @@ produces a sideloadable `.apk`.
 
 ### 2. `.circleci/config.yml`
 
-New job `android_build`, reusing the existing `install_eas` / `install_deps`
-commands:
+**Shared `verify_env_vars` command.** The iOS job already has an inline
+"verify required env vars are present" step (a bash loop over a hardcoded
+list of 9 var names). Extract that loop into a new reusable command,
+parameterized by a `var_names` parameter, alongside the existing `install_eas`
+/ `install_deps` commands. `ios_build_and_submit` is updated to call it with
+its existing 9-var list instead of inlining the loop, and the new
+`android_build` job calls it with its own (shorter) list. This keeps the
+check-required-vars logic in one place so a future rename/addition can't be
+updated in one job and forgotten in the other.
+
+New job `android_build`, reusing `install_eas` / `install_deps` /
+`verify_env_vars`:
 
 - `checkout`
 - `install_eas`
 - `install_deps`
-- Verify `EXPO_OWNER` and `EAS_PROJECT_ID` are set (same vars the iOS job
-  already requires to resolve the EAS project). `ANDROID_PACKAGE` stays
+- `verify_env_vars` with `EXPO_OWNER` and `EAS_PROJECT_ID` (same vars the iOS
+  job already requires to resolve the EAS project). `ANDROID_PACKAGE` stays
   optional — `app.config.ts` already falls back to `com.dmilin.hydra` when
   unset.
 - Run EAS build in JSON mode so the result is machine-readable:
   ```
   eas build --platform android --profile production --non-interactive --json > eas-android-build.json
   ```
-- A small Node step parses `eas-android-build.json` and extracts the
-  artifact download URL (the direct `.apk` link EAS returns for a finished
-  build).
-- Print the URL plainly in the job log (CircleCI auto-linkifies `https://`
-  URLs in log output) **and** write it to `android-apk-download-link.txt`,
-  which gets `store_artifacts`'d — so the link is reachable both by reading
-  the job log and via the CircleCI Artifacts tab.
+- A small Node step parses `eas-android-build.json` and extracts the artifact
+  download URL (the direct `.apk` link EAS returns for a finished build).
+  **This step must fail loudly, not silently, when there's no usable URL:**
+  if the build's `status` isn't the completed/finished state, or the expected
+  artifact URL field is missing/empty, the script exits non-zero (via
+  `process.exit(1)` after printing a clear error) instead of writing an
+  empty/undefined value. That makes the CircleCI step — and therefore the
+  job and workflow — fail whenever the EAS build itself failed, times out, or
+  is cancelled, rather than reporting green with no real download link.
+- Only on success: print the URL plainly in the job log (CircleCI
+  auto-linkifies `https://` URLs in log output) **and** write it to
+  `android-apk-download-link.txt`, which gets `store_artifacts`'d — so the
+  link is reachable both by reading the job log and via the CircleCI
+  Artifacts tab.
 
 No signing setup is needed: EAS auto-generates and manages an Android upload
 keystore on first non-interactive build, the same way it already manages iOS
