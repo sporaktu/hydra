@@ -63,6 +63,7 @@ jest.mock("react-native-safe-area-context", () => ({
 jest.mock("@expo/vector-icons", () => ({
   __esModule: true,
   FontAwesome: () => null,
+  Feather: () => null,
 }));
 
 const mockResolved = {

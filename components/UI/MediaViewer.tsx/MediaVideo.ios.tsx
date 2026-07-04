@@ -1,6 +1,6 @@
 import { useEvent, useEventListener } from "expo";
 import { VideoView } from "expo-video";
-import { useEffect, useRef, useState } from "react";
+import { useContext, useEffect, useRef, useState } from "react";
 import {
   Animated,
   TouchableOpacity,
@@ -9,7 +9,7 @@ import {
   StyleSheet,
   ActivityIndicator,
 } from "react-native";
-import { FontAwesome } from "@expo/vector-icons";
+import { FontAwesome, Feather } from "@expo/vector-icons";
 import {
   useSafeAreaFrame,
   useSafeAreaInsets,
@@ -21,6 +21,7 @@ import { useResolvedVideoSource } from "../../../utils/useResolvedVideoSource";
 import { useSharedVideoPlayer } from "../../../contexts/VideoPlayerRegistryContext";
 import { isVideoVisuallyReady } from "../../../utils/videoOverlayState";
 import { Post } from "../../../api/Posts";
+import { PostSettingsContext } from "../../../contexts/SettingsContexts/PostSettingsContext";
 
 export type VideoItem = {
   type: "video";
@@ -123,7 +124,13 @@ function MediaVideoContent(
   const { source, focused, overlayOpacity, player, retry, resolveStatus } =
     props;
   const { width, height } = useSafeAreaFrame();
-  const { top: safeAreaTop, left: safeAreaLeft } = useSafeAreaInsets();
+  const {
+    top: safeAreaTop,
+    left: safeAreaLeft,
+    right: safeAreaRight,
+  } = useSafeAreaInsets();
+  const { feedVideoAudio, toggleFeedVideoAudio } =
+    useContext(PostSettingsContext);
 
   const touchStart = useRef({
     x: 0,
@@ -231,9 +238,11 @@ function MediaVideoContent(
       // change races through — so fullscreen audio started seconds late and
       // broke after a seek or after closing and reopening. Forcing "doNotMix"
       // here makes expo-video activate the audio session immediately and keep
-      // it active across seeks/reopens.
+      // it active across seeks/reopens. Muted state mirrors the shared
+      // feedVideoAudio setting (same one the feed's mute FAB controls), so
+      // toggling mute in either place stays in sync everywhere.
       player.audioMixingMode = "doNotMix";
-      player.muted = false;
+      player.muted = !feedVideoAudio;
       player.play();
       player.volume = 1;
     } else {
@@ -242,7 +251,7 @@ function MediaVideoContent(
       player.pause();
       player.volume = 0;
     }
-  }, [focused, player]);
+  }, [focused, player, feedVideoAudio]);
 
   useEffect(() => {
     return () => {
@@ -421,6 +430,34 @@ function MediaVideoContent(
           <Text style={{ color: "white" }}>{playbackRate ?? 1}x</Text>
         </TouchableOpacity>
       </Animated.View>
+      <Animated.View
+        style={[
+          styles.muteContainer,
+          {
+            top: safeAreaTop + 10,
+            right: safeAreaRight + 10,
+            opacity: overlayOpacity,
+          },
+        ]}
+        onTouchStart={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+        }}
+      >
+        <TouchableOpacity
+          style={styles.muteButton}
+          accessibilityRole="switch"
+          accessibilityState={{ checked: feedVideoAudio }}
+          accessibilityLabel="Play sound"
+          onPress={() => toggleFeedVideoAudio()}
+        >
+          <Feather
+            name={feedVideoAudio ? "volume-2" : "volume-x"}
+            size={20}
+            color="white"
+          />
+        </TouchableOpacity>
+      </Animated.View>
     </View>
   );
 }
@@ -497,6 +534,17 @@ const styles = StyleSheet.create({
     left: 10,
   },
   playbackRateButton: {
+    borderRadius: 100,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(100, 100, 100, 0.5)",
+    width: 40,
+    aspectRatio: 1,
+  },
+  muteContainer: {
+    position: "absolute",
+  },
+  muteButton: {
     borderRadius: 100,
     alignItems: "center",
     justifyContent: "center",
