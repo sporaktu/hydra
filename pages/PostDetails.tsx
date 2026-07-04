@@ -1,20 +1,14 @@
+import { FlashList, FlashListRef, ViewToken } from "@shopify/flash-list";
 import React, {
   useContext,
   useCallback,
+  useMemo,
   useRef,
   useEffect,
   useState,
   useDeferredValue,
 } from "react";
-import {
-  StyleSheet,
-  View,
-  Text,
-  ActivityIndicator,
-  ScrollView,
-  RefreshControl,
-  ColorValue,
-} from "react-native";
+import { StyleSheet, View, Text, ActivityIndicator } from "react-native";
 
 import {
   getPostsDetail,
@@ -28,9 +22,20 @@ import SortAndContext, {
   SortTypes,
 } from "../components/Navbar/SortAndContext";
 import PostDetailsComponent from "../components/RedditDataRepresentations/Post/PostDetailsComponent";
-import Comments from "../components/RedditDataRepresentations/Post/PostParts/Comments";
+import {
+  CommentComponent,
+  LoadMoreCommentsRow,
+  CollapsedRepliesRow,
+} from "../components/RedditDataRepresentations/Post/PostParts/Comments";
+import {
+  CommentFlatRow,
+  flatRowKey,
+  flattenCommentTree,
+} from "../components/RedditDataRepresentations/Post/PostParts/flattenComments";
 import { AccountContext } from "../contexts/AccountContext";
 import { ScrollerContext, ScrollerProvider } from "../contexts/ScrollerContext";
+import { CommentSettingsContext } from "../contexts/SettingsContexts/CommentSettingsContext";
+import { FiltersContext } from "../contexts/SettingsContexts/FiltersContext";
 import { ThemeContext } from "../contexts/SettingsContexts/ThemeContext";
 import RedditURL from "../utils/RedditURL";
 import { useURLNavigation } from "../utils/navigation";
@@ -38,6 +43,7 @@ import { TabScrollContext } from "../contexts/TabScrollContext";
 import { modifyStat, Stat } from "../db/functions/Stats";
 import ScrollToNextButtonProvider from "../contexts/ScrollToNextButtonProvider";
 import { ScrollToNextButtonContext } from "../contexts/ScrollToNextButtonContext";
+import ThemedRefreshControl from "../components/UI/ThemedRefreshControl";
 
 export type LoadMoreCommentsFunc = (
   commentIds: string[],
@@ -67,41 +73,51 @@ function PostDetails(props: PostDetailsProps) {
     ScrollToNextButtonContext,
   );
 
-  const topOfScroll = useRef<View>(null);
-  const scrollView = useRef<ScrollView>(null);
-  const commentsView = React.useRef<View>(null);
+  const listRef = useRef<FlashListRef<CommentFlatRow>>(null);
+  const listContainer = useRef<View>(null);
+  // Scroll offset and first-visible row are tracked continuously so the
+  // scroll helpers below never need to reach into list internals.
+  const lastScrollOffsetY = useRef(0);
+  const firstViewableIndex = useRef(0);
 
   const [postDetail, setPostDetail] = useState<PostDetail>();
   const [refreshing, setRefreshing] = useState(false);
 
   const deferredPostDetail = useDeferredValue(postDetail);
 
-  const asyncMeasure = (
-    ref: any,
-    type: "measure" | "measureInWindow" = "measure",
-  ): Promise<number[]> => {
-    return new Promise((resolve) => {
-      ref[type]((...args: any) => {
-        resolve(args);
-      });
-    });
-  };
+  const { collapseChildrenOnly } = useContext(CommentSettingsContext);
+  const { doesCommentPassTextFilter } = useContext(FiltersContext);
 
-  const scrollChange = useCallback(
-    async (changeY: number) => {
-      if (!scrollView.current) return;
-      const scrollRef = scrollView.current;
-      const scrollWindowTop = (await asyncMeasure(scrollRef))[5];
-      if (changeY < scrollWindowTop) {
-        const scrollDepth = (await asyncMeasure(topOfScroll.current))[5];
-        scrollView.current.scrollTo({
-          y: scrollWindowTop - scrollDepth + (changeY - scrollWindowTop),
+  const flatRows = useMemo(
+    () =>
+      deferredPostDetail
+        ? flattenCommentTree(deferredPostDetail, {
+            collapseChildrenOnly,
+            passesFilter: doesCommentPassTextFilter,
+          })
+        : [],
+    [deferredPostDetail, collapseChildrenOnly, doesCommentPassTextFilter],
+  );
+  // The scroll helpers are registered once (via context setters) but must see
+  // the current rows, so they read through a ref.
+  const flatRowsRef = useRef(flatRows);
+  flatRowsRef.current = flatRows;
+
+  /**
+   * Keeps a tapped-to-collapse comment visible: if its top (changeY, window
+   * coords) sits above the viewport top, scroll so the comment lands at the
+   * top of the list.
+   */
+  const scrollChange = useCallback(async (changeY: number) => {
+    listContainer.current?.measureInWindow((_x, containerTop) => {
+      if (changeY < containerTop) {
+        listRef.current?.scrollToOffset({
+          offset: lastScrollOffsetY.current + (changeY - containerTop),
           animated: true,
         });
       }
-    },
-    [scrollView.current],
-  );
+    });
+  }, []);
 
   const loadPostDetails = async () => {
     setRefreshing(true);
@@ -208,39 +224,40 @@ function PostDetails(props: PostDetailsProps) {
             (childId) => !commentIds.includes(childId),
           );
         }
-        return oldPostDetail;
+        // New top-level identity so the flattened row array recomputes and
+        // the loaded comments actually appear (returning the same object
+        // would make React bail out of the re-render).
+        return { ...oldPostDetail };
       }
     });
   };
 
+  /**
+   * Jumps to the next/previous top-level comment: a plain index walk over the
+   * flat rows relative to the first visible row (this replaces the old
+   * implementation that reached into React fiber internals to measure nested
+   * comment views).
+   */
   const scrollToNextComment = async (goPrevious = false) => {
-    if (!scrollView.current || !commentsView.current) return;
-    const FUZZY_DISTANCE = 5;
-    const scrollRef = scrollView.current;
-    const scrollY = (await asyncMeasure(scrollRef, "measureInWindow"))[1];
-    const currentScrollHeight = (
-      await asyncMeasure(topOfScroll.current, "measureInWindow")
-    )[1];
-    const childComments = (commentsView.current as any).__internalInstanceHandle
-      .child.child.child.child.memoizedProps[0];
-    let prevDelta = 0;
-    for (const commentView of childComments) {
-      const commentRef = commentView.props.commentPropRef.current;
-      const commentMeasures = await asyncMeasure(commentRef, "measureInWindow");
-      const commentY = commentMeasures[1];
-      const delta = commentY - currentScrollHeight;
-      if (
-        commentY > scrollY &&
-        !(Math.abs(commentY - scrollY) < FUZZY_DISTANCE)
-      ) {
-        scrollView.current.scrollTo({
-          y: goPrevious ? prevDelta : delta,
-          animated: true,
-        });
-        break;
+    const rows = flatRowsRef.current;
+    const isTopLevelComment = (row: CommentFlatRow) =>
+      row.kind === "comment" && row.comment.depth === 0;
+    const current = firstViewableIndex.current;
+    if (goPrevious) {
+      for (let i = Math.min(current, rows.length) - 1; i >= 0; i--) {
+        if (isTopLevelComment(rows[i])) {
+          listRef.current?.scrollToIndex({ index: i, animated: true });
+          return;
+        }
       }
-      if (commentY < scrollY - FUZZY_DISTANCE) {
-        prevDelta = delta;
+      // Nothing above: back to the post itself.
+      listRef.current?.scrollToOffset({ offset: 0, animated: true });
+    } else {
+      for (let i = current + 1; i < rows.length; i++) {
+        if (isTopLevelComment(rows[i])) {
+          listRef.current?.scrollToIndex({ index: i, animated: true });
+          return;
+        }
       }
     }
   };
@@ -248,24 +265,22 @@ function PostDetails(props: PostDetailsProps) {
   const collapseThread = async (comment: Comment) => {
     if (!postDetail) return;
 
-    const currentScrollHeight = (
-      await asyncMeasure(topOfScroll.current, "measureInWindow")
-    )[1];
-    const commentRef = (commentsView.current as any).__internalInstanceHandle
-      .child.child.child.child.memoizedProps[0][comment.path[0]].props
-      .commentPropRef.current;
-    const commentMeasures = await asyncMeasure(commentRef, "measureInWindow");
-    const commentY = commentMeasures[1];
-    const delta = commentY - currentScrollHeight;
-    scrollView.current?.scrollTo({
-      y: delta,
-      animated: true,
-    });
-
     const topOfThread = getCommentFromPath(
       postDetail,
       comment.path.slice(0, 1),
     );
+    const threadIndex = flatRowsRef.current.findIndex(
+      (row) => row.kind === "comment" && row.comment.id === topOfThread.id,
+    );
+    if (threadIndex !== -1) {
+      // The thread head's index is stable across the collapse (only rows
+      // after it are removed); pin it to the viewport top explicitly.
+      listRef.current?.scrollToIndex({
+        index: threadIndex,
+        animated: true,
+        viewPosition: 0,
+      });
+    }
     changeComment({
       ...topOfThread,
       collapsed: true,
@@ -280,18 +295,6 @@ function PostDetails(props: PostDetailsProps) {
   useEffect(() => {
     setScrollToNext(() => scrollToNextComment());
     setScrollToPrevious(() => scrollToNextComment(true));
-  }, [commentsView.current]);
-
-  /**
-   * The tintColor prop on the RefreshControl component is broken in React Native 0.81.5.
-   * This is a workaround to fix the bug. Same fix is used in the RedditDataScroller component.
-   * https://github.com/facebook/react-native/issues/53987
-   */
-  const [refreshControlColor, setRefreshControlColor] = useState<ColorValue>();
-  useEffect(() => {
-    setTimeout(() => {
-      setRefreshControlColor(theme.text);
-    }, 500);
   }, []);
 
   return (
@@ -304,62 +307,110 @@ function PostDetails(props: PostDetailsProps) {
       ]}
     >
       {postDetail ? (
-        <ScrollView
-          ref={scrollView}
-          refreshControl={
-            <RefreshControl
-              tintColor={refreshControlColor}
-              refreshing={refreshing}
-              onRefresh={() => loadPostDetails()}
-            />
-          }
-          scrollEnabled={!scrollDisabled}
-          onScroll={(e) => handleScrollForTabBar(e)}
-          contentContainerStyle={{
-            paddingBottom: 100,
-          }}
-        >
-          <View ref={topOfScroll} />
-          <PostDetailsComponent
-            key={postDetail.id}
-            postDetail={postDetail}
-            loadPostDetails={loadPostDetails}
-            setPostDetail={setPostDetail}
+        <View style={styles.listContainer} ref={listContainer}>
+          <FlashList<CommentFlatRow>
+            ref={listRef}
+            data={flatRows}
+            keyExtractor={flatRowKey}
+            renderItem={({ item }) => {
+              switch (item.kind) {
+                case "comment":
+                  return (
+                    <CommentComponent
+                      comment={item.comment}
+                      index={0}
+                      scrollChange={scrollChange}
+                      changeComment={changeComment}
+                      deleteComment={deleteComment}
+                      collapseThread={collapseThread}
+                      interactionDisabledStatus={
+                        postDetail.interactionDisabledStatus
+                      }
+                    />
+                  );
+                case "loadMore":
+                  return (
+                    <LoadMoreCommentsRow
+                      parent={item.parent}
+                      loadMoreComments={loadMoreCommentsFunc}
+                    />
+                  );
+                case "collapsedReplies":
+                  return (
+                    <CollapsedRepliesRow
+                      comment={item.comment}
+                      changeComment={changeComment}
+                    />
+                  );
+              }
+            }}
+            ListHeaderComponent={
+              <PostDetailsComponent
+                key={postDetail.id}
+                postDetail={postDetail}
+                loadPostDetails={loadPostDetails}
+                setPostDetail={setPostDetail}
+              />
+            }
+            ListEmptyComponent={
+              postDetail !== deferredPostDetail ? (
+                <View style={styles.loadingCommentsContainer}>
+                  <ActivityIndicator size="small" />
+                </View>
+              ) : deferredPostDetail.comments.length === 0 ? (
+                <View style={styles.noCommentsContainer}>
+                  <Text
+                    style={[
+                      styles.noCommentsText,
+                      {
+                        color: theme.text,
+                      },
+                    ]}
+                  >
+                    No comments
+                  </Text>
+                </View>
+              ) : null
+            }
+            ListFooterComponent={
+              flatRows.length > 0 ? (
+                <View
+                  style={[
+                    styles.commentsEndDivider,
+                    { borderBottomColor: theme.divider },
+                  ]}
+                />
+              ) : null
+            }
+            refreshControl={
+              <ThemedRefreshControl
+                refreshing={refreshing}
+                onRefresh={() => loadPostDetails()}
+              />
+            }
+            scrollEnabled={!scrollDisabled}
+            scrollEventThrottle={100}
+            onScroll={(e) => {
+              handleScrollForTabBar(e);
+              lastScrollOffsetY.current = e.nativeEvent.contentOffset.y;
+            }}
+            onViewableItemsChanged={({
+              viewableItems,
+            }: {
+              viewableItems: ViewToken<CommentFlatRow>[];
+            }) => {
+              const first = viewableItems.find(
+                (token) => token.isViewable && token.index !== null,
+              );
+              if (first?.index != null) {
+                firstViewableIndex.current = first.index;
+              }
+            }}
+            contentContainerStyle={{
+              paddingBottom: 100,
+            }}
           />
-          {deferredPostDetail && deferredPostDetail.comments.length > 0 ? (
-            <Comments
-              key={`${deferredPostDetail.id}-comments`}
-              ref={commentsView}
-              loadMoreComments={loadMoreCommentsFunc}
-              postDetail={deferredPostDetail}
-              scrollChange={scrollChange}
-              changeComment={(comment: Comment) => changeComment(comment)}
-              deleteComment={(comment: Comment) => deleteComment(comment)}
-              collapseThread={(comment: Comment) => collapseThread(comment)}
-              interactionDisabledStatus={postDetail.interactionDisabledStatus}
-            />
-          ) : postDetail !== deferredPostDetail ? (
-            <View
-              key="loading-comments"
-              style={styles.loadingCommentsContainer}
-            >
-              <ActivityIndicator size="small" />
-            </View>
-          ) : (
-            <View key="no-comments" style={styles.noCommentsContainer}>
-              <Text
-                style={[
-                  styles.noCommentsText,
-                  {
-                    color: theme.text,
-                  },
-                ]}
-              >
-                No comments
-              </Text>
-            </View>
-          )}
-        </ScrollView>
+        </View>
       ) : (
         <ActivityIndicator size="small" />
       )}
@@ -431,6 +482,12 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     paddingHorizontal: 15,
     paddingVertical: 10,
+  },
+  listContainer: {
+    flex: 1,
+  },
+  commentsEndDivider: {
+    borderBottomWidth: 1,
   },
   loadingCommentsContainer: {
     marginVertical: 25,

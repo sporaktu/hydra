@@ -1,6 +1,6 @@
 {
   "name": "hydra",
-  "version": "4.0.1",
+  "version": "4.0.4",
   "main": "./app/index.tsx",
   "scripts": {
     "start": "expo start",
@@ -11,7 +11,9 @@
     "lint:fix": "eslint **/*.ts **/*.tsx --fix",
     "tsc": "tsc --noEmit",
     "test": "jest",
-    "generate-docs": "bun run generateDocumentation.ts"
+    "generate-docs": "bun run generateDocumentation.ts",
+    "release": "node scripts/release.js",
+    "postinstall": "patch-package"
   },
   "jest": {
     "preset": "jest-expo",
@@ -27,6 +29,7 @@
     "@expo/vector-icons": "^15.0.3",
     "@preeternal/react-native-cookie-manager": "^6.3.2",
     "@react-native-community/netinfo": "11.5.2",
+    "@react-native-menu/menu": "^2.0.0",
     "@react-navigation/bottom-tabs": "^7.4.0",
     "@react-navigation/native": "^7.1.8",
     "@react-navigation/native-stack": "^7.3.16",
@@ -68,6 +71,8 @@
     "react-dom": "19.2.0",
     "react-native": "0.83.2",
     "react-native-gesture-handler": "3.0.0",
+    "react-native-ios-context-menu": "3.2.1",
+    "react-native-ios-utilities": "5.2.0",
     "react-native-mmkv": "^4.2.0",
     "react-native-nitro-modules": "^0.35.0",
     "react-native-reanimated": "4.4.0",
@@ -77,7 +82,17 @@
     "react-native-web": "^0.21.0",
     "react-native-webview": "13.16.0",
     "react-native-worklets": "0.9.1",
-    "typescript-eslint": "^8.39.0"
+    "typescript-eslint": "^8.39.0",
+    "zeego": "^3.0.6"
+  },
+  "overrides": {
+    "zeego": {
+      "react-native-ios-context-menu": "$react-native-ios-context-menu",
+      "react-native-ios-utilities": "$react-native-ios-utilities"
+    },
+    "react-native-ios-context-menu": {
+      "react-native-ios-utilities": "$react-native-ios-utilities"
+    }
   },
   "devDependencies": {
     "@types/jest": "^29.5.14",
@@ -90,6 +105,7 @@
     "eslint-plugin-prettier": "^5.5.4",
     "jest-expo": "~55.0.0",
     "npm-run-all": "^4.1.5",
+    "patch-package": "^8.0.1",
     "prettier": "^3.6.2",
     "react-test-renderer": "^19.2.0",
     "typescript": "~5.9.2",

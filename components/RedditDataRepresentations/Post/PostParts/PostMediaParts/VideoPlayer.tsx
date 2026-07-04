@@ -12,6 +12,7 @@ import Video from "../../../../UI/Gallery/Video";
 import { PostDetail } from "../../../../../api/PostDetail";
 import { FontAwesome } from "@expo/vector-icons";
 import { useSafeAreaFrame } from "react-native-safe-area-context";
+import { useVideoFocus } from "../../../../../contexts/FeedVideoFocusContext";
 
 type VideoPlayerProps = {
   post: Post | PostDetail;
@@ -20,12 +21,24 @@ type VideoPlayerProps = {
 export default function VideoPlayer({ post }: VideoPlayerProps) {
   const { theme } = useContext(ThemeContext);
   const { currentDataMode } = useContext(DataModeContext);
-  const { autoPlayVideos } = useContext(PostSettingsContext);
+  const { autoPlayVideos, feedVideoAudio } = useContext(PostSettingsContext);
   const { interactedWithPost } = useContext(PostInteractionContext);
   const { displayMedia } = useContext(MediaViewerContext);
   const { width, height } = useSafeAreaFrame();
 
-  const dontRender = currentDataMode === "lowData" || !autoPlayVideos;
+  // Focused-only playback (docs/adr/0003-focused-only-playback.md): inside a
+  // feed, only the Focused Post mounts a video player at all — every other
+  // video post shows its Poster. Outside a managed feed (e.g. post details)
+  // isFocused is always true and behavior is unchanged.
+  const video = post.videos[0];
+  const { focusManaged, isFocused } = useVideoFocus(video?.source ?? "");
+
+  const dontRender =
+    currentDataMode === "lowData" ||
+    !autoPlayVideos ||
+    (focusManaged && !isFocused);
+
+  const audioEnabled = focusManaged && isFocused && feedVideoAudio;
 
   const videoRatio = post.mediaAspectRatio ?? 1;
   const heightIfFullSize = width / videoRatio;
@@ -64,7 +77,18 @@ export default function VideoPlayer({ post }: VideoPlayerProps) {
           </View>
         ) : (
           <View style={{ flex: 1 }}>
-            <Video video={post.videos[0]} />
+            <Video
+              video={video}
+              audioEnabled={audioEnabled}
+              poster={
+                post.imageThumbnail ? (
+                  <ImageViewer
+                    images={post.images}
+                    aspectRatio={post.mediaAspectRatio}
+                  />
+                ) : null
+              }
+            />
           </View>
         )}
         {post.videos.length > 1 && (

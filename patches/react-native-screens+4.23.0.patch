@@ -1,0 +1,130 @@
+diff --git a/node_modules/react-native-screens/ios/RNSScreenStackHeaderSubview.mm b/node_modules/react-native-screens/ios/RNSScreenStackHeaderSubview.mm
+index aca7a79..ad7e9a1 100644
+--- a/node_modules/react-native-screens/ios/RNSScreenStackHeaderSubview.mm
++++ b/node_modules/react-native-screens/ios/RNSScreenStackHeaderSubview.mm
+@@ -2,6 +2,7 @@
+ #import "RNSConvert.h"
+ #import "RNSDefines.h"
+ #import "RNSScreenStackHeaderConfig.h"
++#import "RNSScrollToTopGuardGestureRecognizer.h"
+ 
+ #ifdef RCT_NEW_ARCH_ENABLED
+ #import <cxxreact/ReactNativeVersion.h>
+@@ -146,11 +147,30 @@ namespace react = facebook::react;
+   const auto &newHeaderSubviewProps = *std::static_pointer_cast<const react::RNSScreenStackHeaderSubviewProps>(props);
+ 
+   [self setType:[RNSConvert RNSScreenStackHeaderSubviewTypeFromCppEquivalent:newHeaderSubviewProps.type]];
++
++  // Workaround for iOS 26+ nav-bar tap-to-scroll-to-top firing on taps that land on
++  // interactive custom title views (backported from react-native-screens PR #3731).
++  // Applied to title/center subviews only, so taps elsewhere on the bar still scroll to top.
++  if ((_type == RNSScreenStackHeaderSubviewTypeTitle || _type == RNSScreenStackHeaderSubviewTypeCenter) &&
++      ![self hasScrollToTopGuardGestureRecognizer]) {
++    [RNSScrollToTopGuardGestureRecognizer applyToViewIfNecessary:self];
++  }
++
+   [self setHidesSharedBackground:newHeaderSubviewProps.hidesSharedBackground];
+   [self setSynchronousShadowStateUpdatesEnabled:newHeaderSubviewProps.synchronousShadowStateUpdatesEnabled];
+   [super updateProps:props oldProps:oldProps];
+ }
+ 
++- (BOOL)hasScrollToTopGuardGestureRecognizer
++{
++  for (UIGestureRecognizer *recognizer in self.gestureRecognizers) {
++    if ([recognizer isKindOfClass:[RNSScrollToTopGuardGestureRecognizer class]]) {
++      return YES;
++    }
++  }
++  return NO;
++}
++
+ + (react::ComponentDescriptorProvider)componentDescriptorProvider
+ {
+   return react::concreteComponentDescriptorProvider<react::RNSScreenStackHeaderSubviewComponentDescriptor>();
+diff --git a/node_modules/react-native-screens/ios/RNSScrollToTopGuardGestureRecognizer.h b/node_modules/react-native-screens/ios/RNSScrollToTopGuardGestureRecognizer.h
+new file mode 100644
+index 0000000..49a3b13
+--- /dev/null
++++ b/node_modules/react-native-screens/ios/RNSScrollToTopGuardGestureRecognizer.h
+@@ -0,0 +1,26 @@
++#pragma once
++
++#import <UIKit/UIKit.h>
++
++NS_ASSUME_NONNULL_BEGIN
++
++/**
++ * This gesture recognizer is necessary to handle header subviews with custom view
++ * on iOS/iPadOS 26+. Otherwise, clicking a custom view will result in scroll to top action even if
++ * there is a pressable inside the custom view.
++ *
++ * Backported from react-native-screens PR #3731 (unreleased), with the iPad-only
++ * restriction removed: iOS 26+/27 exhibits the same navigation-bar tap-to-scroll-to-top
++ * behavior on iPhone.
++ */
++@interface RNSScrollToTopGuardGestureRecognizer : UITapGestureRecognizer <UIGestureRecognizerDelegate>
++
++/**
++ * This method creates and adds the scroll to top guard gesture recognizer on iOS 26+.
++ * Otherwise, it is a no-op.
++ */
+++ (void)applyToViewIfNecessary:(UIView *)view;
++
++@end
++
++NS_ASSUME_NONNULL_END
+diff --git a/node_modules/react-native-screens/ios/RNSScrollToTopGuardGestureRecognizer.mm b/node_modules/react-native-screens/ios/RNSScrollToTopGuardGestureRecognizer.mm
+new file mode 100644
+index 0000000..7ad456a
+--- /dev/null
++++ b/node_modules/react-native-screens/ios/RNSScrollToTopGuardGestureRecognizer.mm
+@@ -0,0 +1,49 @@
++#import "RNSScrollToTopGuardGestureRecognizer.h"
++#import "RNSDefines.h"
++
++@implementation RNSScrollToTopGuardGestureRecognizer
++
++#if RNS_IPHONE_OS_VERSION_AVAILABLE(26_0)
++
++- (instancetype)init
++{
++  if (self = [super initWithTarget:self action:nil]) {
++    self.cancelsTouchesInView = NO;
++    self.delegate = self;
++  }
++  return self;
++}
++
++#pragma mark - UIGestureRecognizerDelegate
++
++- (BOOL)gestureRecognizer:(UIGestureRecognizer *)gestureRecognizer
++    shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)otherGestureRecognizer
++{
++  return YES;
++}
++
++- (BOOL)gestureRecognizer:(UIGestureRecognizer *)gestureRecognizer
++    shouldBeRequiredToFailByGestureRecognizer:(UIGestureRecognizer *)otherGestureRecognizer
++{
++  // We want to target tap gesture recognizers only (one responsible for scroll to top must be one).
++  if (![otherGestureRecognizer isKindOfClass:[UITapGestureRecognizer class]]) {
++    return NO;
++  }
++
++  // We don't know the exact recognizer responsible for scroll to top so we block all
++  // gesture recognizers above us.
++  return ![otherGestureRecognizer.view isDescendantOfView:gestureRecognizer.view];
++}
++
++#endif // RNS_IPHONE_OS_VERSION_AVAILABLE(26_0)
++
+++ (void)applyToViewIfNecessary:(nonnull UIView *)view
++{
++#if RNS_IPHONE_OS_VERSION_AVAILABLE(26_0)
++  if (@available(iOS 26.0, *)) {
++    [view addGestureRecognizer:[RNSScrollToTopGuardGestureRecognizer new]];
++  }
++#endif // RNS_IPHONE_OS_VERSION_AVAILABLE(26_0)
++}
++
++@end

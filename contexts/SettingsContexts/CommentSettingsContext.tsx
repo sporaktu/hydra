@@ -1,4 +1,4 @@
-import { createContext } from "react";
+import { createContext, useCallback, useMemo } from "react";
 import { useMMKVBoolean } from "react-native-mmkv";
 
 const initialValues = {
@@ -40,12 +40,15 @@ export function CommentSettingsProvider({ children }: React.PropsWithChildren) {
   const showCommentSummary =
     storedShowCommentSummary ?? initialValues.showCommentSummary;
 
-  const toggleVoteIndicator = (newValue = !voteIndicator) => {
-    setVoteIndicator(newValue);
-    alert(
-      "Existing pages may need to be refreshed for this change to take effect.",
-    );
-  };
+  const toggleVoteIndicator = useCallback(
+    (newValue = !voteIndicator) => {
+      setVoteIndicator(newValue);
+      alert(
+        "Existing pages may need to be refreshed for this change to take effect.",
+      );
+    },
+    [voteIndicator, setVoteIndicator],
+  );
 
   const [storedTapToCollapseComment, setTapToCollapseComment] = useMMKVBoolean(
     "tapToCollapseComment",
@@ -53,12 +56,15 @@ export function CommentSettingsProvider({ children }: React.PropsWithChildren) {
   const tapToCollapseComment =
     storedTapToCollapseComment ?? initialValues.tapToCollapseComment;
 
-  const toggleTapToCollapseComment = (newValue = !tapToCollapseComment) => {
-    setTapToCollapseComment(newValue);
-    alert(
-      "Existing pages may need to be refreshed for this change to take effect.",
-    );
-  };
+  const toggleTapToCollapseComment = useCallback(
+    (newValue = !tapToCollapseComment) => {
+      setTapToCollapseComment(newValue);
+      alert(
+        "Existing pages may need to be refreshed for this change to take effect.",
+      );
+    },
+    [tapToCollapseComment, setTapToCollapseComment],
+  );
 
   const [storedCollapseChildrenOnly, setCollapseChildrenOnly] = useMMKVBoolean(
     "collapseChildrenOnly",
@@ -66,33 +72,65 @@ export function CommentSettingsProvider({ children }: React.PropsWithChildren) {
   const collapseChildrenOnly =
     storedCollapseChildrenOnly ?? initialValues.collapseChildrenOnly;
 
+  const toggleCollapseAutoModerator = useCallback(
+    (newValue = !collapseAutoModerator) => setCollapseAutoModerator(newValue),
+    [collapseAutoModerator, setCollapseAutoModerator],
+  );
+
+  const toggleCommentFlairs = useCallback(
+    (newValue = !commentFlairs) => setCommentFlairs(newValue),
+    [commentFlairs, setCommentFlairs],
+  );
+
+  const toggleShowCommentSummary = useCallback(
+    (newValue = !showCommentSummary) => setShowCommentSummary(newValue),
+    [showCommentSummary, setShowCommentSummary],
+  );
+
+  const toggleCollapseChildrenOnly = useCallback(
+    (newValue = !collapseChildrenOnly) => setCollapseChildrenOnly(newValue),
+    [collapseChildrenOnly, setCollapseChildrenOnly],
+  );
+
+  const value = useMemo(
+    () => ({
+      voteIndicator: voteIndicator ?? initialValues.voteIndicator,
+      toggleVoteIndicator,
+
+      collapseAutoModerator,
+      toggleCollapseAutoModerator,
+
+      commentFlairs,
+      toggleCommentFlairs,
+
+      showCommentSummary,
+      toggleShowCommentSummary,
+
+      tapToCollapseComment:
+        tapToCollapseComment ?? initialValues.tapToCollapseComment,
+      toggleTapToCollapseComment,
+
+      collapseChildrenOnly,
+      toggleCollapseChildrenOnly,
+    }),
+    [
+      voteIndicator,
+      toggleVoteIndicator,
+      collapseAutoModerator,
+      toggleCollapseAutoModerator,
+      commentFlairs,
+      toggleCommentFlairs,
+      showCommentSummary,
+      toggleShowCommentSummary,
+      tapToCollapseComment,
+      toggleTapToCollapseComment,
+      collapseChildrenOnly,
+      toggleCollapseChildrenOnly,
+    ],
+  );
+
   return (
-    <CommentSettingsContext.Provider
-      value={{
-        voteIndicator: voteIndicator ?? initialValues.voteIndicator,
-        toggleVoteIndicator,
-
-        collapseAutoModerator,
-        toggleCollapseAutoModerator: (newValue = !collapseAutoModerator) =>
-          setCollapseAutoModerator(newValue),
-
-        commentFlairs,
-        toggleCommentFlairs: (newValue = !commentFlairs) =>
-          setCommentFlairs(newValue),
-
-        showCommentSummary,
-        toggleShowCommentSummary: (newValue = !showCommentSummary) =>
-          setShowCommentSummary(newValue),
-
-        tapToCollapseComment:
-          tapToCollapseComment ?? initialValues.tapToCollapseComment,
-        toggleTapToCollapseComment,
-
-        collapseChildrenOnly,
-        toggleCollapseChildrenOnly: (newValue = !collapseChildrenOnly) =>
-          setCollapseChildrenOnly(newValue),
-      }}
-    >
+    <CommentSettingsContext.Provider value={value}>
       {children}
     </CommentSettingsContext.Provider>
   );
