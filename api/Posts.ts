@@ -3,7 +3,8 @@ import { decode } from "html-entities";
 
 import { Flair, formatFlair } from "./Flair";
 import { api } from "./RedditApi";
-import RedditURL from "../utils/RedditURL";
+import { getMergedMultiFeedURL } from "./Multireddit";
+import RedditURL, { PageType } from "../utils/RedditURL";
 import Time from "../utils/Time";
 import URL, { OpenGraphData } from "../utils/URL";
 import { Alert } from "react-native";
@@ -359,7 +360,16 @@ export async function getPosts(
   url: string,
   options: GetPostOptions = {},
 ): Promise<Post[]> {
-  const redditURL = new RedditURL(url);
+  let redditURL = new RedditURL(url);
+  if (redditURL.getPageType() === PageType.MULTIREDDIT) {
+    const mergedFeedURL = await getMergedMultiFeedURL(url);
+    if (mergedFeedURL === "empty") {
+      return [];
+    }
+    if (mergedFeedURL) {
+      redditURL = mergedFeedURL;
+    }
+  }
   redditURL.changeQueryParam("sr_detail", "true");
   redditURL.changeQueryParam("limit", String(options?.limit ?? 10));
   redditURL.changeQueryParam("after", options?.after ?? "");
