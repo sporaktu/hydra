@@ -32,6 +32,10 @@ type QuickSubredditSearchProps = {
   onExit: () => void;
 };
 
+const PAGE_SIZE = 20;
+const MAX_VISIBLE_ROWS = 10;
+const ROW_HEIGHT = 52;
+
 export default function QuickSubredditSearch({
   show,
   onExit,
@@ -46,8 +50,11 @@ export default function QuickSubredditSearch({
   const [searchText, setSearchText] = useState("");
   const [subreddits, setSubreddits] = useState<Subreddit[]>([]);
   const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [fullyLoaded, setFullyLoaded] = useState(false);
   const [exactSub, setExactSub] = useState<Subreddit | null>(null);
   const exactLookupToken = useRef(0);
+  const searchToken = useRef(0);
 
   const subredditsToShow = searchText
     ? subreddits
@@ -67,17 +74,46 @@ export default function QuickSubredditSearch({
 
   const loadSearchResults = async (searchText: string) => {
     if (!searchText.length) return;
+    const token = ++searchToken.current;
     setLoading(true);
+    setLoadingMore(false);
+    setFullyLoaded(false);
     const results = await getSearchResults<"subreddits">(
       "subreddits",
       searchText,
       {
-        limit: "5",
+        limit: String(PAGE_SIZE),
         sr_detail: "false",
       },
     );
+    // Ignore stale searches (user kept typing)
+    if (token !== searchToken.current) return;
     setSubreddits(results);
+    setFullyLoaded(results.length < PAGE_SIZE);
     setLoading(false);
+  };
+
+  const loadMoreSearchResults = async () => {
+    // Only the searched results paginate; the user's own subs are fully loaded.
+    if (!searchText.length || loading || loadingMore || fullyLoaded) return;
+    const lastSubreddit = subreddits[subreddits.length - 1];
+    if (!lastSubreddit) return;
+    const token = searchToken.current;
+    setLoadingMore(true);
+    const results = await getSearchResults<"subreddits">(
+      "subreddits",
+      searchText,
+      {
+        limit: String(PAGE_SIZE),
+        after: lastSubreddit.after,
+        sr_detail: "false",
+      },
+    );
+    // Ignore this page if a new search started while it was in flight
+    if (token !== searchToken.current) return;
+    setSubreddits((prev) => [...prev, ...results]);
+    setFullyLoaded(results.length < PAGE_SIZE);
+    setLoadingMore(false);
   };
 
   const loadExactSub = async (searchText: string) => {
@@ -188,6 +224,17 @@ export default function QuickSubredditSearch({
           contentContainerStyle={{ backgroundColor: theme.tint }}
           keyboardShouldPersistTaps="handled"
           data={subredditsToShow}
+          onEndReached={loadMoreSearchResults}
+          onEndReachedThreshold={0.5}
+          ListFooterComponent={
+            loadingMore ? (
+              <ActivityIndicator
+                style={styles.footerLoading}
+                size="small"
+                color={theme.text}
+              />
+            ) : null
+          }
           renderItem={({ item, index }) => (
             <TouchableOpacity
               onPress={() => navigateToSubreddit(item)}
@@ -288,7 +335,7 @@ const styles = StyleSheet.create({
     width: "100%",
     marginTop: 10,
     pointerEvents: "auto",
-    maxHeight: 275,
+    maxHeight: ROW_HEIGHT * MAX_VISIBLE_ROWS,
     borderRadius: 10,
     overflow: "hidden",
     borderWidth: 1,
@@ -315,6 +362,9 @@ const styles = StyleSheet.create({
   },
   loading: {
     marginTop: 20,
+  },
+  footerLoading: {
+    paddingVertical: 15,
   },
   goToContainer: {
     width: "100%",

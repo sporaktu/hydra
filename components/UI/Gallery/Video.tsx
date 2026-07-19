@@ -26,6 +26,7 @@ import {
   getRememberedPlaybackPosition,
   rememberPlaybackPosition,
 } from "../../../utils/FeedVideoFocus";
+import { getTrimmedVideoSource } from "../../../utils/videoSourceFallback";
 
 type VideoProps = {
   video: Post["videos"][number];
@@ -53,6 +54,23 @@ function Video({ video, audioEnabled = false, poster }: VideoProps) {
     retry,
   } = useResolvedVideoSource(video.source, video.needsResolution);
 
+  // Fallback for embeds that only fail because of trailing query params: on the
+  // first player error we retry once with a parameter-free source URL. Signed
+  // reddit/redgifs URLs return null here (their params are required), so this
+  // never fights their own recovery paths.
+  const [useTrimmedSource, setUseTrimmedSource] = useState(false);
+  const trimmedUri = getTrimmedVideoSource(resolvedUri);
+  const effectiveUri =
+    useTrimmedSource && trimmedUri ? trimmedUri : resolvedUri;
+
+  // A recycled FlashList cell mounts on a different video — start over from the
+  // untrimmed source so the fallback is scoped to the video that needed it.
+  const hasTriedTrimmedSource = useRef(false);
+  useEffect(() => {
+    hasTriedTrimmedSource.current = false;
+    setUseTrimmedSource(false);
+  }, [video.source]);
+
   // Keep the latest audio preference readable from long-lived
   // callbacks/cleanups without resubscribing them.
   const audioEnabledRef = useRef(audioEnabled);
@@ -60,7 +78,7 @@ function Video({ video, audioEnabled = false, poster }: VideoProps) {
 
   const player = useSharedVideoPlayer(
     video.source,
-    resolvedUri ? VideoCache.makeCachedVideoSource(resolvedUri) : null,
+    effectiveUri ? VideoCache.makeCachedVideoSource(effectiveUri) : null,
     (player) => {
       player.audioMixingMode = audioEnabledRef.current
         ? "doNotMix"
@@ -122,16 +140,16 @@ function Video({ video, audioEnabled = false, poster }: VideoProps) {
   // player with the current resolvedUri at acquire time.
   const lastReplacedUri = useRef<string | null>(null);
   useEffect(() => {
-    if (!player || !resolvedUri) return;
+    if (!player || !effectiveUri) return;
     if (lastReplacedUri.current === null) {
-      lastReplacedUri.current = resolvedUri;
+      lastReplacedUri.current = effectiveUri;
       return;
     }
-    if (lastReplacedUri.current !== resolvedUri) {
-      lastReplacedUri.current = resolvedUri;
-      player.replace(VideoCache.makeCachedVideoSource(resolvedUri));
+    if (lastReplacedUri.current !== effectiveUri) {
+      lastReplacedUri.current = effectiveUri;
+      player.replace(VideoCache.makeCachedVideoSource(effectiveUri));
     }
-  }, [player, resolvedUri]);
+  }, [player, effectiveUri]);
 
   // Tracks whether the fullscreen viewer is currently open for this shared
   // player, so the "always play" effect below doesn't fight the viewer (which
@@ -206,7 +224,7 @@ function Video({ video, audioEnabled = false, poster }: VideoProps) {
   // so it never thrashes.
   const reloadAttempts = useRef(0);
   useEffect(() => {
-    if (!player || !resolvedUri) return;
+    if (!player || !effectiveUri) return;
     // Healthy: clear the watchdog and reset the budget.
     if (playerStatus === "readyToPlay") {
       reloadAttempts.current = 0;
@@ -232,7 +250,7 @@ function Video({ video, audioEnabled = false, poster }: VideoProps) {
       }
       reloadAttempts.current += 1;
       try {
-        player.replace(VideoCache.makeCachedVideoSource(resolvedUri));
+        player.replace(VideoCache.makeCachedVideoSource(effectiveUri));
         if (!isViewerShowing.current) player.play();
       } catch {
         // Player may have been released by the registry as the cell scrolled
@@ -240,7 +258,7 @@ function Video({ video, audioEnabled = false, poster }: VideoProps) {
       }
     }, delay);
     return () => clearTimeout(timer);
-  }, [player, playerStatus, resolvedUri, resolveStatus]);
+  }, [player, playerStatus, effectiveUri, resolveStatus]);
 
   const hasBustedStaleCache = useRef(false);
   useEffect(() => {
@@ -255,6 +273,22 @@ function Video({ video, audioEnabled = false, poster }: VideoProps) {
       retry();
     }
   }, [playerStatus, video.needsResolution, resolveStatus, video.source, retry]);
+
+  // On the first player error, if the source only differs from a working URL by
+  // its trailing query params, retry once with them stripped. getTrimmedVideoSource
+  // returns null for signed reddit/redgifs URLs (their params are required), so
+  // this leaves those to the watchdog / stale-cache paths above.
+  useEffect(() => {
+    if (
+      playerStatus === "error" &&
+      !useTrimmedSource &&
+      !hasTriedTrimmedSource.current &&
+      trimmedUri
+    ) {
+      hasTriedTrimmedSource.current = true;
+      setUseTrimmedSource(true);
+    }
+  }, [playerStatus, useTrimmedSource, trimmedUri]);
 
   useEffect(() => {
     if (!player) return;
