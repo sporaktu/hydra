@@ -1,6 +1,6 @@
 {
   "name": "hydra",
-  "version": "4.2.0",
+  "version": "4.2.1",
   "main": "./app/index.tsx",
   "scripts": {
     "start": "expo start",
@@ -87,6 +87,7 @@
   },
   "overrides": {
     "zeego": {
+      "@react-native-menu/menu": "$@react-native-menu/menu",
       "react-native-ios-context-menu": "$react-native-ios-context-menu",
       "react-native-ios-utilities": "$react-native-ios-utilities"
     },
