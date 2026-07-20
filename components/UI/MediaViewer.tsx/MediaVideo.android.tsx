@@ -1,6 +1,6 @@
 import { useEvent, useEventListener } from "expo";
 import { VideoView } from "expo-video";
-import { useEffect, useRef, useState } from "react";
+import { useContext, useEffect, useRef, useState } from "react";
 import {
   TouchableOpacity,
   View,
@@ -9,7 +9,7 @@ import {
   ActivityIndicator,
 } from "react-native";
 import Animated, { useSharedValue } from "react-native-reanimated";
-import { FontAwesome } from "@expo/vector-icons";
+import { FontAwesome, Feather } from "@expo/vector-icons";
 import {
   useSafeAreaFrame,
   useSafeAreaInsets,
@@ -21,6 +21,7 @@ import { useResolvedVideoSource } from "../../../utils/useResolvedVideoSource";
 import { useSharedVideoPlayer } from "../../../contexts/VideoPlayerRegistryContext";
 import { isVideoVisuallyReady } from "../../../utils/videoOverlayState";
 import { Post } from "../../../api/Posts";
+import { PostSettingsContext } from "../../../contexts/SettingsContexts/PostSettingsContext";
 import { AnimatedStyleHandle } from "react-native-reanimated/lib/typescript/hook/commonTypes";
 import { GestureDetector, usePanGesture } from "react-native-gesture-handler";
 import { runOnJS } from "react-native-worklets";
@@ -124,7 +125,13 @@ function MediaVideoContent(
 ) {
   const { source, focused, overlayStyle, player, retry, resolveStatus } = props;
   const { width, height } = useSafeAreaFrame();
-  const { top: safeAreaTop, left: safeAreaLeft } = useSafeAreaInsets();
+  const {
+    top: safeAreaTop,
+    left: safeAreaLeft,
+    right: safeAreaRight,
+  } = useSafeAreaInsets();
+  const { feedVideoAudio, toggleFeedVideoAudio } =
+    useContext(PostSettingsContext);
 
   const videoTimeAtSeekStart = useSharedValue(0);
   const wasPlayingAtSeekStart = useSharedValue(false);
@@ -248,9 +255,11 @@ function MediaVideoContent(
     if (focused) {
       // Take exclusive audio focus so fullscreen audio starts promptly and
       // stays working across seeks/reopens, instead of inheriting the inline
-      // feed player's "mixWithOthers" muted state.
+      // feed player's "mixWithOthers" muted state. Muted state mirrors the
+      // shared feedVideoAudio setting (same one the feed's mute FAB
+      // controls), so toggling mute in either place stays in sync everywhere.
       player.audioMixingMode = "doNotMix";
-      player.muted = false;
+      player.muted = !feedVideoAudio;
       player.play();
       player.volume = 1;
     } else {
@@ -259,7 +268,7 @@ function MediaVideoContent(
       player.pause();
       player.volume = 0;
     }
-  }, [focused, player]);
+  }, [focused, player, feedVideoAudio]);
 
   useEffect(() => {
     return () => {
@@ -399,6 +408,34 @@ function MediaVideoContent(
             <Text style={{ color: "white" }}>{playbackRate ?? 1}x</Text>
           </TouchableOpacity>
         </Animated.View>
+        <Animated.View
+          style={[
+            styles.muteContainer,
+            {
+              top: safeAreaTop + 10,
+              right: safeAreaRight + 10,
+            },
+            overlayStyle,
+          ]}
+          onTouchStart={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+          }}
+        >
+          <TouchableOpacity
+            style={styles.muteButton}
+            accessibilityRole="switch"
+            accessibilityState={{ checked: feedVideoAudio }}
+            accessibilityLabel="Play sound"
+            onPress={() => toggleFeedVideoAudio()}
+          >
+            <Feather
+              name={feedVideoAudio ? "volume-2" : "volume-x"}
+              size={20}
+              color="white"
+            />
+          </TouchableOpacity>
+        </Animated.View>
       </View>
     </GestureDetector>
   );
@@ -480,6 +517,17 @@ const styles = StyleSheet.create({
     left: 10,
   },
   playbackRateButton: {
+    borderRadius: 100,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(100, 100, 100, 0.5)",
+    width: 40,
+    aspectRatio: 1,
+  },
+  muteContainer: {
+    position: "absolute",
+  },
+  muteButton: {
     borderRadius: 100,
     alignItems: "center",
     justifyContent: "center",

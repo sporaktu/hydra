@@ -1,5 +1,5 @@
 import { FontAwesome, MaterialCommunityIcons } from "@expo/vector-icons";
-import React, { useContext } from "react";
+import React, { useContext, useEffect, useState } from "react";
 import { Alert, StyleSheet, Switch, Text, View } from "react-native";
 
 import List from "../../../components/UI/List";
@@ -7,6 +7,9 @@ import SectionTitle from "../../../components/UI/SectionTitle";
 import TextInput from "../../../components/UI/TextInput";
 import { FiltersContext } from "../../../contexts/SettingsContexts/FiltersContext";
 import { ThemeContext } from "../../../contexts/SettingsContexts/ThemeContext";
+import { getHiddenPosts, unhidePost } from "../../../db/functions/HiddenPosts";
+
+type HiddenPost = ReturnType<typeof getHiddenPosts>[number];
 
 export default function Filters() {
   const { theme } = useContext(ThemeContext);
@@ -23,6 +26,31 @@ export default function Filters() {
   } = useContext(FiltersContext);
 
   const filteredSubreddits = Object.entries(hideFilteredSubreddits);
+
+  const [hiddenPosts, setHiddenPosts] = useState<HiddenPost[]>([]);
+
+  useEffect(() => {
+    setHiddenPosts(getHiddenPosts());
+  }, []);
+
+  const handleUnhidePost = (post: HiddenPost) => {
+    Alert.alert(`Unhide this post?`, post.title, [
+      {
+        text: "Cancel",
+        style: "cancel",
+      },
+      {
+        text: "Unhide",
+        style: "destructive",
+        onPress: async () => {
+          await unhidePost(post.postId);
+          setHiddenPosts((current) =>
+            current.filter((p) => p.postId !== post.postId),
+          );
+        },
+      },
+    ]);
+  };
 
   const hideSeenURLOverrides = Object.entries(hideSeenURLs)
     .filter(([_, setting]) => setting !== filterSeenPosts)
@@ -206,6 +234,62 @@ export default function Filters() {
                 },
               ]);
             },
+          }))}
+        />
+      )}
+      <View style={[styles.divider, { borderColor: theme.divider }]} />
+      <SectionTitle text="Hidden posts" />
+      <Text
+        style={[
+          styles.textDescription,
+          {
+            marginTop: 0,
+            color: theme.text,
+          },
+        ]}
+      >
+        You can hide individual posts by long-pressing them and choosing "Hide
+        Post". Hidden posts are kept locally (not on Reddit) and automatically
+        start showing again one month after they were hidden. Tap a post here to
+        unhide it sooner.
+      </Text>
+      {hiddenPosts.length > 0 && (
+        <List
+          title="Posts"
+          items={hiddenPosts.map((post) => ({
+            key: post.postId,
+            text: post.title,
+            rightIcon: <></>,
+            renderCustomItem: () => (
+              <>
+                <View style={styles.iconMargin}>
+                  <MaterialCommunityIcons
+                    name="eye-off-outline"
+                    size={24}
+                    color={theme.text}
+                  />
+                </View>
+                <View style={styles.subredditFilterInfo}>
+                  <Text
+                    style={{ color: theme.text, fontSize: 17 }}
+                    numberOfLines={2}
+                  >
+                    {post.title}
+                  </Text>
+                  <Text style={{ color: theme.subtleText, fontSize: 13 }}>
+                    {`r/${post.subreddit} · Expires ${new Date(
+                      post.expiresAt,
+                    ).toLocaleDateString()}`}
+                  </Text>
+                </View>
+                <MaterialCommunityIcons
+                  name="trash-can-outline"
+                  size={24}
+                  color={theme.text}
+                />
+              </>
+            ),
+            onPress: () => handleUnhidePost(post),
           }))}
         />
       )}

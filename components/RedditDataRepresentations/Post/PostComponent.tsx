@@ -23,6 +23,11 @@ import { PostInteractionProvider } from "../../../contexts/PostInteractionContex
 import { PostSettingsContext } from "../../../contexts/SettingsContexts/PostSettingsContext";
 import { ThemeContext } from "../../../contexts/SettingsContexts/ThemeContext";
 import {
+  hidePost,
+  isPostHidden,
+  unhidePost,
+} from "../../../db/functions/HiddenPosts";
+import {
   isPostSeen,
   markPostSeen,
   markPostUnseen,
@@ -78,6 +83,10 @@ function PostComponent({
   // onto a different post, so a recycled cell never renders a frame with the
   // previous post's seen-dimming.
   const [seen, setSeen] = useRecyclingState(() => isPostSeen(post), [post.id]);
+  const [hidden, setHidden] = useRecyclingState(
+    () => isPostHidden(post),
+    [post.id],
+  );
 
   useEffect(() => {
     // The subscription keeps this cell in sync when the post is marked seen
@@ -165,6 +174,20 @@ function PostComponent({
         }
         toggleFilterSubreddit(post.subreddit, expiresAt);
         deletePost?.(post);
+      },
+    },
+    {
+      label: hidden ? "Unhide Post" : "Hide Post",
+      isAllowed: !!deletePost,
+      handle: async () => {
+        if (hidden) {
+          await unhidePost(post.id);
+          setHidden(false);
+        } else {
+          await hidePost(post);
+          setHidden(true);
+          deletePost?.(post);
+        }
       },
     },
     {
