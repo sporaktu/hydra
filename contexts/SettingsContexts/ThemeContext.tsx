@@ -1,5 +1,11 @@
 import { setStatusBarStyle } from "expo-status-bar";
-import { createContext, useContext, useEffect, useRef, useState } from "react";
+import {
+  createContext,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 import { useMMKVBoolean, useMMKVString } from "react-native-mmkv";
 
 import Themes, {
@@ -7,7 +13,6 @@ import Themes, {
   CustomTheme,
   NEW_CUSTOM_THEME,
 } from "../../constants/Themes";
-import { SubscriptionsContext } from "../SubscriptionsContext";
 import { getCustomTheme } from "../../db/functions/CustomThemes";
 import { ColorSchemeName, useColorScheme } from "react-native";
 
@@ -29,8 +34,6 @@ const initialThemeContext = {
 export const ThemeContext = createContext(initialThemeContext);
 
 export function ThemeProvider({ children }: React.PropsWithChildren) {
-  const { isPro, purchasesInitialized } = useContext(SubscriptionsContext);
-
   const scheme = useColorScheme();
   const systemColorScheme = scheme === "unspecified" ? "light" : scheme;
 
@@ -46,115 +49,93 @@ export function ThemeProvider({ children }: React.PropsWithChildren) {
   const useDifferentDarkTheme =
     storedUseDifferentDarkTheme ?? initialThemeContext.useDifferentDarkTheme;
 
-  const temporaryThemeTimeout = useRef<ReturnType<typeof setTimeout> | null>(
-    null,
-  );
-  const [temporaryTheme, setTemporaryTheme] = useState<string | null>(null);
-
   const lightTheme = storedCurrentTheme ?? initialThemeContext.currentTheme;
   const darkTheme = storedDarkTheme ?? initialThemeContext.currentTheme;
   const currentTheme =
-    temporaryTheme ??
     (systemColorScheme === "light" || !useDifferentDarkTheme
       ? storedCurrentTheme
-      : storedDarkTheme) ??
-    initialThemeContext.currentTheme;
+      : storedDarkTheme) ?? initialThemeContext.currentTheme;
 
-  const cantUseTheme = (themeKey: string) => {
-    return (
-      purchasesInitialized &&
-      !isPro &&
-      (!(themeKey in Themes) ||
-        (themeKey in Themes && Themes[themeKey as keyof typeof Themes].isPro))
-    );
-  };
+  // Every theme is free, so any theme can always be used.
+  const cantUseTheme = useCallback((_themeKey: string) => false, []);
 
-  const clearTemporaryTheme = () => {
-    if (temporaryThemeTimeout.current) {
-      clearTimeout(temporaryThemeTimeout.current);
-      temporaryThemeTimeout.current = null;
-    }
-    setTemporaryTheme(null);
-  };
-
-  const grantThemeTemporarily = (themeKey: string) => {
-    clearTemporaryTheme();
-    setTemporaryTheme(themeKey);
-    temporaryThemeTimeout.current = setTimeout(
-      () => clearTemporaryTheme(),
-      1000 * 60 * 5,
-    );
-  };
-
-  const setCurrentTheme = (
-    themeKey: string,
-    colorScheme: ColorSchemeName | undefined = useDifferentDarkTheme
-      ? systemColorScheme
-      : "unspecified",
-  ) => {
-    clearTemporaryTheme();
-    if (cantUseTheme(themeKey)) {
-      if (colorScheme === "unspecified" || colorScheme === systemColorScheme) {
-        grantThemeTemporarily(themeKey);
-      }
-    } else {
+  const setCurrentTheme = useCallback(
+    (
+      themeKey: string,
+      colorScheme: ColorSchemeName | undefined = useDifferentDarkTheme
+        ? systemColorScheme
+        : "unspecified",
+    ) => {
       if (colorScheme === "unspecified" || colorScheme === "light") {
         setStoredTheme(themeKey);
       } else {
         setStoredDarkTheme(themeKey);
       }
-    }
-  };
+    },
+    [
+      useDifferentDarkTheme,
+      systemColorScheme,
+      setStoredTheme,
+      setStoredDarkTheme,
+    ],
+  );
 
-  let theme = DEFAULT_THEME;
-  let baseTheme = DEFAULT_THEME;
-  if (currentTheme in Themes) {
-    theme = Themes[currentTheme as keyof typeof Themes];
-    baseTheme = Themes[currentTheme as keyof typeof Themes];
-  } else {
-    const customTheme = getCustomTheme(currentTheme);
-    if (customTheme && customTheme.extends in Themes) {
-      theme = {
-        ...Themes[customTheme.extends as keyof typeof Themes],
-        ...customTheme,
-        isPro: true,
-      };
+  const { theme, baseTheme } = useMemo(() => {
+    let theme = DEFAULT_THEME;
+    let baseTheme = DEFAULT_THEME;
+    if (currentTheme in Themes) {
+      theme = Themes[currentTheme as keyof typeof Themes];
+      baseTheme = Themes[currentTheme as keyof typeof Themes];
+    } else {
+      const customTheme = getCustomTheme(currentTheme);
+      if (customTheme && customTheme.extends in Themes) {
+        theme = {
+          ...Themes[customTheme.extends as keyof typeof Themes],
+          ...customTheme,
+          isPro: true,
+        };
+      }
     }
-  }
-  theme = { ...theme, ...customThemeData };
+    theme = { ...theme, ...customThemeData };
+    return { theme, baseTheme };
+  }, [currentTheme, customThemeData]);
 
   useEffect(() => {
     setStatusBarStyle(theme.statusBar);
   }, [theme.statusBar]);
 
-  useEffect(() => {
-    if (
-      purchasesInitialized &&
-      !temporaryThemeTimeout.current &&
-      cantUseTheme(currentTheme)
-    ) {
-      setStoredTheme(initialThemeContext.currentTheme);
-    }
-  }, [purchasesInitialized, isPro]);
+  const value = useMemo(
+    () => ({
+      systemColorScheme,
+      lightTheme,
+      darkTheme,
+      currentTheme,
+      setCurrentTheme,
+      useDifferentDarkTheme,
+      setUseDifferentDarkTheme,
+      theme,
+      baseTheme,
+      cantUseTheme,
+      customThemeData,
+      setCustomThemeData,
+    }),
+    [
+      systemColorScheme,
+      lightTheme,
+      darkTheme,
+      currentTheme,
+      setCurrentTheme,
+      useDifferentDarkTheme,
+      setUseDifferentDarkTheme,
+      theme,
+      baseTheme,
+      cantUseTheme,
+      customThemeData,
+      setCustomThemeData,
+    ],
+  );
 
   return (
-    <ThemeContext.Provider
-      value={{
-        systemColorScheme,
-        lightTheme,
-        darkTheme,
-        currentTheme,
-        setCurrentTheme,
-        useDifferentDarkTheme,
-        setUseDifferentDarkTheme,
-        theme,
-        baseTheme,
-        cantUseTheme,
-        customThemeData,
-        setCustomThemeData,
-      }}
-    >
-      {children}
-    </ThemeContext.Provider>
+    <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>
   );
 }

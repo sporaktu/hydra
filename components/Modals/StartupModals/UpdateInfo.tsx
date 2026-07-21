@@ -9,7 +9,6 @@ import {
 } from "react-native";
 
 import { ThemeContext } from "../../../contexts/SettingsContexts/ThemeContext";
-import GetHydraProButton from "../../UI/GetHydraProButton";
 import KeyStore from "../../../utils/KeyStore";
 import { TextWithRepairedHeight } from "../../Other/TextWithRepairedHeight";
 
@@ -369,7 +368,6 @@ export default function UpdateInfo({ onExit }: { onExit: () => void }) {
               you can make a pull request at https://github.com/dmilin1/hydra
             </TextWithRepairedHeight>
           </View>
-          <GetHydraProButton onPress={() => exitUpdateInfo()} />
         </ScrollView>
       </View>
       <TouchableOpacity

@@ -8,23 +8,18 @@ import {
   Ionicons,
 } from "@expo/vector-icons";
 import React, { useContext } from "react";
-import { Alert, Switch, View } from "react-native";
+import { Switch, View } from "react-native";
 
 import List from "../../components/UI/List";
 import { CommentSettingsContext } from "../../contexts/SettingsContexts/CommentSettingsContext";
 import { PostSettingsContext } from "../../contexts/SettingsContexts/PostSettingsContext";
 import { TabSettingsContext } from "../../contexts/SettingsContexts/TabSettingsContext";
 import { ThemeContext } from "../../contexts/SettingsContexts/ThemeContext";
-import { SubscriptionsContext } from "../../contexts/SubscriptionsContext";
-import { useURLNavigation } from "../../utils/navigation";
 import { useSettingsPicker } from "../../utils/useSettingsPicker";
 import { useSplitViewSupport } from "../../utils/useSplitViewSupport";
 
 export default function Appearance() {
   const { theme } = useContext(ThemeContext);
-  const { isPro } = useContext(SubscriptionsContext);
-
-  const { pushURL } = useURLNavigation();
 
   const { deviceSupportsSplitView, splitViewEnabled, setSplitViewEnabled } =
     useSplitViewSupport();
@@ -50,10 +45,10 @@ export default function Appearance() {
     toggleBlurNSFW,
     blurSpoilers,
     toggleBlurSpoilers,
-    showPostSummary,
-    toggleShowPostSummary,
     autoPlayVideos,
     toggleAutoPlayVideos,
+    feedVideoAudio,
+    toggleFeedVideoAudio,
     liveTextInteraction,
     toggleLiveTextInteraction,
     tapToCollapsePost,
@@ -67,8 +62,6 @@ export default function Appearance() {
     toggleCollapseAutoModerator,
     commentFlairs,
     toggleCommentFlairs,
-    showCommentSummary,
-    toggleShowCommentSummary,
     tapToCollapseComment,
     toggleTapToCollapseComment,
     collapseChildrenOnly,
@@ -117,22 +110,6 @@ export default function Appearance() {
     value: linkDescriptionLength,
     onChange: changeLinkDescriptionLength,
   });
-
-  const showProAlert = (title: string, message: string) => {
-    Alert.alert(title, message, [
-      {
-        text: "Get Hydra Pro",
-        isPreferred: true,
-        onPress: () => {
-          pushURL("hydra://settings/hydraPro");
-        },
-      },
-      {
-        text: "Maybe Later",
-        style: "cancel",
-      },
-    ]);
-  };
 
   return (
     <>
@@ -310,42 +287,6 @@ export default function Appearance() {
             onPress: () => toggleBlurNSFW(),
           },
           {
-            key: "showPostSummary",
-            icon: (
-              <MaterialIcons name="short-text" size={24} color={theme.text} />
-            ),
-            rightIcon: (
-              <Switch
-                trackColor={{
-                  false: theme.iconSecondary,
-                  true: theme.iconPrimary,
-                }}
-                value={isPro && showPostSummary}
-                onValueChange={() => {
-                  if (isPro) {
-                    toggleShowPostSummary();
-                  } else {
-                    showProAlert(
-                      "Hydra Pro",
-                      "Post summaries are only available to Hydra Pro subscribers.",
-                    );
-                  }
-                }}
-              />
-            ),
-            text: "Show post summary",
-            onPress: () => {
-              if (isPro) {
-                toggleShowPostSummary();
-              } else {
-                showProAlert(
-                  "Hydra Pro",
-                  "Post summaries are only available to Hydra Pro subscribers.",
-                );
-              }
-            },
-          },
-          {
             key: "autoPlayVideos",
             icon: (
               <MaterialIcons name="play-arrow" size={24} color={theme.text} />
@@ -362,6 +303,24 @@ export default function Appearance() {
             ),
             text: "Auto play videos",
             onPress: () => toggleAutoPlayVideos(),
+          },
+          {
+            key: "feedVideoAudio",
+            icon: (
+              <MaterialIcons name="volume-up" size={24} color={theme.text} />
+            ),
+            rightIcon: (
+              <Switch
+                trackColor={{
+                  false: theme.iconSecondary,
+                  true: theme.iconPrimary,
+                }}
+                value={feedVideoAudio}
+                onValueChange={() => toggleFeedVideoAudio()}
+              />
+            ),
+            text: "Focused video audio",
+            onPress: () => toggleFeedVideoAudio(),
           },
           {
             key: "liveTextInteraction",
@@ -462,42 +421,6 @@ export default function Appearance() {
             ),
             text: "Show flairs",
             onPress: () => toggleCommentFlairs(),
-          },
-          {
-            key: "showCommentSummary",
-            icon: (
-              <MaterialIcons name="short-text" size={24} color={theme.text} />
-            ),
-            rightIcon: (
-              <Switch
-                trackColor={{
-                  false: theme.iconSecondary,
-                  true: theme.iconPrimary,
-                }}
-                value={isPro && showCommentSummary}
-                onValueChange={() => {
-                  if (isPro) {
-                    toggleShowCommentSummary();
-                  } else {
-                    showProAlert(
-                      "Hydra Pro",
-                      "Comment summaries are only available to Hydra Pro subscribers.",
-                    );
-                  }
-                }}
-              />
-            ),
-            text: "Show comment summary",
-            onPress: () => {
-              if (isPro) {
-                toggleShowCommentSummary();
-              } else {
-                showProAlert(
-                  "Hydra Pro",
-                  "Comment summaries are only available to Hydra Pro subscribers.",
-                );
-              }
-            },
           },
           {
             key: "tapToCollapseComment",

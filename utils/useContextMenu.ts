@@ -3,10 +3,10 @@ import {
   useActionSheet,
 } from "@expo/react-native-action-sheet";
 import { useContext } from "react";
-import * as Haptics from "expo-haptics";
 
 import { ThemeContext } from "../contexts/SettingsContexts/ThemeContext";
 import { ActionSheetBgContext } from "../contexts/ActionSheetBgContext";
+import { hapticSelection } from "./haptics";
 
 type OpenContextMenuFn = <Options extends string[]>(
   actionSheetOptions: ActionSheetOptions & { options: Options },
@@ -18,7 +18,7 @@ export default function useContextMenu() {
   const { theme } = useContext(ThemeContext);
 
   const openContextMenu: OpenContextMenuFn = (actionSheetOptions) => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    hapticSelection();
     setIsActionSheetShowing(true);
     return new Promise((resolve) => {
       const cancelButtonIndex = actionSheetOptions.options.length;

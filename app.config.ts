@@ -1,12 +1,25 @@
 import packageJson from './package.json';
 
-const projectId = "7e403d7f-7747-4daa-a3c9-4acb948f7a60";
+// Identity is env-overridable so a fork can point builds at its own Expo
+// project / Apple bundle id (set these in the hydra-cci CircleCI context — see
+// docs/ci/circleci-testflight-setup.md) without editing or merge-conflicting
+// this file. `projectId` has no upstream fallback: when EAS_PROJECT_ID is unset
+// (e.g. the bootstrap run) it stays undefined so `eas init` creates a fresh
+// project under EXPO_OWNER instead of trying to link the inaccessible upstream
+// project.
+const projectId = process.env.EAS_PROJECT_ID;
+const owner = process.env.EXPO_OWNER ?? "dmilin";
+// Must match the slug of the EAS project EAS_PROJECT_ID points at (a fork's
+// project may use a different slug, e.g. `ghydra`); override via EXPO_SLUG.
+const slug = process.env.EXPO_SLUG ?? "hydra";
+const iosBundleIdentifier = process.env.IOS_BUNDLE_ID ?? "com.dmilin.hydra";
+const androidPackage = process.env.ANDROID_PACKAGE ?? "com.dmilin.hydra";
 const IS_DEV = process.env.APP_VARIANT === 'development';
 
 module.exports = {
   expo: {
     name: "Hydra",
-    slug: "hydra",
+    slug,
     version: packageJson.version,
     runtimeVersion: {
       policy: 'appVersion',
@@ -25,13 +38,13 @@ module.exports = {
     ios: {
       appStoreUrl: "https://apps.apple.com/us/app/hydra-for-reddit/id6478089063",
       supportsTablet: true,
-      bundleIdentifier: "com.dmilin.hydra",
+      bundleIdentifier: iosBundleIdentifier,
       infoPlist: {
         ITSAppUsesNonExemptEncryption: false,
       },
     },
     android: {
-      package: "com.dmilin.hydra",
+      package: androidPackage,
       adaptiveIcon: {
         foregroundImage: "./assets/images/adaptive-icon.png",
         backgroundColor: "#000000"
@@ -41,12 +54,8 @@ module.exports = {
       bundler: "metro",
       favicon: "./assets/images/favicon.png"
     },
-    extra: {
-      eas: {
-        projectId,
-      }
-    },
-    owner: "dmilin",
+    ...(projectId ? { extra: { eas: { projectId } } } : {}),
+    owner,
     plugins: [
       "expo-router",
       [
@@ -114,9 +123,11 @@ module.exports = {
       "expo-video",
       "expo-web-browser",
     ],
-    updates: {
-      url: `https://u.expo.dev/${projectId}`,
-      fallbackToCacheTimeout: 5000,
-    }
+    ...(projectId ? {
+      updates: {
+        url: `https://u.expo.dev/${projectId}`,
+        fallbackToCacheTimeout: 5000,
+      }
+    } : {})
   }
 }

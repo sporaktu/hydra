@@ -1,5 +1,5 @@
 import { FontAwesome, MaterialCommunityIcons } from "@expo/vector-icons";
-import React, { useContext } from "react";
+import React, { useContext, useEffect, useState } from "react";
 import { Alert, StyleSheet, Switch, Text, View } from "react-native";
 
 import List from "../../../components/UI/List";
@@ -7,114 +7,9 @@ import SectionTitle from "../../../components/UI/SectionTitle";
 import TextInput from "../../../components/UI/TextInput";
 import { FiltersContext } from "../../../contexts/SettingsContexts/FiltersContext";
 import { ThemeContext } from "../../../contexts/SettingsContexts/ThemeContext";
-import { SubscriptionsContext } from "../../../contexts/SubscriptionsContext";
-import { useURLNavigation } from "../../../utils/navigation";
+import { getHiddenPosts, unhidePost } from "../../../db/functions/HiddenPosts";
 
-const noPolitics = `
-Don't show posts about the following:
-- Politics
-- Economics referred to in a political way
-- Companies referred to negatively
-- Billionaires
-- Political sounding subreddits
-- Government agencies
-- Notable government figures
-- Government buildings
-- Hot political topics like abortion, gun control, etc.
-- Negative about the environment, climate change, or sustainability
-- About ethnicity, gender, race, or religion`.trim();
-
-const noNegativity = `
-Don't show the following kinds of posts:
-- Negative or critical of a person, company, or product.
-- Have words like "hate", "dislike", "bad", "worst", etc.
-- Angry rants or complaints.
-- Overly dramatic or emotional
-- Negative about the environment, climate change, or sustainability
-- Attempt to incite anger or outrage
-`.trim();
-
-const noGraphicContent = `
-Don't show posts containing:
-- Violence, fights, or physical harm
-- Blood, injuries, or medical procedures
-- Death, corpses, or crime scenes
-- War, combat, or disaster footage
-- Animal cruelty, dead animals, or hunting content
-- Explicit sexual content or nudity
-- Psychological horror or disturbing content
-- True crime details or crime scene photos
-- Medical emergencies or graphic medical conditions
-- Paranormal or supernatural content
-`.trim();
-
-const noGamblingTriggers = `
-Don't show posts containing:
-- Gambling, betting, or wagering of any kind
-- Sports betting, fantasy sports, or casino games
-- Lottery, scratch cards, or gambling promotions
-- Gambling-related communities, success stories, or ads
-- Stock market trading, crypto trading, or day trading
-- Trading-related communities like WallStreetBets
-- Market speculation, predictions, or volatility
-- Trading terminology like "moon", "hodl", "diamond hands"
-`.trim();
-
-const noDrugsAndAlcohol = `
-Don't show posts containing:
-- Illegal drugs, drug use, or drug culture
-- Drug names, slang, preparation, or acquisition
-- Alcohol brands, drinking stories, or drinking games
-- Prescription drug abuse or misuse
-- Drug-related communities, memes, or media
-- Drug-related news, policy, or legalization
-- Drug-related locations, events, or gatherings
-- Recovery stories, addiction, or withdrawal
-`.trim();
-
-const noFluff = `
-Don't show posts containing:
-- Celebrity news, gossip, or entertainment drama
-- Clickbait or sensational headlines
-- Low-effort content like memes or reposts
-- Posts with poor formatting or minimal effort
-- Made-up stories or exaggerated narratives
-- Personal drama or attention-seeking posts
-- Story-based subreddits with common templates
-`.trim();
-
-const aiFilterPresets = [
-  {
-    key: "noPolitics",
-    text: "No Politics",
-    description: noPolitics,
-  },
-  {
-    key: "noNegativity",
-    text: "No Negativity",
-    description: noNegativity,
-  },
-  {
-    key: "noGraphicContent",
-    text: "No Graphic Content",
-    description: noGraphicContent,
-  },
-  {
-    key: "noGamblingTriggers",
-    text: "No Gambling Triggers",
-    description: noGamblingTriggers,
-  },
-  {
-    key: "noDrugsAndAlcohol",
-    text: "No Drugs and Alcohol",
-    description: noDrugsAndAlcohol,
-  },
-  {
-    key: "noFluff",
-    text: "No Fluff",
-    description: noFluff,
-  },
-];
+type HiddenPost = ReturnType<typeof getHiddenPosts>[number];
 
 export default function Filters() {
   const { theme } = useContext(ThemeContext);
@@ -126,40 +21,40 @@ export default function Filters() {
     toggleAutoMarkAsSeen,
     filterText,
     setFilterText,
-    aiFilterText,
-    setAiFilterText,
     hideFilteredSubreddits,
     toggleFilterSubreddit: toggleHideSubreddit,
   } = useContext(FiltersContext);
 
-  const { isPro } = useContext(SubscriptionsContext);
-  const { pushURL } = useURLNavigation();
-
   const filteredSubreddits = Object.entries(hideFilteredSubreddits);
+
+  const [hiddenPosts, setHiddenPosts] = useState<HiddenPost[]>([]);
+
+  useEffect(() => {
+    setHiddenPosts(getHiddenPosts());
+  }, []);
+
+  const handleUnhidePost = (post: HiddenPost) => {
+    Alert.alert(`Unhide this post?`, post.title, [
+      {
+        text: "Cancel",
+        style: "cancel",
+      },
+      {
+        text: "Unhide",
+        style: "destructive",
+        onPress: async () => {
+          await unhidePost(post.postId);
+          setHiddenPosts((current) =>
+            current.filter((p) => p.postId !== post.postId),
+          );
+        },
+      },
+    ]);
+  };
 
   const hideSeenURLOverrides = Object.entries(hideSeenURLs)
     .filter(([_, setting]) => setting !== filterSeenPosts)
     .map(([url]) => url);
-
-  const showProAlert = () => {
-    Alert.alert(
-      "Hydra Pro Feature",
-      "This feature is only available to Hydra Pro subscribers.",
-      [
-        {
-          text: "Get Hydra Pro",
-          isPreferred: true,
-          onPress: () => {
-            pushURL("hydra://settings/hydraPro");
-          },
-        },
-        {
-          text: "Maybe Later",
-          style: "cancel",
-        },
-      ],
-    );
-  };
 
   return (
     <>
@@ -281,75 +176,6 @@ export default function Filters() {
         "caterpillar".
       </Text>
       <View style={[styles.divider, { borderColor: theme.divider }]} />
-      <SectionTitle text="Smart Post Filter" />
-      <TextInput
-        style={[
-          styles.filterText,
-          {
-            backgroundColor: theme.tint,
-            borderColor: theme.divider,
-            color: theme.text,
-          },
-        ]}
-        textAlignVertical="top"
-        multiline
-        value={aiFilterText}
-        onChangeText={(text) => setAiFilterText(text)}
-        editable={isPro}
-        onPress={() => {
-          if (!isPro) {
-            showProAlert();
-          }
-        }}
-      />
-      <Text
-        style={[
-          styles.textDescription,
-          {
-            color: theme.text,
-          },
-        ]}
-      >
-        Write a description of the kinds of posts you want to have hidden. Posts
-        that match this description will be hidden from view. Or, you can use
-        one of the presets below. Smart filters do a much better job of catching
-        unwanted content than text filters, but only apply to posts.
-        Additionally, smart filters are unable to scan post images, so they may
-        miss some unwanted content if the unwanted material is not alluded to in
-        the title or text of a post.
-      </Text>
-      <List
-        title="Smart Post Filter Presets"
-        items={aiFilterPresets.map((preset) => ({
-          key: preset.key,
-          text: preset.text,
-          icon: (
-            <MaterialCommunityIcons
-              name="view-compact-outline"
-              size={24}
-              color={theme.text}
-            />
-          ),
-          rightIcon:
-            aiFilterText === preset.description ? (
-              <MaterialCommunityIcons
-                name="check"
-                size={24}
-                color={theme.text}
-              />
-            ) : (
-              <></>
-            ),
-          onPress: () => {
-            if (isPro) {
-              setAiFilterText(preset.description);
-            } else {
-              showProAlert();
-            }
-          },
-        }))}
-      />
-      <View style={[styles.divider, { borderColor: theme.divider }]} />
       <SectionTitle text="Filtered subreddits" />
       <Text
         style={[
@@ -408,6 +234,62 @@ export default function Filters() {
                 },
               ]);
             },
+          }))}
+        />
+      )}
+      <View style={[styles.divider, { borderColor: theme.divider }]} />
+      <SectionTitle text="Hidden posts" />
+      <Text
+        style={[
+          styles.textDescription,
+          {
+            marginTop: 0,
+            color: theme.text,
+          },
+        ]}
+      >
+        You can hide individual posts by long-pressing them and choosing "Hide
+        Post". Hidden posts are kept locally (not on Reddit) and automatically
+        start showing again one month after they were hidden. Tap a post here to
+        unhide it sooner.
+      </Text>
+      {hiddenPosts.length > 0 && (
+        <List
+          title="Posts"
+          items={hiddenPosts.map((post) => ({
+            key: post.postId,
+            text: post.title,
+            rightIcon: <></>,
+            renderCustomItem: () => (
+              <>
+                <View style={styles.iconMargin}>
+                  <MaterialCommunityIcons
+                    name="eye-off-outline"
+                    size={24}
+                    color={theme.text}
+                  />
+                </View>
+                <View style={styles.subredditFilterInfo}>
+                  <Text
+                    style={{ color: theme.text, fontSize: 17 }}
+                    numberOfLines={2}
+                  >
+                    {post.title}
+                  </Text>
+                  <Text style={{ color: theme.subtleText, fontSize: 13 }}>
+                    {`r/${post.subreddit} · Expires ${new Date(
+                      post.expiresAt,
+                    ).toLocaleDateString()}`}
+                  </Text>
+                </View>
+                <MaterialCommunityIcons
+                  name="trash-can-outline"
+                  size={24}
+                  color={theme.text}
+                />
+              </>
+            ),
+            onPress: () => handleUnhidePost(post),
           }))}
         />
       )}

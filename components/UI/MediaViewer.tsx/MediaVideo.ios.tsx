@@ -1,6 +1,6 @@
 import { useEvent, useEventListener } from "expo";
-import { useVideoPlayer, VideoView } from "expo-video";
-import { useEffect, useRef, useState } from "react";
+import { VideoView } from "expo-video";
+import { useContext, useEffect, useRef, useState } from "react";
 import {
   Animated,
   TouchableOpacity,
@@ -9,14 +9,19 @@ import {
   StyleSheet,
   ActivityIndicator,
 } from "react-native";
-import { FontAwesome } from "@expo/vector-icons";
+import { FontAwesome, Feather } from "@expo/vector-icons";
 import {
   useSafeAreaFrame,
   useSafeAreaInsets,
 } from "react-native-safe-area-context";
 import DismountWhenBackgrounded from "../../Other/DismountWhenBackgrounded";
 import VideoCache from "../../../utils/VideoCache";
+import Redgifs from "../../../utils/RedGifs";
+import { useResolvedVideoSource } from "../../../utils/useResolvedVideoSource";
+import { useSharedVideoPlayer } from "../../../contexts/VideoPlayerRegistryContext";
+import { isVideoVisuallyReady } from "../../../utils/videoOverlayState";
 import { Post } from "../../../api/Posts";
+import { PostSettingsContext } from "../../../contexts/SettingsContexts/PostSettingsContext";
 
 export type VideoItem = {
   type: "video";
@@ -33,18 +38,99 @@ type MediaVideoProps = {
 const PLAYBACK_RATES = [0.5, 1, 1.5, 2];
 
 function MediaVideo(props: MediaVideoProps) {
-  const { source, focused, overlayOpacity } = props;
+  const { source } = props;
   const { width, height } = useSafeAreaFrame();
-  const { top: safeAreaTop, left: safeAreaLeft } = useSafeAreaInsets();
 
-  const player = useVideoPlayer(
-    VideoCache.makeCachedVideoSource(source.source),
+  const {
+    uri: resolvedUri,
+    status: resolveStatus,
+    retry,
+  } = useResolvedVideoSource(source.source, source.needsResolution);
+
+  const player = useSharedVideoPlayer(
+    source.source,
+    resolvedUri ? VideoCache.makeCachedVideoSource(resolvedUri) : null,
     (player) => {
       player.audioMixingMode = "mixWithOthers";
       player.loop = true;
       player.timeUpdateEventInterval = 1 / 15;
+      player.seekTolerance = {
+        toleranceBefore: 0.1,
+        toleranceAfter: 0.1,
+      };
     },
   );
+
+  // When a stale cached redgifs URL is busted and re-resolved, the shared player
+  // still holds the old source (the registry key is unchanged), so swap the source
+  // on the live player. Skip the first application — the registry created the
+  // player with the current resolvedUri at acquire time.
+  const lastReplacedUri = useRef<string | null>(null);
+  useEffect(() => {
+    if (!player || !resolvedUri) return;
+    if (lastReplacedUri.current === null) {
+      lastReplacedUri.current = resolvedUri;
+      return;
+    }
+    if (lastReplacedUri.current !== resolvedUri) {
+      lastReplacedUri.current = resolvedUri;
+      player.replace(VideoCache.makeCachedVideoSource(resolvedUri));
+    }
+  }, [player, resolvedUri]);
+
+  // C's resolution-error tap-to-retry tile lives here in the wrapper, since the
+  // inner content component requires a non-null player.
+  if (resolveStatus === "error") {
+    return (
+      <View style={[styles.container, { width, height }]}>
+        <View style={styles.notReadyContainer}>
+          <TouchableOpacity onPress={retry}>
+            <Text style={styles.errorText}>
+              Couldn&apos;t load video. Tap to retry.
+            </Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  }
+
+  if (!player) {
+    return (
+      <View style={[styles.container, { width, height }]}>
+        <View style={styles.notReadyContainer}>
+          <ActivityIndicator color="white" />
+        </View>
+      </View>
+    );
+  }
+
+  return (
+    <MediaVideoContent
+      {...props}
+      player={player}
+      retry={retry}
+      resolveStatus={resolveStatus}
+    />
+  );
+}
+
+function MediaVideoContent(
+  props: MediaVideoProps & {
+    player: import("expo-video").VideoPlayer;
+    retry: () => void;
+    resolveStatus: "loading" | "ready" | "error";
+  },
+) {
+  const { source, focused, overlayOpacity, player, retry, resolveStatus } =
+    props;
+  const { width, height } = useSafeAreaFrame();
+  const {
+    top: safeAreaTop,
+    left: safeAreaLeft,
+    right: safeAreaRight,
+  } = useSafeAreaInsets();
+  const { feedVideoAudio, toggleFeedVideoAudio } =
+    useContext(PostSettingsContext);
 
   const touchStart = useRef({
     x: 0,
@@ -56,7 +142,23 @@ function MediaVideo(props: MediaVideoProps) {
 
   const [isPlaying, setIsPlaying] = useState(player.playing);
   const [status, setStatus] = useState(player.status);
+  const [currentTime, setCurrentTime] = useState(player.currentTime);
   const [error, setError] = useState<string | null>(null);
+
+  // expo-video's player.status/.playing/.currentTime are non-reactive getters,
+  // and this viewer reuses the SAME shared player as the inline feed. For a
+  // recycled player the loading->readyToPlay transition almost always fires in
+  // the gap between this component's render-time snapshot and its effect-time
+  // event subscription, so the event is missed and never repeats. Worse, a
+  // shared player observed in the wild can sit at status "loading" FOREVER while
+  // actually playing (currentTime advancing) — so status must never alone gate
+  // the overlay. Re-read the live readiness signals on (re)mount to close that
+  // race; isVideoVisuallyReady() then hides the overlay off playing/currentTime.
+  useEffect(() => {
+    setStatus(player.status);
+    setIsPlaying(player.playing);
+    setCurrentTime(player.currentTime);
+  }, [player]);
 
   const dimensions = {
     width: player.videoTrack?.size.width ?? 0,
@@ -109,21 +211,47 @@ function MediaVideo(props: MediaVideoProps) {
     if (newIsPlaying !== isPlaying) {
       setIsPlaying(newIsPlaying);
     }
+    // A playing player has by definition decoded a frame — capture the live
+    // currentTime so the readiness gate flips even if no timeUpdate has fired.
+    setCurrentTime(player.currentTime);
   });
 
   useEventListener(player, "timeUpdate", (e) => {
+    // Mirror the first advance past frame 0 into state (once) so the overlay's
+    // readiness gate clears even when statusChange/playingChange were missed for
+    // this recycled cell.
+    if (e.currentTime > 0) {
+      setCurrentTime((prev) => (prev > 0 ? prev : e.currentTime));
+    }
     progress.setValue(e.currentTime / player.duration);
   });
 
   useEffect(() => {
+    player.seekTolerance = {
+      toleranceBefore: 0.1,
+      toleranceAfter: 0.1,
+    };
     if (focused) {
+      // The shared player is created by the inline feed with
+      // audioMixingMode "mixWithOthers" + muted, which leaves the iOS audio
+      // session in a mixing state that isn't activated until a play/mute
+      // change races through — so fullscreen audio started seconds late and
+      // broke after a seek or after closing and reopening. Forcing "doNotMix"
+      // here makes expo-video activate the audio session immediately and keep
+      // it active across seeks/reopens. Muted state mirrors the shared
+      // feedVideoAudio setting (same one the feed's mute FAB controls), so
+      // toggling mute in either place stays in sync everywhere.
+      player.audioMixingMode = "doNotMix";
+      player.muted = !feedVideoAudio;
       player.play();
       player.volume = 1;
     } else {
+      // Hand the player back to the inline feed's mixing/muted behavior.
+      player.audioMixingMode = "mixWithOthers";
       player.pause();
       player.volume = 0;
     }
-  }, [focused]);
+  }, [focused, player, feedVideoAudio]);
 
   useEffect(() => {
     return () => {
@@ -133,6 +261,20 @@ function MediaVideo(props: MediaVideoProps) {
       }
     };
   }, []);
+
+  const hasBustedStaleCache = useRef(false);
+  useEffect(() => {
+    if (
+      error &&
+      source.needsResolution &&
+      resolveStatus === "ready" &&
+      !hasBustedStaleCache.current
+    ) {
+      hasBustedStaleCache.current = true;
+      Redgifs.clearCached(Redgifs.getVideoId(source.source));
+      retry();
+    }
+  }, [error, source.needsResolution, resolveStatus, source.source, retry]);
 
   return (
     <View
@@ -174,11 +316,30 @@ function MediaVideo(props: MediaVideoProps) {
         props.setIsScrollLocked(false);
       }}
     >
-      {error ? (
+      {resolveStatus === "error" ? (
+        <View style={styles.notReadyContainer}>
+          <TouchableOpacity onPress={retry}>
+            <Text style={styles.errorText}>
+              Couldn&apos;t load video. Tap to retry.
+            </Text>
+          </TouchableOpacity>
+        </View>
+      ) : resolveStatus === "loading" ? (
+        <View style={styles.notReadyContainer}>
+          <ActivityIndicator color="white" />
+        </View>
+      ) : error ? (
         <View style={styles.notReadyContainer}>
           <Text style={styles.errorText}>{error}</Text>
         </View>
-      ) : status === "loading" ? (
+      ) : !isVideoVisuallyReady({
+          playerStatus: status,
+          isPlaying,
+          currentTime,
+        }) ? (
+        // Gate on the robust readiness signal, never on status alone: a shared,
+        // recycled player can stay at status "loading" forever while actually
+        // playing, which previously left this black box covering a good video.
         <View style={styles.notReadyContainer}>
           <ActivityIndicator color="white" />
         </View>
@@ -269,6 +430,34 @@ function MediaVideo(props: MediaVideoProps) {
           <Text style={{ color: "white" }}>{playbackRate ?? 1}x</Text>
         </TouchableOpacity>
       </Animated.View>
+      <Animated.View
+        style={[
+          styles.muteContainer,
+          {
+            top: safeAreaTop + 10,
+            right: safeAreaRight + 10,
+            opacity: overlayOpacity,
+          },
+        ]}
+        onTouchStart={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+        }}
+      >
+        <TouchableOpacity
+          style={styles.muteButton}
+          accessibilityRole="switch"
+          accessibilityState={{ checked: feedVideoAudio }}
+          accessibilityLabel="Play sound"
+          onPress={() => toggleFeedVideoAudio()}
+        >
+          <Feather
+            name={feedVideoAudio ? "volume-2" : "volume-x"}
+            size={20}
+            color="white"
+          />
+        </TouchableOpacity>
+      </Animated.View>
     </View>
   );
 }
@@ -345,6 +534,17 @@ const styles = StyleSheet.create({
     left: 10,
   },
   playbackRateButton: {
+    borderRadius: 100,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(100, 100, 100, 0.5)",
+    width: 40,
+    aspectRatio: 1,
+  },
+  muteContainer: {
+    position: "absolute",
+  },
+  muteButton: {
     borderRadius: 100,
     alignItems: "center",
     justifyContent: "center",

@@ -7,7 +7,7 @@ import {
   FontAwesome,
 } from "@expo/vector-icons";
 import React, { useContext, useEffect, useState } from "react";
-import { StyleSheet, Text, View, ScrollView, Alert } from "react-native";
+import { StyleSheet, Text, View, ScrollView } from "react-native";
 import * as Application from "expo-application";
 
 import { ThemeContext } from "../../contexts/SettingsContexts/ThemeContext";
@@ -18,8 +18,6 @@ import {
   Stat,
 } from "../../db/functions/Stats";
 import Time from "../../utils/Time";
-import { SubscriptionsContext } from "../../contexts/SubscriptionsContext";
-import { useURLNavigation } from "../../utils/navigation";
 
 type StatCardData = {
   title: string;
@@ -43,9 +41,6 @@ type Achievement = {
 
 export default function Stats() {
   const { theme } = useContext(ThemeContext);
-  const { isPro } = useContext(SubscriptionsContext);
-
-  const { pushURL } = useURLNavigation();
 
   const [installTime, setInstallTime] = useState<number | null>(null);
 
@@ -99,10 +94,8 @@ export default function Stats() {
 
   const maxVisits = topSubreddits.length > 0 ? topSubreddits[0][1] : 1;
 
-  const obfuscateNumber = (text: string) =>
-    isPro ? text : text.replace(/\d/g, "*");
-  const obfuscateText = (text: string) =>
-    isPro ? text : text.replace(/\w/g, "*");
+  const obfuscateNumber = (text: string) => text;
+  const obfuscateText = (text: string) => text;
 
   const prettyNum = (
     value: number,
@@ -411,28 +404,6 @@ export default function Stats() {
     getDaysSinceInstall();
   }, []);
 
-  useEffect(() => {
-    if (!isPro) {
-      Alert.alert(
-        "Hydra Pro Feature",
-        "Stats are only available to Hydra Pro subscribers, but you can check out this page anyway to see what stats you can unlock.",
-        [
-          {
-            text: "Get Hydra Pro",
-            isPreferred: true,
-            onPress: () => {
-              pushURL("hydra://settings/hydraPro");
-            },
-          },
-          {
-            text: "Maybe Later",
-            style: "cancel",
-          },
-        ],
-      );
-    }
-  }, [isPro]);
-
   return (
     <ScrollView
       style={[styles.container, { backgroundColor: theme.background }]}
@@ -548,7 +519,7 @@ export default function Stats() {
       <View style={[styles.funFactsSection, { backgroundColor: theme.tint }]}>
         {[
           "🔒 All these stats are stored locally on your device. They are not sent to any servers.",
-          "❤️ I am incredibly grateful to those of you who have chosen to subscribe to Hydra Pro. I build Hydra in my spare time as a passion project, but as it grows in popularity, it becomes more and more expensive to keep running. Your ongoing support is what keeps Hydra alive.",
+          "❤️ I build Hydra in my spare time as a passion project. Thanks for using it!",
         ].map((fact) => (
           <Text
             key={fact}

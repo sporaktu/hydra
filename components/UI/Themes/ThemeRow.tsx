@@ -9,7 +9,6 @@ import {
 } from "react-native";
 
 import { ThemeContext } from "../../../contexts/SettingsContexts/ThemeContext";
-import { SubscriptionsContext } from "../../../contexts/SubscriptionsContext";
 import Themes, { CustomTheme, Theme } from "../../../constants/Themes";
 import ThemeColorBand from "./ThemeColorBand";
 
@@ -27,9 +26,6 @@ export default function ThemeRow({
   onLongPress,
 }: ThemeRowProps) {
   const { theme: currentTheme } = useContext(ThemeContext);
-  const { isPro } = useContext(SubscriptionsContext);
-
-  const isProTheme = !("isPro" in theme) || theme.isPro;
 
   const themeData =
     "extends" in theme
@@ -71,12 +67,6 @@ export default function ThemeRow({
         {isSelected ? (
           <Feather
             name="check"
-            size={24}
-            color={currentTheme.iconOrTextButton}
-          />
-        ) : isProTheme && !isPro ? (
-          <Feather
-            name="lock"
             size={24}
             color={currentTheme.iconOrTextButton}
           />

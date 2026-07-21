@@ -1,6 +1,6 @@
 {
   "name": "hydra",
-  "version": "4.0.1",
+  "version": "4.1.0",
   "main": "./app/index.tsx",
   "scripts": {
     "start": "expo start",
@@ -10,16 +10,26 @@
     "lint": "eslint **/*.ts **/*.tsx",
     "lint:fix": "eslint **/*.ts **/*.tsx --fix",
     "tsc": "tsc --noEmit",
-    "generate-docs": "bun run generateDocumentation.ts"
+    "test": "jest",
+    "generate-docs": "bun run generateDocumentation.ts",
+    "release": "node scripts/release.js",
+    "postinstall": "patch-package"
   },
   "jest": {
-    "preset": "jest-expo"
+    "preset": "jest-expo",
+    "setupFiles": [
+      "<rootDir>/jest.setup.js"
+    ],
+    "transformIgnorePatterns": [
+      "node_modules/(?!((jest-)?react-native|@react-native(-community)?|expo(nent)?|@expo(nent)?/.*|@expo-google-fonts/.*|react-navigation|@react-navigation/.*|@unimodules/.*|unimodules|sentry-expo|native-base|react-native-svg|@shopify/.*|drizzle-orm))"
+    ]
   },
   "dependencies": {
     "@expo/react-native-action-sheet": "^4.1.1",
     "@expo/vector-icons": "^15.0.3",
     "@preeternal/react-native-cookie-manager": "^6.3.2",
     "@react-native-community/netinfo": "11.5.2",
+    "@react-native-menu/menu": "^2.0.0",
     "@react-navigation/bottom-tabs": "^7.4.0",
     "@react-navigation/native": "^7.1.8",
     "@react-navigation/native-stack": "^7.3.16",
@@ -61,9 +71,10 @@
     "react-dom": "19.2.0",
     "react-native": "0.83.2",
     "react-native-gesture-handler": "3.0.0",
+    "react-native-ios-context-menu": "3.2.1",
+    "react-native-ios-utilities": "5.2.0",
     "react-native-mmkv": "^4.2.0",
     "react-native-nitro-modules": "^0.35.0",
-    "react-native-purchases": "^8.9.3",
     "react-native-reanimated": "4.4.0",
     "react-native-safe-area-context": "~5.6.2",
     "react-native-screens": "~4.23.0",
@@ -71,17 +82,32 @@
     "react-native-web": "^0.21.0",
     "react-native-webview": "13.16.0",
     "react-native-worklets": "0.9.1",
-    "typescript-eslint": "^8.39.0"
+    "typescript-eslint": "^8.39.0",
+    "zeego": "^3.0.6"
+  },
+  "overrides": {
+    "zeego": {
+      "react-native-ios-context-menu": "$react-native-ios-context-menu",
+      "react-native-ios-utilities": "$react-native-ios-utilities"
+    },
+    "react-native-ios-context-menu": {
+      "react-native-ios-utilities": "$react-native-ios-utilities"
+    }
   },
   "devDependencies": {
+    "@types/jest": "^29.5.14",
     "@types/react": "~19.2.10",
+    "@types/react-test-renderer": "^19.1.0",
     "drizzle-kit": "^0.31.4",
     "eslint": "^9.33.0",
     "eslint-config-expo": "~55.0.0",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-prettier": "^5.5.4",
+    "jest-expo": "~55.0.0",
     "npm-run-all": "^4.1.5",
+    "patch-package": "^8.0.1",
     "prettier": "^3.6.2",
+    "react-test-renderer": "^19.2.0",
     "typescript": "~5.9.2",
     "webpack": "^5.101.0",
     "webpack-cli": "^6.0.1",

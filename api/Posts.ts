@@ -3,8 +3,8 @@ import { decode } from "html-entities";
 
 import { Flair, formatFlair } from "./Flair";
 import { api } from "./RedditApi";
-import Redgifs from "../utils/RedGifs";
-import RedditURL from "../utils/RedditURL";
+import { getMergedMultiFeedURL } from "./Multireddit";
+import RedditURL, { PageType } from "../utils/RedditURL";
 import Time from "../utils/Time";
 import URL, { OpenGraphData } from "../utils/URL";
 import { Alert } from "react-native";
@@ -47,7 +47,11 @@ export type Post = {
   images: (string | ImageSource[])[];
   imageThumbnail: ImageSource | null;
   mediaAspectRatio: number;
-  videos: { source: string; videoDownloadURL: string }[];
+  videos: {
+    source: string;
+    videoDownloadURL: string;
+    needsResolution?: boolean;
+  }[];
   poll: Poll | undefined;
   externalLink: string | undefined;
   openGraphData: OpenGraphData | undefined;
@@ -137,9 +141,11 @@ function formatImages(child: any): ImageSource[][] {
   return [];
 }
 
-async function formatVideos(
+export async function formatVideos(
   child: any,
-): Promise<{ source: string; videoDownloadURL: string }[]> {
+): Promise<
+  { source: string; videoDownloadURL: string; needsResolution?: boolean }[]
+> {
   if (child.data.media?.reddit_video?.hls_url) {
     return [
       {
@@ -210,11 +216,11 @@ async function formatVideos(
         },
       ];
     } else if (url.includes("redgifs.com")) {
-      const videoURL = await Redgifs.getMediaURL(url);
       return [
         {
-          source: videoURL,
-          videoDownloadURL: videoURL,
+          source: url,
+          videoDownloadURL: url,
+          needsResolution: true,
         },
       ];
     }
@@ -354,7 +360,16 @@ export async function getPosts(
   url: string,
   options: GetPostOptions = {},
 ): Promise<Post[]> {
-  const redditURL = new RedditURL(url);
+  let redditURL = new RedditURL(url);
+  if (redditURL.getPageType() === PageType.MULTIREDDIT) {
+    const mergedFeedURL = await getMergedMultiFeedURL(url);
+    if (mergedFeedURL === "empty") {
+      return [];
+    }
+    if (mergedFeedURL) {
+      redditURL = mergedFeedURL;
+    }
+  }
   redditURL.changeQueryParam("sr_detail", "true");
   redditURL.changeQueryParam("limit", String(options?.limit ?? 10));
   redditURL.changeQueryParam("after", options?.after ?? "");

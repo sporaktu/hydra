@@ -132,6 +132,10 @@ export default function SearchPage() {
       />
       <RedditDataScroller<SearchResult>
         showInitialLoader={false}
+        // Dragging the list down dismisses the keyboard; "handled" keeps the
+        // trending-subreddit rows (and result rows) tappable while it's up.
+        keyboardDismissMode="on-drag"
+        keyboardShouldPersistTaps="handled"
         loadMore={loadMoreSearchResults}
         refresh={refreshSearchResults}
         fullyLoaded={fullyLoaded}

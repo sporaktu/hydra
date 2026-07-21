@@ -3,7 +3,6 @@ import React, {
   Dispatch,
   PropsWithChildren,
   SetStateAction,
-  useContext,
   useEffect,
   useRef,
   useState,
@@ -17,12 +16,8 @@ import KeyStore from "../utils/KeyStore";
 import PromptForReview, {
   STORE_REVIEW_REQUESTED_KEY,
 } from "../components/Modals/StartupModals/PromptForReview";
-import GetHydraPro, {
-  HYDRA_PRO_LAST_OFFERED_KEY,
-} from "../components/Modals/StartupModals/GetHydraPro";
-import { SubscriptionsContext } from "./SubscriptionsContext";
 
-export type ModalId = "updateInfo" | "promptForReview" | "getHydraPro";
+export type ModalId = "updateInfo" | "promptForReview";
 
 const initialState = {
   startupModal: null as ModalId | null,
@@ -33,7 +28,6 @@ export const StartupModalContext = createContext(initialState);
 
 export function StartupModalProvider({ children }: PropsWithChildren) {
   const [startupModal, setStartupModal] = useState(initialState.startupModal);
-  const { purchasesInitialized, isPro } = useContext(SubscriptionsContext);
   const hasShownStartupModal = useRef(false);
 
   const modals: { id: ModalId; wantsToShow: boolean }[] = [
@@ -48,14 +42,6 @@ export function StartupModalProvider({ children }: PropsWithChildren) {
         (getStat(Stat.APP_LAUNCHES) ?? 0) > 30 &&
         !KeyStore.getBoolean(STORE_REVIEW_REQUESTED_KEY),
     },
-    {
-      id: "getHydraPro",
-      wantsToShow:
-        !isPro &&
-        (getStat(Stat.APP_LAUNCHES) ?? 0) > 50 &&
-        (KeyStore.getNumber(HYDRA_PRO_LAST_OFFERED_KEY) ?? 0) <
-          Date.now() - 1000 * 60 * 60 * 24 * 90,
-    },
   ];
 
   const showTopPriorityModal = () => {
@@ -66,10 +52,10 @@ export function StartupModalProvider({ children }: PropsWithChildren) {
   };
 
   useEffect(() => {
-    if (!purchasesInitialized || hasShownStartupModal.current) return;
+    if (hasShownStartupModal.current) return;
     hasShownStartupModal.current = true;
     showTopPriorityModal();
-  }, [purchasesInitialized]);
+  }, []);
 
   return (
     <StartupModalContext.Provider value={{ startupModal, setStartupModal }}>
@@ -78,9 +64,6 @@ export function StartupModalProvider({ children }: PropsWithChildren) {
       )}
       {startupModal === "promptForReview" && (
         <PromptForReview onExit={() => setStartupModal(null)} />
-      )}
-      {startupModal === "getHydraPro" && (
-        <GetHydraPro onExit={() => setStartupModal(null)} />
       )}
       {children}
     </StartupModalContext.Provider>
