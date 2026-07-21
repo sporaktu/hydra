@@ -135,6 +135,9 @@ jobs:
           # --auto-submit chains `eas submit` after the build. EAS generates the
           # iOS distribution cert + provisioning profile from the ASC API key
           # (EXPO_ASC_* env), so no interactive Apple login is needed.
+          # EAS builds run on Expo's infra and can go quiet for well over
+          # CircleCI's 10m default no-output timeout, so extend it.
+          no_output_timeout: 40m
           command: |
             eas build \
               --platform ios \
@@ -156,6 +159,9 @@ jobs:
           # upload keystore on first non-interactive build. --json suppresses
           # the interactive progress UI and prints machine-readable build
           # results instead, which we parse below for the download link.
+          # --json means stdout stays silent until the build finishes, which
+          # routinely exceeds CircleCI's 10m default no-output timeout.
+          no_output_timeout: 40m
           command: |
             eas build \
               --platform android \
