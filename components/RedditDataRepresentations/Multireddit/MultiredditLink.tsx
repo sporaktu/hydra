@@ -1,18 +1,12 @@
 import { Entypo, FontAwesome } from "@expo/vector-icons";
 import React, { useContext, useState } from "react";
-import {
-  StyleSheet,
-  View,
-  Text,
-  TouchableOpacity,
-  Image,
-  Share,
-} from "react-native";
+import { StyleSheet, View, Text, TouchableOpacity, Image } from "react-native";
 
 import { Multi } from "../../../api/Multireddit";
 import { ThemeContext } from "../../../contexts/SettingsContexts/ThemeContext";
 import { SubredditContext } from "../../../contexts/SubredditContext";
 import { useURLNavigation } from "../../../utils/navigation";
+import shareURL from "../../../utils/shareURL";
 import useContextMenu from "../../../utils/useContextMenu";
 
 export default function MultiredditLink({ multi }: { multi: Multi }) {
@@ -84,7 +78,7 @@ export default function MultiredditLink({ multi }: { multi: Multi }) {
                   deleteSubFromMulti(multi, subreddit.name);
                 }
                 if (result === "Share") {
-                  Share.share({ url: subreddit.url });
+                  shareURL(subreddit.url);
                 }
               }}
               activeOpacity={0.5}

@@ -16,7 +16,6 @@ import {
   TouchableOpacity,
   TouchableHighlight,
   Alert,
-  Share,
   Platform,
 } from "react-native";
 
@@ -36,6 +35,7 @@ import { FiltersContext } from "../../../../contexts/SettingsContexts/FiltersCon
 import { ThemeContext } from "../../../../contexts/SettingsContexts/ThemeContext";
 import { LoadMoreCommentsFunc } from "../../../../pages/PostDetails";
 import RedditURL from "../../../../utils/RedditURL";
+import shareURL from "../../../../utils/shareURL";
 import { useURLNavigation } from "../../../../utils/navigation";
 import useContextMenu from "../../../../utils/useContextMenu";
 import RenderHtml from "../../../HTML/RenderHTML";
@@ -239,7 +239,7 @@ export function CommentComponent({
     {
       label: "Share",
       handle: () => {
-        Share.share({ url: new RedditURL(comment.link).toString() });
+        shareURL(new RedditURL(comment.link).toString());
       },
     },
   ];
@@ -294,9 +294,7 @@ export function CommentComponent({
                   icon: <FontAwesome name="share" />,
                   color: theme.share,
                   action: async () => {
-                    Share.share({
-                      url: new RedditURL(comment.link).toString(),
-                    });
+                    shareURL(new RedditURL(comment.link).toString());
                   },
                 },
                 {

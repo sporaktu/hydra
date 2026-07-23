@@ -1,13 +1,6 @@
 import { AntDesign, Feather, FontAwesome, Octicons } from "@expo/vector-icons";
 import React, { Dispatch, SetStateAction, useContext, useState } from "react";
-import {
-  TouchableOpacity,
-  View,
-  Text,
-  StyleSheet,
-  Share,
-  Alert,
-} from "react-native";
+import { TouchableOpacity, View, Text, StyleSheet, Alert } from "react-native";
 
 import PostMedia from "./PostParts/PostMedia";
 import SubredditIcon from "./PostParts/SubredditIcon";
@@ -18,6 +11,7 @@ import { ModalContext } from "../../../contexts/ModalContext";
 import { PostSettingsContext } from "../../../contexts/SettingsContexts/PostSettingsContext";
 import { ThemeContext } from "../../../contexts/SettingsContexts/ThemeContext";
 import RedditURL from "../../../utils/RedditURL";
+import shareURL from "../../../utils/shareURL";
 import { useRoute, useURLNavigation } from "../../../utils/navigation";
 import NewComment from "../../Modals/NewComment";
 import Time from "../../../utils/Time";
@@ -286,7 +280,7 @@ export default function PostDetailsComponent({
         <TouchableOpacity
           style={styles.buttonsContainer}
           onPress={() => {
-            Share.share({ url: new RedditURL(url).toString() });
+            shareURL(new RedditURL(url).toString());
           }}
         >
           <Feather name="share" size={28} color={theme.iconPrimary} />
