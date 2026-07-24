@@ -132,6 +132,10 @@ jobs:
             '
       - run:
           name: Build on EAS and submit to TestFlight (non-interactive)
+          # EAS runs the build on Expo's cloud and `eas build` prints no output
+          # while it waits, so raise CircleCI's default 10m no-output timeout
+          # above the real build+submit duration or the step is killed mid-build.
+          no_output_timeout: 45m
           # --auto-submit chains `eas submit` after the build. EAS generates the
           # iOS distribution cert + provisioning profile from the ASC API key
           # (EXPO_ASC_* env), so no interactive Apple login is needed.
@@ -152,6 +156,10 @@ jobs:
           var_names: EXPO_OWNER EAS_PROJECT_ID
       - run:
           name: Build Android APK on EAS (non-interactive)
+          # --json waits for the build with no output until it finishes, so raise
+          # CircleCI's default 10m no-output timeout above the real EAS build
+          # duration or the step is killed while the build is still running.
+          no_output_timeout: 45m
           # No signing setup needed: EAS auto-generates and manages an Android
           # upload keystore on first non-interactive build. --json suppresses
           # the interactive progress UI and prints machine-readable build
