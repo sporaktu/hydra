@@ -16,6 +16,7 @@ import { getSearchResults } from "../../api/Search";
 import { resolveSubreddit } from "../../api/SubredditDetails";
 import { useDebouncedEffect } from "../../utils/debounce";
 import { Subreddit } from "../../api/Subreddits";
+import Numbers from "../../utils/Numbers";
 import SubredditIcon from "../RedditDataRepresentations/Post/PostParts/SubredditIcon";
 import {
   NavigationContainerRef,
@@ -254,16 +255,30 @@ export default function QuickSubredditSearch({
                   subredditIcon={item.iconURL}
                   overridePostAppearanceSetting={true}
                 />
-                <Text
-                  style={[
-                    styles.subredditText,
-                    {
-                      color: theme.text,
-                    },
-                  ]}
-                >
-                  {item.name}
-                </Text>
+                <View style={styles.subredditTextContainer}>
+                  <Text
+                    style={[
+                      styles.subredditText,
+                      {
+                        color: theme.text,
+                      },
+                    ]}
+                  >
+                    {item.name}
+                  </Text>
+                  {typeof item.subscribers === "number" && (
+                    <Text
+                      style={[
+                        styles.subredditSubscribers,
+                        {
+                          color: theme.subtleText,
+                        },
+                      ]}
+                    >
+                      {new Numbers(item.subscribers).prettyNum()} subscribers
+                    </Text>
+                  )}
+                </View>
                 <MaterialIcons
                   name="keyboard-arrow-right"
                   size={30}
@@ -349,10 +364,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
-  subredditText: {
-    fontSize: 17,
+  subredditTextContainer: {
     flex: 1,
     marginLeft: 10,
+  },
+  subredditText: {
+    fontSize: 17,
+  },
+  subredditSubscribers: {
+    fontSize: 13,
+    marginTop: 2,
   },
   arrow: {
     marginVertical: -100,
