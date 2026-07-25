@@ -141,6 +141,62 @@ function formatImages(child: any): ImageSource[][] {
   return [];
 }
 
+/**
+ * Reddit exposes a GIF-as-video in `preview.images[].variants.mp4` as a
+ * full-size `source` plus a list of downscaled `resolutions` (which top out
+ * around 640px wide). Always prefer `source` — the downscaled variants are
+ * literally previews and look soft on a phone screen, let alone fullscreen.
+ */
+function bestPreviewMp4(image: any): string | null {
+  const mp4 = image?.variants?.mp4;
+  if (!mp4) return null;
+  const item = mp4.source ?? mp4.resolutions?.at?.(-1);
+  return item?.url ? decode(item.url) : null;
+}
+
+/**
+ * Videos in a Reddit gallery post live in `media_metadata`, one entry per
+ * gallery item, ordered by `gallery_data.items`. Each entry's `s.mp4` is the
+ * full-size original (`p` holds the preview-sized stills).
+ */
+function formatGalleryVideos(
+  child: any,
+): { source: string; videoDownloadURL: string }[] {
+  if (!child.data.gallery_data?.items?.length) return [];
+
+  // Example post: https://www.reddit.com/r/CelebsWithPetiteTits/comments/1s4xx9l/ana_de_armas_or_alison_brie/
+  const galleryIndexes =
+    child.data.gallery_data?.items?.reduce?.(
+      (acc: string[], item: any, i: number) => ({
+        ...acc,
+        [item.media_id]: i,
+      }),
+      {},
+    ) ?? {};
+
+  return (
+    Object.values(child.data.media_metadata ?? {})
+      /**
+       * Posts can have unprocessed media that we can't display. I don't
+       * know why they remain unprocessed. Maybe a Reddit server media
+       * processing bug?
+       *
+       * https://www.reddit.com/r/pocketcasts/comments/1tgukak/display_first_two_lines_of_episode_titles_in_up/
+       */
+      .filter((data: any) => !!data.p)
+      .sort((a: any, b: any) => galleryIndexes[a.id] - galleryIndexes[b.id])
+      .map((data: any) => {
+        if (!data.s?.mp4) return null;
+        const url = decode(data.s.mp4);
+        return {
+          source: url,
+          videoDownloadURL: url,
+        };
+      })
+      .filter((video) => video !== null)
+  );
+}
+
 export async function formatVideos(
   child: any,
 ): Promise<
@@ -154,48 +210,35 @@ export async function formatVideos(
       },
     ];
   }
+  if (child.data.media?.reddit_video?.fallback_url) {
+    // No HLS playlist (happens on some crossposts / older videos). The DASH
+    // fallback is the full-size mp4 — much better than dropping down to the
+    // preview variants below.
+    const fallbackURL = decode(child.data.media.reddit_video.fallback_url);
+    return [
+      {
+        source: fallbackURL,
+        videoDownloadURL: fallbackURL,
+      },
+    ];
+  }
+  /**
+   * Galleries are checked before the preview variants: a gallery post that
+   * also carries a `preview` would otherwise collapse to a single
+   * preview-resolution video instead of every item at full size.
+   */
+  const galleryVideos = formatGalleryVideos(child);
+  if (galleryVideos.length) {
+    return galleryVideos;
+  }
   if (child.data.preview?.images?.[0]?.variants?.mp4) {
     // Example post: https://www.reddit.com/r/gifs/comments/1rzl4fp/seth_hernandez_throws_a_1024_mph_laser_on_the/
-    return child.data.preview.images.map((image: any) => {
-      const item = image.variants.mp4.resolutions.at(-1);
-      return {
-        source: decode(item.url),
-        videoDownloadURL: decode(item.url),
-      };
-    });
-  }
-  if (child.data.gallery_data?.items?.length) {
-    // Example post: https://www.reddit.com/r/CelebsWithPetiteTits/comments/1s4xx9l/ana_de_armas_or_alison_brie/
-    const galleryIndexes =
-      child.data.gallery_data?.items?.reduce?.(
-        (acc: string[], item: any, i: number) => ({
-          ...acc,
-          [item.media_id]: i,
-        }),
-        {},
-      ) ?? {};
-
-    return (
-      Object.values(child.data.media_metadata ?? {})
-        /**
-         * Posts can have unprocessed media that we can't display. I don't
-         * know why they remain unprocessed. Maybe a Reddit server media
-         * processing bug?
-         *
-         * https://www.reddit.com/r/pocketcasts/comments/1tgukak/display_first_two_lines_of_episode_titles_in_up/
-         */
-        .filter((data: any) => !!data.p)
-        .sort((a: any, b: any) => galleryIndexes[a.id] - galleryIndexes[b.id])
-        .map((data: any) => {
-          if (!data.s.mp4) return null;
-          const url = decode(data.s.mp4);
-          return {
-            source: url,
-            videoDownloadURL: url,
-          };
-        })
-        .filter((video) => video !== null)
-    );
+    return child.data.preview.images
+      .map((image: any) => {
+        const url = bestPreviewMp4(image);
+        return url ? { source: url, videoDownloadURL: url } : null;
+      })
+      .filter((video: any) => video !== null);
   }
   const { url, isValid } = RedditURL.getURLIfValid(child.data.url);
   if (!isValid) {

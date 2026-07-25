@@ -28,7 +28,10 @@ import { MediaImage } from "./MediaImage.android";
 import PostOverlay from "./PostOverlay";
 import { MediaItemRow, MediaViewerProps } from "./types";
 import MediaVideo from "./MediaVideo.android";
+import { useMediaViewerTaps } from "./useMediaViewerTaps";
 import { AnimatedStyleHandle } from "react-native-reanimated/lib/typescript/hook/commonTypes";
+import { useVideoPlayerPeek } from "../../../contexts/VideoPlayerRegistryContext";
+import { hapticSelection } from "../../../utils/haptics";
 
 export type { MediaItemCollection } from "./types";
 
@@ -99,13 +102,10 @@ export default function MediaViewer({
   const overlayProgress = useSharedValue(0);
 
   const overlayShown = useRef(false);
-  const overlayTapStart = useRef<{
-    x: number;
-    y: number;
-    timestamp: number;
-  } | null>(null);
   const pendingColumn = useRef(startingColumnIndex);
   const lastArrowTap = useRef(0);
+
+  const peekVideoPlayer = useVideoPlayerPeek();
 
   const rowLengths = media.map((row) => row.length);
   const currentRowSize = media[rowIndex]?.length ?? 0;
@@ -127,12 +127,9 @@ export default function MediaViewer({
     });
   };
 
-  const toggleOverlay = () => {
-    overlayShown.current = !overlayShown.current;
-    overlayProgress.value = withTiming(
-      overlayShown.current ? 1 : 0,
-      OVERLAY_TIMING,
-    );
+  const toggleOverlay = (show = !overlayShown.current) => {
+    overlayShown.current = show;
+    overlayProgress.value = withTiming(show ? 1 : 0, OVERLAY_TIMING);
   };
 
   const scrollToColumn = (column: number) => {
@@ -150,6 +147,39 @@ export default function MediaViewer({
     lastArrowTap.current = now;
     scrollToColumn(base + (direction === "left" ? -1 : 1));
   };
+
+  /**
+   * Double tap in the middle: play/pause the video the viewer is showing. The
+   * player belongs to the focused MediaVideo (via the shared registry), so we
+   * borrow it by key rather than plumbing a handle back up. Pausing reveals the
+   * overlay so the paused state is legible; resuming hides it again.
+   */
+  const toggleCurrentVideoPlayback = () => {
+    const item = media[rowIndex]?.[columnIndex];
+    if (item?.type !== "video") return;
+    const player = peekVideoPlayer(item.source.source);
+    if (!player) return;
+    const wasPlaying = player.playing;
+    if (wasPlaying) {
+      player.pause();
+    } else {
+      player.play();
+    }
+    hapticSelection();
+    toggleOverlay(wasPlaying);
+  };
+
+  const tapHandlers = useMediaViewerTaps({
+    width,
+    canPageSides: () => currentRowSize > 1 && pagerEnabled.value,
+    canTogglePlayback: () => media[rowIndex]?.[columnIndex]?.type === "video",
+    onSingleTap: () => toggleOverlay(),
+    onSideDoubleTap: (direction) => {
+      hapticSelection();
+      handleTapToScrollRow(direction);
+    },
+    onMiddleDoubleTap: toggleCurrentVideoPlayback,
+  });
 
   useAnimatedReaction(
     () => {
@@ -407,25 +437,8 @@ export default function MediaViewer({
         )}
         <Animated.View
           style={[styles.flex, contentStyle]}
-          onTouchStart={(e) =>
-            (overlayTapStart.current = {
-              x: e.nativeEvent.locationX,
-              y: e.nativeEvent.locationY,
-              timestamp: Date.now(),
-            })
-          }
-          onTouchEnd={(e) => {
-            if (!overlayTapStart.current) return;
-            const { x, y, timestamp } = overlayTapStart.current;
-            const { locationX, locationY } = e.nativeEvent;
-            if (
-              Math.abs(locationX - x) < 10 &&
-              Math.abs(locationY - y) < 10 &&
-              Date.now() - timestamp < 300
-            ) {
-              toggleOverlay();
-            }
-          }}
+          onTouchStart={tapHandlers.onTouchStart}
+          onTouchEnd={tapHandlers.onTouchEnd}
         >
           <Animated.View
             style={[
@@ -544,7 +557,15 @@ function RowStrip({
             }}
           >
             {item.type === "image" ? (
-              <MediaImage item={item} pagerEnabled={pagerEnabled} />
+              <MediaImage
+                item={item}
+                pagerEnabled={pagerEnabled}
+                /**
+                 * In a gallery the screen edges belong to the viewer's
+                 * double-tap paging, so the image only zooms from the middle.
+                 */
+                sideTapPages={items.length > 1}
+              />
             ) : (
               <MediaVideo
                 source={item.source}

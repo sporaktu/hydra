@@ -50,12 +50,28 @@ jest.mock("../../../../contexts/SettingsContexts/ThemeContext", () => {
   };
 });
 
+// Controllable stand-in for the fullscreen viewer's visibility broadcast. Like
+// the real one, it replays the current value to a listener the moment it
+// subscribes — which is exactly the case that used to silence the viewer.
+type VisibilityListener = (isShowing: boolean) => void;
+const mockVisibilityListeners = new Set<VisibilityListener>();
+let mockViewerIsShowing = false;
+
+function setViewerShowing(isShowing: boolean) {
+  mockViewerIsShowing = isShowing;
+  mockVisibilityListeners.forEach((listener) => listener(isShowing));
+}
+
 jest.mock("../../../../contexts/MediaViewerContext", () => {
   const { createContext } = require("react");
   return {
     __esModule: true,
     MediaViewerContext: createContext({
-      subscribeToVisibility: () => () => {},
+      subscribeToVisibility: (listener: VisibilityListener) => {
+        mockVisibilityListeners.add(listener);
+        listener(mockViewerIsShowing);
+        return () => mockVisibilityListeners.delete(listener);
+      },
     }),
   };
 });
@@ -110,6 +126,8 @@ function overlayTexts(tree: ReactTestRenderer): string[] {
 
 afterEach(() => {
   mockCurrentPlayer = null;
+  mockVisibilityListeners.clear();
+  mockViewerIsShowing = false;
   jest.clearAllMocks();
 });
 
@@ -203,4 +221,83 @@ it("pauses and remembers the position on unmount so an LRU-cached player stops p
   expect(mockCurrentPlayer!.pause).toHaveBeenCalled();
   expect(mockCurrentPlayer!.muted).toBe(true);
   expect(getRememberedPlaybackPosition("unmount-remember")).toBe(4.2);
+});
+
+// --- handoff to the fullscreen viewer --------------------------------------
+// Regression tests for "videos opened from Gallery Mode have no sound": the
+// grid scrolls to follow the viewer, so an inline cell mounts (or recycles)
+// onto the very player the viewer is playing. Everything this component does to
+// a player it does NOT own would then land on the fullscreen video — muting it,
+// pausing it, or swapping its source.
+
+it("leaves the shared player alone when it mounts while the viewer is open", () => {
+  mockViewerIsShowing = true;
+  mockCurrentPlayer = makePlayer({
+    status: "readyToPlay",
+    playing: true,
+    muted: false,
+  });
+  const video = {
+    source: "viewer-open-mount",
+    needsResolution: false,
+  } as never;
+  act(() => {
+    create(<Video video={video} />);
+  });
+  // The viewer set these; the inline copy must not undo them.
+  expect(mockCurrentPlayer!.muted).toBe(false);
+  expect(mockCurrentPlayer!.pause).not.toHaveBeenCalled();
+});
+
+it("does not mute or pause the shared player on unmount while the viewer is open", () => {
+  mockViewerIsShowing = true;
+  mockCurrentPlayer = makePlayer({
+    status: "readyToPlay",
+    playing: true,
+    muted: false,
+    currentTime: 2,
+  });
+  const video = {
+    source: "viewer-open-unmount",
+    needsResolution: false,
+  } as never;
+  let tree!: ReactTestRenderer;
+  act(() => {
+    tree = create(<Video video={video} />);
+  });
+  act(() => {
+    tree.unmount();
+  });
+  expect(mockCurrentPlayer!.muted).toBe(false);
+  expect(mockCurrentPlayer!.pause).not.toHaveBeenCalled();
+});
+
+it("takes playback back when the viewer closes", () => {
+  mockViewerIsShowing = true;
+  mockCurrentPlayer = makePlayer({
+    status: "readyToPlay",
+    playing: true,
+    muted: false,
+  });
+  const video = { source: "viewer-close", needsResolution: false } as never;
+  act(() => {
+    create(<Video video={video} />);
+  });
+  act(() => {
+    setViewerShowing(false);
+  });
+  expect(mockCurrentPlayer!.muted).toBe(true);
+  expect(mockCurrentPlayer!.play).toHaveBeenCalled();
+});
+
+it("pauses inline playback when the viewer opens over it", () => {
+  mockCurrentPlayer = makePlayer({ status: "readyToPlay", playing: true });
+  const video = { source: "viewer-opens", needsResolution: false } as never;
+  act(() => {
+    create(<Video video={video} />);
+  });
+  act(() => {
+    setViewerShowing(true);
+  });
+  expect(mockCurrentPlayer!.pause).toHaveBeenCalled();
 });

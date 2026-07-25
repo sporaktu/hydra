@@ -44,6 +44,55 @@ describe("Redgifs.getVideoId", () => {
       Redgifs.getVideoId("https://www.redgifs.com/watch/somecoolgif#t=1"),
     ).toBe("somecoolgif");
   });
+
+  it("strips a trailing slash, with or without params after it", () => {
+    expect(
+      Redgifs.getVideoId("https://www.redgifs.com/watch/somecoolgif/"),
+    ).toBe("somecoolgif");
+    expect(
+      Redgifs.getVideoId("https://www.redgifs.com/watch/somecoolgif/?foo=bar"),
+    ).toBe("somecoolgif");
+  });
+
+  it("strips everything after the path on a combined query + fragment", () => {
+    expect(
+      Redgifs.getVideoId(
+        "https://www.redgifs.com/watch/somecoolgif?rel=user%3Aname#t=1",
+      ),
+    ).toBe("somecoolgif");
+  });
+
+  it("handles link shapes other than /watch/", () => {
+    expect(Redgifs.getVideoId("https://www.redgifs.com/ifr/somecoolgif")).toBe(
+      "somecoolgif",
+    );
+    expect(Redgifs.getVideoId("https://www.redgifs.com/i/somecoolgif")).toBe(
+      "somecoolgif",
+    );
+    expect(Redgifs.getVideoId("https://redgifs.com/somecoolgif")).toBe(
+      "somecoolgif",
+    );
+  });
+
+  it("drops the extension from a direct media link", () => {
+    expect(
+      Redgifs.getVideoId("https://media.redgifs.com/somecoolgif.mp4?expires=1"),
+    ).toBe("somecoolgif");
+  });
+
+  it("returns nothing for a link with no id", () => {
+    expect(Redgifs.getVideoId("https://www.redgifs.com/")).toBe("");
+    expect(Redgifs.getVideoId("https://www.redgifs.com")).toBe("");
+  });
+});
+
+describe("Redgifs.getMediaURL with an unresolvable link", () => {
+  it("fails without asking the api for an empty id", async () => {
+    await expect(
+      Redgifs.getMediaURL("https://www.redgifs.com/"),
+    ).rejects.toThrow(RedgifsResolutionError);
+    expect(mockSafeFetch).not.toHaveBeenCalled();
+  });
 });
 
 describe("Redgifs cache", () => {
