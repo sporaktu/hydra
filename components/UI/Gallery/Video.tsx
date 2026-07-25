@@ -76,6 +76,26 @@ function Video({ video, audioEnabled = false, poster }: VideoProps) {
   const audioEnabledRef = useRef(audioEnabled);
   audioEnabledRef.current = audioEnabled;
 
+  /**
+   * Whether the fullscreen viewer is currently showing. While it is, it owns
+   * the shared player — this inline copy must not touch mute state, playback,
+   * or the source, or it silences/pauses the video the user is watching. That
+   * bites hardest in Gallery Mode, where the grid scrolls to follow the viewer
+   * and so recycles cells onto the very video the viewer is playing.
+   *
+   * Mirrored into a ref by the FIRST effect in this component so every later
+   * effect in the same commit already reads the correct value (the listener
+   * fires synchronously on subscribe).
+   */
+  const isViewerShowing = useRef(false);
+  useEffect(
+    () =>
+      subscribeToVisibility((isShowing) => {
+        isViewerShowing.current = isShowing;
+      }),
+    [subscribeToVisibility],
+  );
+
   const player = useSharedVideoPlayer(
     video.source,
     effectiveUri ? VideoCache.makeCachedVideoSource(effectiveUri) : null,
@@ -147,14 +167,12 @@ function Video({ video, audioEnabled = false, poster }: VideoProps) {
     }
     if (lastReplacedUri.current !== effectiveUri) {
       lastReplacedUri.current = effectiveUri;
+      // The viewer runs the same swap on the same shared player, so leave it to
+      // the viewer rather than replacing the source it is playing from.
+      if (isViewerShowing.current) return;
       player.replace(VideoCache.makeCachedVideoSource(effectiveUri));
     }
   }, [player, effectiveUri]);
-
-  // Tracks whether the fullscreen viewer is currently open for this shared
-  // player, so the "always play" effect below doesn't fight the viewer (which
-  // pauses the inline feed playback while it owns the player).
-  const isViewerShowing = useRef(false);
 
   // The feed always wants the player looping and playing (muted unless this
   // is the Focused Post with feed audio on) — even if a fullscreen viewer
@@ -163,12 +181,14 @@ function Video({ video, audioEnabled = false, poster }: VideoProps) {
   // "readyToPlay" yet when the player is first acquired, so the configure-time
   // play() never starts them. Once they reach readyToPlay we (re-)issue play(),
   // otherwise they sit paused inline as a black box until tapped into fullscreen.
+  // Skipped entirely while the viewer owns the player: re-muting it there is
+  // what silenced fullscreen videos opened from Gallery Mode.
   useEffect(() => {
-    if (!player) return;
+    if (!player || isViewerShowing.current) return;
     player.muted = !audioEnabled;
     player.audioMixingMode = audioEnabled ? "doNotMix" : "mixWithOthers";
     player.loop = true;
-    if (player.status === "readyToPlay" && !isViewerShowing.current) {
+    if (player.status === "readyToPlay") {
       player.play();
     }
   }, [player, playerStatus, audioEnabled]);
@@ -182,7 +202,7 @@ function Video({ video, audioEnabled = false, poster }: VideoProps) {
   }, [player, video.source]);
   useEffect(() => {
     if (!player || hasRestoredPosition.current) return;
-    if (playerStatus !== "readyToPlay") return;
+    if (playerStatus !== "readyToPlay" || isViewerShowing.current) return;
     hasRestoredPosition.current = true;
     const remembered = getRememberedPlaybackPosition(video.source);
     if (remembered > 0 && player.currentTime < 0.05) {
@@ -243,15 +263,16 @@ function Video({ video, audioEnabled = false, poster }: VideoProps) {
     // Stuck (loading / idle / error) while visible — arm a watchdog.
     const delay = nextReloadDelayMs(reloadAttempts.current);
     const timer = setTimeout(() => {
-      // Re-check: only reload if still not ready (status is a live getter).
-      if (player.status === "readyToPlay") {
+      // Re-check: only reload if still not ready (status is a live getter), and
+      // never yank the source out from under the fullscreen viewer.
+      if (player.status === "readyToPlay" || isViewerShowing.current) {
         reloadAttempts.current = 0;
         return;
       }
       reloadAttempts.current += 1;
       try {
         player.replace(VideoCache.makeCachedVideoSource(effectiveUri));
-        if (!isViewerShowing.current) player.play();
+        player.play();
       } catch {
         // Player may have been released by the registry as the cell scrolled
         // off; the next mount will re-acquire a fresh one. Nothing to do.
@@ -309,6 +330,7 @@ function Video({ video, audioEnabled = false, poster }: VideoProps) {
   useEffect(() => {
     if (!player) return;
     const subscription = AppState.addEventListener("change", (state) => {
+      if (isViewerShowing.current) return;
       if (state === "active" && player.status === "readyToPlay") {
         player.play();
       }
@@ -316,14 +338,25 @@ function Video({ video, audioEnabled = false, poster }: VideoProps) {
     return () => subscription.remove();
   }, [player]);
 
+  // Hand playback to and from the fullscreen viewer. Only *transitions* matter:
+  // the listener also fires synchronously on subscribe, and a cell that mounts
+  // (or recycles) while the viewer is already open must leave the player alone
+  // — pausing there stopped the very video the user had open in Gallery Mode.
   useEffect(() => {
     if (!player) return;
+    let isFirstCallback = true;
     return subscribeToVisibility((isShowing) => {
-      isViewerShowing.current = isShowing;
+      const wasFirstCallback = isFirstCallback;
+      isFirstCallback = false;
+      if (wasFirstCallback && isShowing) return;
       if (isShowing) {
         player.pause();
       } else {
+        player.audioMixingMode = audioEnabledRef.current
+          ? "doNotMix"
+          : "mixWithOthers";
         player.muted = !audioEnabledRef.current;
+        player.loop = true;
         player.play();
       }
     });

@@ -218,12 +218,31 @@ async function waitForCooldown(): Promise<void> {
 const resolvedUrlCache = new Map<string, string>();
 
 export default class Redgifs {
+  /**
+   * The gif id the v2 API wants, from any redgifs link we might be handed.
+   *
+   * Everything after the path is stripped first — query strings (`?rel=`,
+   * `?utm_source=`, share/embed params), hash fragments, and trailing slashes
+   * all otherwise end up glued to the id and turn the lookup into a 404. The id
+   * is then the last path segment, which covers every link shape redgifs uses:
+   * `/watch/<id>`, `/ifr/<id>`, `/i/<id>`, a bare `/<id>`, and direct media
+   * links like `media.redgifs.com/<id>.mp4` (extension dropped).
+   *
+   * Returns "" for a link with no path segment at all, which callers treat as
+   * unresolvable rather than requesting `/v2/gifs/undefined`.
+   */
   static getVideoId(url: string): string {
-    return url.split(/watch\/|\?|#/)[1];
+    const path = url.split(/[?#]/)[0].replace(/^[a-z][a-z0-9+.-]*:\/\//i, "");
+    const segments = path.split("/").slice(1).filter(Boolean);
+    const id = segments.at(-1) ?? "";
+    return id.replace(/\.[a-z0-9]{2,4}$/i, "");
   }
 
   static async getMediaURL(url: string, signal?: AbortSignal): Promise<string> {
     const videoId = Redgifs.getVideoId(url);
+    if (!videoId) {
+      throw new RedgifsResolutionError(`No Redgifs id in "${url}"`);
+    }
     const cached = resolvedUrlCache.get(videoId);
     if (cached) {
       return cached;
