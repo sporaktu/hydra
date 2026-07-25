@@ -28,8 +28,11 @@ import MediaVideo, { VideoItem } from "./MediaVideo";
 import { ImageItem, MediaImage } from "./MediaImage";
 import * as ExpoOrientation from "expo-screen-orientation";
 import PostOverlay from "./PostOverlay";
+import { useMediaViewerTaps } from "./useMediaViewerTaps";
 import { Post } from "../../../api/Posts";
 import { PostDetail } from "../../../api/PostDetail";
+import { useVideoPlayerPeek } from "../../../contexts/VideoPlayerRegistryContext";
+import { hapticSelection } from "../../../utils/haptics";
 
 type MediaItem = ImageItem | VideoItem;
 
@@ -71,11 +74,7 @@ export default function MediaViewer({
 
   const rowFlashListRef = useRef<FlashListRef<MediaItem>>(null);
 
-  const overlayTapStart = useRef<{
-    x: number;
-    y: number;
-    timestamp: number;
-  } | null>(null);
+  const peekVideoPlayer = useVideoPlayerPeek();
 
   // Track horizontal scroll position for each row independently
   const rowScrollPositions = useRef<Map<number, number>>(new Map());
@@ -178,12 +177,58 @@ export default function MediaViewer({
         ? tapToScrollColumnIndex.current
         : currentColumnIndex;
     lastTapToScrollTime.current = now;
-    tapToScrollColumnIndex.current =
-      currentIndex + (direction === "left" ? -1 : 1);
-    rowFlashListRef.current?.scrollToIndex({
-      index: tapToScrollColumnIndex.current,
-    });
+    // Clamped because double taps (unlike the arrow buttons) aren't disabled at
+    // the ends of the row.
+    const target = Math.min(
+      Math.max(currentIndex + (direction === "left" ? -1 : 1), 0),
+      currentRowSize - 1,
+    );
+    tapToScrollColumnIndex.current = target;
+    rowFlashListRef.current?.scrollToIndex({ index: target });
   };
+
+  const toggleOverlay = (show = !showOverlay.current) => {
+    showOverlay.current = show;
+    Animated.timing(overlayOpacity.current, {
+      toValue: show ? 1 : 0,
+      duration: 150,
+      useNativeDriver: true,
+    }).start();
+  };
+
+  /**
+   * Double tap in the middle: play/pause the video the viewer is showing. The
+   * player belongs to the focused MediaVideo (via the shared registry), so we
+   * borrow it by key rather than plumbing a handle back up. Pausing reveals the
+   * overlay so the paused state is legible; resuming hides it again.
+   */
+  const toggleCurrentVideoPlayback = () => {
+    const item = media[currentRowIndex]?.[currentColumnIndex];
+    if (item?.type !== "video") return;
+    const player = peekVideoPlayer(item.source.source);
+    if (!player) return;
+    const wasPlaying = player.playing;
+    if (wasPlaying) {
+      player.pause();
+    } else {
+      player.play();
+    }
+    hapticSelection();
+    toggleOverlay(wasPlaying);
+  };
+
+  const tapHandlers = useMediaViewerTaps({
+    width,
+    canPageSides: () => currentRowSize > 1 && !isScrollLocked,
+    canTogglePlayback: () =>
+      media[currentRowIndex]?.[currentColumnIndex]?.type === "video",
+    onSingleTap: () => toggleOverlay(),
+    onSideDoubleTap: (direction) => {
+      hapticSelection();
+      handleTapToScrollRow(direction);
+    },
+    onMiddleDoubleTap: toggleCurrentVideoPlayback,
+  });
 
   const verticalScrollHandler = useAnimatedScrollHandler(
     {
@@ -288,31 +333,8 @@ export default function MediaViewer({
         )}
         <Reanimated.View
           style={[styles.contentContainer, contentStyle]}
-          onTouchStart={(e) =>
-            (overlayTapStart.current = {
-              x: e.nativeEvent.locationX,
-              y: e.nativeEvent.locationY,
-              timestamp: Date.now(),
-            })
-          }
-          onTouchEnd={(e) => {
-            if (overlayTapStart.current) {
-              const { x, y, timestamp } = overlayTapStart.current;
-              const { locationX, locationY } = e.nativeEvent;
-              if (
-                Math.abs(locationX - x) < 10 &&
-                Math.abs(locationY - y) < 10 &&
-                Date.now() - timestamp < 300
-              ) {
-                showOverlay.current = !showOverlay.current;
-                Animated.timing(overlayOpacity.current, {
-                  toValue: showOverlay.current ? 1 : 0,
-                  duration: 150,
-                  useNativeDriver: true,
-                }).start();
-              }
-            }
-          }}
+          onTouchStart={tapHandlers.onTouchStart}
+          onTouchEnd={tapHandlers.onTouchEnd}
         >
           <Animated.View
             style={[
@@ -488,6 +510,11 @@ function MediaRow({
             <MediaImage
               item={mediaItem}
               setIsScrollLocked={setIsScrollLocked}
+              /**
+               * In a gallery the screen edges belong to the viewer's
+               * double-tap paging, so the image only zooms from the middle.
+               */
+              sideTapPages={items.length > 1}
             />
           ) : mediaItem.type === "video" ? (
             <MediaVideo

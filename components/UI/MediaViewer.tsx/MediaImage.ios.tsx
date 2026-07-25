@@ -18,6 +18,7 @@ import Animated, {
   withTiming,
 } from "react-native-reanimated";
 import { runOnJS } from "react-native-worklets";
+import { SIDE_TAP_ZONE_FRACTION } from "../../../utils/mediaViewerTaps";
 
 export type ImageItem = {
   type: "image";
@@ -27,6 +28,12 @@ export type ImageItem = {
 export type MediaImageProps = {
   item: ImageItem;
   setIsScrollLocked: (isScrollLocked: boolean) => void;
+  /**
+   * True inside a gallery, where the viewer turns side double taps into
+   * previous/next paging. Zoom then only responds to the middle zone so one
+   * double tap can't both page and zoom.
+   */
+  sideTapPages?: boolean;
 };
 
 const ZOOM_SCALE = 3;
@@ -37,7 +44,11 @@ const TIMING = { duration: 250, easing: Easing.out(Easing.ease) };
 // term for that frame so the focal jump doesn't translate the image.
 const FOCAL_SNAP_THRESHOLD = 50;
 
-export function MediaImage({ item, setIsScrollLocked }: MediaImageProps) {
+export function MediaImage({
+  item,
+  setIsScrollLocked,
+  sideTapPages = false,
+}: MediaImageProps) {
   const { width, height } = useSafeAreaFrame();
 
   const scale = useSharedValue(1);
@@ -103,6 +114,15 @@ export function MediaImage({ item, setIsScrollLocked }: MediaImageProps) {
     maxDistance: 20,
     numberOfTaps: 2,
     onActivate: (event) => {
+      if (
+        sideTapPages &&
+        !isZoomed.value &&
+        (event.x < width * SIDE_TAP_ZONE_FRACTION ||
+          event.x > width * (1 - SIDE_TAP_ZONE_FRACTION))
+      ) {
+        // The viewer pages the gallery for this one.
+        return;
+      }
       if (isZoomed.value) {
         scale.value = withTiming(1, TIMING);
         isZoomed.value = false;

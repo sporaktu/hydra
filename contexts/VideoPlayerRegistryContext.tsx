@@ -76,6 +76,22 @@ export function VideoPlayerRegistryProvider({ children }: PropsWithChildren) {
   );
 }
 
+/**
+ * Look up a live player without acquiring it — for callers that only want to
+ * poke at a player some other component already owns (e.g. the media viewer's
+ * double-tap play/pause, where the player belongs to the focused MediaVideo).
+ * Returns null when nothing holds that key.
+ */
+export function useVideoPlayerPeek(): (key: string) => VideoPlayer | null {
+  const ctx = useContext(VideoPlayerRegistryContext);
+  if (!ctx) {
+    throw new Error(
+      "useVideoPlayerPeek must be used within a VideoPlayerRegistryProvider",
+    );
+  }
+  return ctx.peek;
+}
+
 export function useSharedVideoPlayer(
   key: string,
   source: VideoSource | null,
