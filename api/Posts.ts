@@ -274,6 +274,47 @@ export async function formatVideos(
   return [];
 }
 
+/**
+ * Reddit pages a link post can point at that Hydra knows how to open in-app.
+ * Anything else valid-but-unlisted (i.redd.it images, /gallery/ links, the
+ * post's own permalink) is already handled by the media parsing above and must
+ * not also render as a link.
+ */
+const IN_APP_LINK_PAGE_TYPES = [
+  PageType.SUBREDDIT,
+  PageType.SUBREDDIT_SEARCH,
+  PageType.MULTIREDDIT,
+  PageType.USER,
+  PageType.SEARCH,
+  PageType.WIKI,
+  PageType.SIDEBAR,
+];
+
+/**
+ * Whether a link post's (already validated) Reddit URL should become a
+ * tappable in-app link.
+ *
+ * This used to be a bare `url.includes("/r/")` check, which silently dropped
+ * every link post pointing at a page that doesn't live under /r/ — most
+ * visibly multireddits (/user/<name>/m/<multi>), i.e. essentially all of
+ * r/multihub, but also user profiles and site-wide searches. Those posts got
+ * no externalLink at all, so no link card was rendered and tapping the post
+ * only opened its comments.
+ */
+function isInAppLinkTarget(url: string, postSubreddit: string): boolean {
+  const pageType = RedditURL.getPageType(url);
+  if (!IN_APP_LINK_PAGE_TYPES.includes(pageType)) return false;
+  if (pageType === PageType.SUBREDDIT) {
+    // A post linking to the listing of the subreddit it was posted in isn't
+    // taking the reader anywhere new.
+    return (
+      new RedditURL(url).getSubreddit().toLowerCase() !==
+      (postSubreddit ?? "").toLowerCase()
+    );
+  }
+  return true;
+}
+
 export async function formatPostData(child: any): Promise<Post> {
   const images = formatImages(child);
   const imageThumbnail = images?.at(0)?.at(0) ?? null;
@@ -297,11 +338,8 @@ export async function formatPostData(child: any): Promise<Post> {
       !child.data.url.includes(child.data.permalink)
     ) {
       crossCommentLink = url;
-    } else if (
-      url.includes("/r/") &&
-      !url.includes(`/r/${child.data.subreddit}`)
-    ) {
-      // Link posts that point to other posts or subreddits but are not cross posts
+    } else if (isInAppLinkTarget(url, child.data.subreddit)) {
+      // Link posts that point at another page on Reddit but are not cross posts
       externalLink = url;
     }
   } else {
