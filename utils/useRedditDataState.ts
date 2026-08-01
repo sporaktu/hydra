@@ -2,6 +2,7 @@ import { DependencyList, useEffect, useRef, useState } from "react";
 
 import { RedditDataObject } from "../api/RedditApi";
 import { BannedSubredditError, PrivateSubredditError } from "../api/Posts";
+import { MultiredditUnavailableError } from "../api/Multireddit";
 import { BannedUserError, UserDoesNotExistError } from "../api/User";
 
 export type FilterFunction<T extends RedditDataObject> = (
@@ -37,7 +38,7 @@ export type ErrorType = "postLoadingError" | "userLoadingError" | null;
 export type ErrorTypeResolver<
   E extends "postLoadingError" | "userLoadingError" | null,
 > = E extends "postLoadingError"
-  ? BannedSubredditError | PrivateSubredditError
+  ? BannedSubredditError | PrivateSubredditError | MultiredditUnavailableError
   : E extends "userLoadingError"
     ? BannedUserError | UserDoesNotExistError
     : never;
@@ -74,6 +75,7 @@ export default function useRedditDataState<
       if (
         e instanceof BannedSubredditError ||
         e instanceof PrivateSubredditError ||
+        e instanceof MultiredditUnavailableError ||
         e instanceof BannedUserError ||
         e instanceof UserDoesNotExistError
       ) {

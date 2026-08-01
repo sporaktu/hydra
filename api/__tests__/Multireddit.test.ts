@@ -5,6 +5,7 @@ import {
   getMultiPath,
   getMultiSubredditNames,
   Multi,
+  MultiredditUnavailableError,
   removeFromMulti,
 } from "../Multireddit";
 import { api } from "../RedditApi";
@@ -107,13 +108,23 @@ describe("getMergedMultiFeedURL", () => {
     expect(mergedURL).toBe("empty");
   });
 
-  it("returns null when the multi definition can't be loaded", async () => {
-    mockedApi.mockRejectedValueOnce(new Error("network"));
+  it("throws when the multi definition can't be loaded from any source", async () => {
+    mockedApi.mockRejectedValue(new Error("network"));
 
-    const mergedURL = await getMergedMultiFeedURL(
-      "https://www.reddit.com/user/bob4/m/tech/",
-    );
-    expect(mergedURL).toBeNull();
+    await expect(
+      getMergedMultiFeedURL("https://www.reddit.com/user/bob4/m/tech/"),
+    ).rejects.toBeInstanceOf(MultiredditUnavailableError);
+  });
+
+  it("treats a Reddit error envelope as unavailable, not as an empty multi", async () => {
+    // api() parses the body whatever the status was, so a 403 arrives looking
+    // like a successful response. Reading it as "no subreddits" is what made
+    // someone else's multireddit render as a blank feed.
+    mockedApi.mockResolvedValue({ error: 403, message: "Forbidden" });
+
+    await expect(
+      getMergedMultiFeedURL("https://www.reddit.com/user/forbidden/m/tech/"),
+    ).rejects.toBeInstanceOf(MultiredditUnavailableError);
   });
 
   it("returns null for non-multireddit URLs without hitting the API", async () => {
@@ -224,5 +235,46 @@ describe("add/removeFromMulti endpoints", () => {
     expect(mockedApi.mock.calls[0][0]).toBe(
       "https://www.reddit.com/api/multi/user/bob/m/tech/r/apple",
     );
+  });
+});
+
+describe("getMultiSubredditNames fallbacks", () => {
+  beforeEach(() => {
+    mockedApi.mockReset();
+  });
+
+  it("falls through to the next source when one returns no definition", async () => {
+    mockedApi
+      .mockResolvedValueOnce({ error: 403, message: "Forbidden" })
+      .mockRejectedValueOnce(new Error("network"))
+      .mockResolvedValueOnce(makeMultiResponse(["apple", "android"]));
+
+    const names = await getMultiSubredditNames("user/other/m/tech");
+
+    expect(names).toEqual(["apple", "android"]);
+    expect(mockedApi.mock.calls.map((call) => call[0])).toEqual([
+      "https://www.reddit.com/api/multi/user/other/m/tech",
+      "https://www.reddit.com/api/multi/user/other/m/tech.json",
+      "https://old.reddit.com/api/multi/user/other/m/tech",
+    ]);
+  });
+
+  it("does not cache a failure, so a later attempt can still succeed", async () => {
+    mockedApi.mockResolvedValue({ error: 403 });
+    await expect(
+      getMultiSubredditNames("user/retry/m/tech"),
+    ).rejects.toBeInstanceOf(MultiredditUnavailableError);
+
+    mockedApi.mockReset();
+    mockedApi.mockResolvedValueOnce(makeMultiResponse(["apple"]));
+    expect(await getMultiSubredditNames("user/retry/m/tech")).toEqual([
+      "apple",
+    ]);
+  });
+
+  it("caches and reports a genuinely empty multireddit as empty", async () => {
+    mockedApi.mockResolvedValueOnce(makeMultiResponse([]));
+    expect(await getMultiSubredditNames("user/emptyone/m/tech")).toEqual([]);
+    expect(mockedApi).toHaveBeenCalledTimes(1);
   });
 });

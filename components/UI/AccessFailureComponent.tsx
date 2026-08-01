@@ -20,6 +20,8 @@ export default function AccessFailureComponent<E extends ErrorType>({
     BannedSubredditError: `🚫 r/${contentName} has been banned by Reddit Administrators for breaking Reddit rules`,
     UserDoesNotExistError: `🚫 ${contentName} does not exist`,
     BannedUserError: `🚫 ${contentName} has been banned`,
+    MultiredditUnavailableError:
+      "🔑 Reddit wouldn't share this multireddit. It may be private, deleted, or only visible to the account that owns it.",
   };
 
   return accessFailure ? (

@@ -181,7 +181,13 @@ export default class RedditURL extends URL {
   jsonify(): RedditURL {
     const base = this.getBasePath();
     const urlParams = this.getURLParams();
-    this.url = `${base}.json?${urlParams}`;
+    // A trailing slash would produce ".../m/tech/.json". Drop it — but never so
+    // far that the domain root loses its own slash ("https://www.reddit.com.json").
+    const trimmed = base.replace(/\/+$/, "");
+    const jsonBase = /^https?:\/\/[^/]+$/.test(trimmed)
+      ? `${trimmed}/`
+      : trimmed;
+    this.url = `${jsonBase}.json?${urlParams}`;
     return this;
   }
 

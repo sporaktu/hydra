@@ -3,7 +3,10 @@ import { decode } from "html-entities";
 
 import { Flair, formatFlair } from "./Flair";
 import { api } from "./RedditApi";
-import { getMergedMultiFeedURL } from "./Multireddit";
+import {
+  getMergedMultiFeedURL,
+  MultiredditUnavailableError,
+} from "./Multireddit";
 import RedditURL, { PageType } from "../utils/RedditURL";
 import Time from "../utils/Time";
 import URL, { OpenGraphData } from "../utils/URL";
@@ -404,13 +407,22 @@ export async function getPosts(
   options: GetPostOptions = {},
 ): Promise<Post[]> {
   let redditURL = new RedditURL(url);
+  // Set when a multireddit's definition couldn't be read, so this request is
+  // the last-resort attempt at the multi's own listing rather than the merged
+  // /r/a+b+c feed. See the check after the response comes back.
+  let isUnreadableMulti = false;
   if (redditURL.getPageType() === PageType.MULTIREDDIT) {
-    const mergedFeedURL = await getMergedMultiFeedURL(url);
-    if (mergedFeedURL === "empty") {
-      return [];
-    }
-    if (mergedFeedURL) {
-      redditURL = mergedFeedURL;
+    try {
+      const mergedFeedURL = await getMergedMultiFeedURL(url);
+      if (mergedFeedURL === "empty") {
+        return [];
+      }
+      if (mergedFeedURL) {
+        redditURL = mergedFeedURL;
+      }
+    } catch (e) {
+      if (!(e instanceof MultiredditUnavailableError)) throw e;
+      isUnreadableMulti = true;
     }
   }
   redditURL.changeQueryParam("sr_detail", "true");
@@ -428,6 +440,11 @@ export async function getPosts(
   }
   if (response.reason === "private") {
     throw new PrivateSubredditError();
+  }
+  if (isUnreadableMulti && !Array.isArray(response?.data?.children)) {
+    // Neither the multi's definition nor its own listing came back. Say so
+    // instead of rendering a blank feed that looks like "no posts here".
+    throw new MultiredditUnavailableError();
   }
   const posts: Post[] = await Promise.all(
     response.data.children.map(
