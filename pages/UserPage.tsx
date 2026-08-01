@@ -47,6 +47,7 @@ export default function UserPage({ route }: StackPageProps<"UserPage">) {
     deleteData: deleteUserContent,
     fullyLoaded,
     hitFilterLimit,
+    loadFailed,
     accessFailure,
   } = useRedditDataState<UserContent, "userLoadingError">({
     loadData: async (after) => await getUserContent(url, { after }),
@@ -126,6 +127,7 @@ export default function UserPage({ route }: StackPageProps<"UserPage">) {
           refresh={refreshUserContent}
           fullyLoaded={fullyLoaded}
           hitFilterLimit={hitFilterLimit}
+          loadFailed={loadFailed}
           data={userContent}
           renderItem={({ item: content }) => {
             if (content.type === "post") {

@@ -30,6 +30,7 @@ export default function SubredditSearchPage({
     modifyData: modifyPosts,
     fullyLoaded,
     hitFilterLimit,
+    loadFailed,
   } = useRedditDataState<Post>({
     loadData: async (after, limit) =>
       await searchSubredditPosts(url, {
@@ -78,6 +79,7 @@ export default function SubredditSearchPage({
         refresh={refreshPosts}
         fullyLoaded={fullyLoaded}
         hitFilterLimit={hitFilterLimit}
+        loadFailed={loadFailed}
         data={posts}
         renderItem={({ item }) => (
           <PostComponent

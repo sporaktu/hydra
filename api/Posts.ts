@@ -274,6 +274,47 @@ export async function formatVideos(
   return [];
 }
 
+/**
+ * Reddit pages a link post can point at that Hydra knows how to open in-app.
+ * Anything else valid-but-unlisted (i.redd.it images, /gallery/ links, the
+ * post's own permalink) is already handled by the media parsing above and must
+ * not also render as a link.
+ */
+const IN_APP_LINK_PAGE_TYPES = [
+  PageType.SUBREDDIT,
+  PageType.SUBREDDIT_SEARCH,
+  PageType.MULTIREDDIT,
+  PageType.USER,
+  PageType.SEARCH,
+  PageType.WIKI,
+  PageType.SIDEBAR,
+];
+
+/**
+ * Whether a link post's (already validated) Reddit URL should become a
+ * tappable in-app link.
+ *
+ * This used to be a bare `url.includes("/r/")` check, which silently dropped
+ * every link post pointing at a page that doesn't live under /r/ — most
+ * visibly multireddits (/user/<name>/m/<multi>), i.e. essentially all of
+ * r/multihub, but also user profiles and site-wide searches. Those posts got
+ * no externalLink at all, so no link card was rendered and tapping the post
+ * only opened its comments.
+ */
+function isInAppLinkTarget(url: string, postSubreddit: string): boolean {
+  const pageType = RedditURL.getPageType(url);
+  if (!IN_APP_LINK_PAGE_TYPES.includes(pageType)) return false;
+  if (pageType === PageType.SUBREDDIT) {
+    // A post linking to the listing of the subreddit it was posted in isn't
+    // taking the reader anywhere new.
+    return (
+      new RedditURL(url).getSubreddit().toLowerCase() !==
+      (postSubreddit ?? "").toLowerCase()
+    );
+  }
+  return true;
+}
+
 export async function formatPostData(child: any): Promise<Post> {
   const images = formatImages(child);
   const imageThumbnail = images?.at(0)?.at(0) ?? null;
@@ -297,11 +338,8 @@ export async function formatPostData(child: any): Promise<Post> {
       !child.data.url.includes(child.data.permalink)
     ) {
       crossCommentLink = url;
-    } else if (
-      url.includes("/r/") &&
-      !url.includes(`/r/${child.data.subreddit}`)
-    ) {
-      // Link posts that point to other posts or subreddits but are not cross posts
+    } else if (isInAppLinkTarget(url, child.data.subreddit)) {
+      // Link posts that point at another page on Reddit but are not cross posts
       externalLink = url;
     }
   } else {
@@ -402,56 +440,117 @@ export class PrivateSubredditError extends Error {
   }
 }
 
-export async function getPosts(
-  url: string,
-  options: GetPostOptions = {},
-): Promise<Post[]> {
-  let redditURL = new RedditURL(url);
-  // Set when a multireddit's definition couldn't be read, so this request is
-  // the last-resort attempt at the multi's own listing rather than the merged
-  // /r/a+b+c feed. See the check after the response comes back.
-  let isUnreadableMulti = false;
-  if (redditURL.getPageType() === PageType.MULTIREDDIT) {
-    try {
-      const mergedFeedURL = await getMergedMultiFeedURL(url);
-      if (mergedFeedURL === "empty") {
-        return [];
-      }
-      if (mergedFeedURL) {
-        redditURL = mergedFeedURL;
-      }
-    } catch (e) {
-      if (!(e instanceof MultiredditUnavailableError)) throw e;
-      isUnreadableMulti = true;
-    }
+/**
+ * Thrown when Reddit answers a listing request with something that isn't a
+ * listing — an HTML error page, an { error } envelope, a truncated body. It
+ * used to surface as a TypeError on `response.data.children`, which told
+ * nobody anything and, because it escaped as a rejected promise, left the
+ * feed's loading spinner up forever.
+ */
+export class ListingResponseError extends Error {
+  name: "ListingResponseError";
+  constructor(url: string) {
+    super(`Reddit did not return a listing for ${url}`);
+    this.name = "ListingResponseError";
   }
+}
+
+/**
+ * Applies the query params every listing request needs and returns the
+ * .json URL to fetch. Mutates (and is meant to consume) `redditURL`.
+ */
+function makeListingURL(redditURL: RedditURL, options: GetPostOptions): string {
   redditURL.changeQueryParam("sr_detail", "true");
   redditURL.changeQueryParam("limit", String(options?.limit ?? 10));
   redditURL.changeQueryParam("after", options?.after ?? "");
-  redditURL.jsonify();
-  let response = await api(redditURL.toString());
-  const gatedResult = await handleGatedSubreddit(response, url);
+  return redditURL.jsonify().toString();
+}
+
+/**
+ * Fetches one listing URL. `originalURL` is the page the user is actually on,
+ * which is what the gated-subreddit prompt needs to accept on their behalf.
+ */
+async function getListingPosts(
+  listingURL: string,
+  originalURL: string,
+): Promise<Post[]> {
+  let response = await api(listingURL);
+  const gatedResult = await handleGatedSubreddit(response, originalURL);
   if (gatedResult === "cancelled") return [];
   if (gatedResult === "success") {
-    response = await api(redditURL.toString());
+    response = await api(listingURL);
   }
-  if (response.reason === "banned") {
+  if (response?.reason === "banned") {
     throw new BannedSubredditError();
   }
-  if (response.reason === "private") {
+  if (response?.reason === "private") {
     throw new PrivateSubredditError();
   }
-  if (isUnreadableMulti && !Array.isArray(response?.data?.children)) {
-    // Neither the multi's definition nor its own listing came back. Say so
-    // instead of rendering a blank feed that looks like "no posts here".
-    throw new MultiredditUnavailableError();
+  if (!Array.isArray(response?.data?.children)) {
+    throw new ListingResponseError(listingURL);
   }
-  const posts: Post[] = await Promise.all(
+  return await Promise.all(
     response.data.children.map(
       async (child: any) => await formatPostData(child),
     ),
   );
-  return posts;
+}
+
+/**
+ * Multireddits are read through the merged /r/a+b+c listing (see
+ * getMergedMultiFeedURL), but that request can fail on its own — Reddit
+ * refuses over-long merged URLs and won't serve a merge containing a
+ * subreddit it's withholding — and it answers with an HTML error page, which
+ * rejects while being parsed as JSON. That rejection used to escape getPosts
+ * and hang the feed on its spinner with nothing on screen, so try the multi's
+ * own listing before giving up, and give up with the error the page knows how
+ * to explain.
+ */
+async function getMultiredditPosts(
+  url: string,
+  options: GetPostOptions,
+): Promise<Post[]> {
+  const listingURLs: string[] = [];
+  try {
+    const mergedFeedURL = await getMergedMultiFeedURL(url);
+    if (mergedFeedURL === "empty") {
+      return [];
+    }
+    if (mergedFeedURL) {
+      listingURLs.push(makeListingURL(mergedFeedURL, options));
+    }
+  } catch (e) {
+    if (!(e instanceof MultiredditUnavailableError)) throw e;
+    // The definition couldn't be read; the multi's own listing is all that's left.
+  }
+  listingURLs.push(makeListingURL(new RedditURL(url), options));
+
+  for (const listingURL of listingURLs) {
+    try {
+      return await getListingPosts(listingURL, url);
+    } catch (e) {
+      if (
+        e instanceof BannedSubredditError ||
+        e instanceof PrivateSubredditError
+      ) {
+        throw e;
+      }
+      // Network failure, error page, or a body that isn't a listing. Fall
+      // through to the next source.
+    }
+  }
+  throw new MultiredditUnavailableError();
+}
+
+export async function getPosts(
+  url: string,
+  options: GetPostOptions = {},
+): Promise<Post[]> {
+  const redditURL = new RedditURL(url);
+  if (redditURL.getPageType() === PageType.MULTIREDDIT) {
+    return await getMultiredditPosts(url, options);
+  }
+  return await getListingPosts(makeListingURL(redditURL, options), url);
 }
 
 export async function handleGatedSubreddit(
@@ -459,7 +558,7 @@ export async function handleGatedSubreddit(
   url: string,
 ): Promise<"success" | "cancelled" | null> {
   const warning =
-    response.quarantine_message ?? response.interstitial_warning_message;
+    response?.quarantine_message ?? response?.interstitial_warning_message;
   if (!warning) return null;
   const type = response.quarantine_message ? "quarantine" : "gated";
   return new Promise((resolve) => {

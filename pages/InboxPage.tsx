@@ -25,6 +25,7 @@ export default function InboxPage() {
     modifyData: modifyMessages,
     fullyLoaded,
     hitFilterLimit,
+    loadFailed,
   } = useRedditDataState<InboxItem>({
     loadData: async (after) => {
       if (!currentUser) return [];
@@ -51,6 +52,7 @@ export default function InboxPage() {
         refresh={refreshMessages}
         fullyLoaded={fullyLoaded}
         hitFilterLimit={hitFilterLimit}
+        loadFailed={loadFailed}
         data={messages}
         renderItem={({ item }) =>
           item.type === "message" ? (
