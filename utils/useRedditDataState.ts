@@ -1,4 +1,5 @@
 import { DependencyList, useEffect, useRef, useState } from "react";
+import * as Sentry from "@sentry/react-native";
 
 import { RedditDataObject } from "../api/RedditApi";
 import { BannedSubredditError, PrivateSubredditError } from "../api/Posts";
@@ -60,6 +61,7 @@ export default function useRedditDataState<
   const [hitFilterLimit, setHitFilterLimit] = useState(false);
   const [accessFailure, setAccessFailure] =
     useState<ErrorTypeResolver<E> | null>(null);
+  const [loadFailed, setLoadFailed] = useState(false);
 
   const applyFilters = async (newData: T[], filters: FilterFunction<T>[]) => {
     if (filters.length === 0) return newData;
@@ -82,13 +84,23 @@ export default function useRedditDataState<
         setAccessFailure(e as ErrorTypeResolver<E>);
         return [];
       } else {
-        throw e;
+        /**
+         * Anything else — a dropped connection, an HTML error page where JSON
+         * was expected, a listing Reddit refused to serve. Rethrowing left the
+         * rejection unhandled, and with no data and no error state the page
+         * sat on its loading spinner indefinitely. Report it and let the page
+         * say something instead.
+         */
+        Sentry.captureException(e);
+        setLoadFailed(true);
+        return [];
       }
     }
   };
 
   const loadMoreData = async () => {
     if (hitFilterLimit) return;
+    setLoadFailed(false);
     let newData: T[] = [];
     for (let i = 0; i < filterRetries; i++) {
       const potentialData = await loadDataWithFailureHandling(
@@ -119,6 +131,7 @@ export default function useRedditDataState<
     if (clearBeforeLoading) {
       setData([]);
     }
+    setLoadFailed(false);
     unfilteredAfter.current = undefined;
     let newData: T[] = [];
     for (let i = 0; i < filterRetries; i++) {
@@ -192,5 +205,6 @@ export default function useRedditDataState<
     fullyLoaded,
     hitFilterLimit,
     accessFailure,
+    loadFailed,
   };
 }

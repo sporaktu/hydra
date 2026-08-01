@@ -47,6 +47,7 @@ type RedditDataScrollerProps<T> = OverridableFlashListProps<T> & {
   data: T[];
   fullyLoaded: boolean;
   hitFilterLimit: boolean;
+  loadFailed?: boolean;
 };
 
 function RedditDataScroller<T extends RedditDataObject>(
@@ -177,16 +178,35 @@ function RedditDataScroller<T extends RedditDataObject>(
   }, []);
 
   const loadMoreData = async (refresh = false) => {
-    if (props.fullyLoaded && !refresh) return;
-    setIsLoadingMore(true);
-    if (refresh) {
-      await props.refresh();
-      setRefreshing(false);
-    } else {
-      await props.loadMore();
+    if (props.fullyLoaded && !refresh) {
+      // Nothing left to load, but the initial loader may still be showing
+      // (this fires on mount for a feed that came back empty).
+      setIsLoadingMore(false);
+      return;
     }
-    setIsLoadingMore(false);
+    setIsLoadingMore(true);
+    try {
+      if (refresh) {
+        await props.refresh();
+      } else {
+        await props.loadMore();
+      }
+    } finally {
+      // A load that throws still has to put the spinner down, or the page
+      // spins forever with nothing on it.
+      if (refresh) setRefreshing(false);
+      setIsLoadingMore(false);
+    }
   };
+
+  // The initial loader is on from the first render, before this component
+  // does any loading of its own, so the owner of the data is the one that has
+  // to end it: either everything there is has arrived, or nothing will.
+  useEffect(() => {
+    if (props.fullyLoaded || props.loadFailed) {
+      setIsLoadingMore(false);
+    }
+  }, [props.fullyLoaded, props.loadFailed]);
 
   return (
     <FlashList<T>
@@ -247,6 +267,18 @@ function RedditDataScroller<T extends RedditDataObject>(
               ]}
             >
               {`Wow. You've reached the bottom.`}
+            </Text>
+          )}
+          {!isLoadingMore && props.loadFailed && (
+            <Text
+              style={[
+                styles.endOfListText,
+                {
+                  color: theme.text,
+                },
+              ]}
+            >
+              Something went wrong loading this. Pull down to try again.
             </Text>
           )}
           {!isLoadingMore && props.hitFilterLimit && (

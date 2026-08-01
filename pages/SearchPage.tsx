@@ -45,6 +45,7 @@ export default function SearchPage() {
     deleteData: deleteSearchResults,
     fullyLoaded,
     hitFilterLimit,
+    loadFailed,
   } = useRedditDataState<SearchResult>({
     loadData: async (after) => {
       if (!search.current) {
@@ -140,6 +141,7 @@ export default function SearchPage() {
         refresh={refreshSearchResults}
         fullyLoaded={fullyLoaded}
         hitFilterLimit={hitFilterLimit}
+        loadFailed={loadFailed}
         data={searchResults}
         renderItem={({ item }) => {
           if (item.type === "post")

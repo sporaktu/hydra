@@ -75,6 +75,7 @@ export default function PostsPage({
     deleteData: deletePosts,
     fullyLoaded,
     hitFilterLimit,
+    loadFailed,
     accessFailure,
   } = useRedditDataState<Post, "postLoadingError">({
     loadData: async (after, limit) => await getPosts(url, { after, limit }),
@@ -219,6 +220,7 @@ export default function PostsPage({
             refresh={refreshPosts}
             fullyLoaded={fullyLoaded}
             hitFilterLimit={hitFilterLimit}
+            loadFailed={loadFailed}
             data={posts}
             renderItem={renderPost}
             onViewableItemsChanged={(data) => {
