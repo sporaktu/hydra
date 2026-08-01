@@ -12,6 +12,22 @@ export type Multi = {
   subreddits: Subreddit[];
 };
 
+/**
+ * A multi's `subreddits` entries come back in two shapes: expanded
+ * (`{ name, data: { ...subreddit } }`, what `expand_srs=true` asks for) and
+ * bare (`{ name }`). Only the expanded shape is a normal subreddit listing
+ * child. Treating a bare entry as expanded throws inside formatSubredditData,
+ * which used to take the WHOLE multireddit list down with it — so fall back to
+ * the one field a bare entry does carry.
+ */
+function formatMultiSubredditData(subreddit: any): Subreddit {
+  if (subreddit?.data) return formatSubredditData(subreddit);
+  const name = subreddit?.name ?? "";
+  return formatSubredditData({
+    data: { display_name: name, url: `/r/${name}/` },
+  });
+}
+
 export function formatMultiData(data: any): Multi {
   return {
     id: data.name,
@@ -19,9 +35,11 @@ export function formatMultiData(data: any): Multi {
     name: data.display_name,
     iconURL: data.icon_url,
     url: data.path,
-    subreddits: data.subreddits
-      .map((subreddit: any) => formatSubredditData(subreddit))
-      .sort((a: Subreddit, b: Subreddit) => a.name.localeCompare(b.name)),
+    subreddits: (data.subreddits ?? [])
+      .map((subreddit: any) => formatMultiSubredditData(subreddit))
+      .sort((a: Subreddit, b: Subreddit) =>
+        (a.name ?? "").localeCompare(b.name ?? ""),
+      ),
   };
 }
 
@@ -63,7 +81,7 @@ export async function getMultiSubredditNames(
   const cached = multiSubredditNamesCache.get(multiCacheKey(multiPath));
   if (cached) return cached;
   const multi = await api(`https://www.reddit.com/api/multi/${multiPath}`);
-  const names: string[] = multi.data.subreddits.map(
+  const names: string[] = (multi?.data?.subreddits ?? []).map(
     (subreddit: any) => subreddit.name,
   );
   multiSubredditNamesCache.set(multiCacheKey(multiPath), names);
@@ -126,12 +144,29 @@ export async function getMyMultis(): Promise<Multi[]> {
   return formattedMultis;
 }
 
+/**
+ * Reddit hands back a multi's `path` WITH a trailing slash ("/user/bob/m/tech/"),
+ * so pasting "/r/<sub>" onto it produced a doubled slash and a 404 — silently
+ * breaking "Add to Multireddit" / "Delete From Multireddit". Rebuild the path
+ * through the same normalizer the feed uses instead.
+ */
+function multiSubredditEndpoint(
+  multi: Multi,
+  subredditName: Subreddit["name"],
+): string {
+  const multiPath = getMultiPath(multi.url);
+  if (!multiPath) {
+    throw new Error(`Not a multireddit URL: ${multi.url}`);
+  }
+  return `https://www.reddit.com/api/multi/${multiPath}/r/${subredditName}`;
+}
+
 export async function addToMulti(
   multi: Multi,
   subredditName: Subreddit["name"],
 ) {
   await api(
-    `https://www.reddit.com/api/multi${multi.url}/r/${subredditName}`,
+    multiSubredditEndpoint(multi, subredditName),
     {
       method: "PUT",
     },
@@ -152,7 +187,7 @@ export async function removeFromMulti(
   subredditName: Subreddit["name"],
 ) {
   await api(
-    `https://www.reddit.com/api/multi${multi.url}/r/${subredditName}`,
+    multiSubredditEndpoint(multi, subredditName),
     {
       method: "DELETE",
     },

@@ -124,11 +124,7 @@ function MediaVideoContent(
   const { source, focused, overlayOpacity, player, retry, resolveStatus } =
     props;
   const { width, height } = useSafeAreaFrame();
-  const {
-    top: safeAreaTop,
-    left: safeAreaLeft,
-    right: safeAreaRight,
-  } = useSafeAreaInsets();
+  const { top: safeAreaTop, left: safeAreaLeft } = useSafeAreaInsets();
   const { feedVideoAudio, toggleFeedVideoAudio } =
     useContext(PostSettingsContext);
 
@@ -405,9 +401,15 @@ function MediaVideoContent(
           ]}
         />
       </View>
+      {/*
+       * Both video controls live in one top-LEFT row. The mute button used to
+       * be pinned top-right, which is exactly where PostOverlay's close button
+       * sits — and the overlay container paints above this cell (zIndex 1), so
+       * the close button covered it and swallowed its taps.
+       */}
       <Animated.View
         style={[
-          styles.playbackRateContainer,
+          styles.videoControlsContainer,
           {
             top: safeAreaTop + 10,
             left: safeAreaLeft + 10,
@@ -420,32 +422,21 @@ function MediaVideoContent(
         }}
       >
         <TouchableOpacity
-          style={styles.playbackRateButton}
+          style={styles.videoControlButton}
           onPress={() => {
             const currentIndex = PLAYBACK_RATES.indexOf(playbackRate ?? 1);
             const newIndex = (currentIndex + 1) % PLAYBACK_RATES.length;
+            // expo-video's Android player defaults preservesPitch to FALSE
+            // (its docs say true), so a >1x rate shifts the pitch up and turns
+            // voices into chipmunks. Force it on every time the rate changes.
+            player.preservesPitch = true;
             player.playbackRate = PLAYBACK_RATES[newIndex];
           }}
         >
           <Text style={{ color: "white" }}>{playbackRate ?? 1}x</Text>
         </TouchableOpacity>
-      </Animated.View>
-      <Animated.View
-        style={[
-          styles.muteContainer,
-          {
-            top: safeAreaTop + 10,
-            right: safeAreaRight + 10,
-            opacity: overlayOpacity,
-          },
-        ]}
-        onTouchStart={(e) => {
-          e.preventDefault();
-          e.stopPropagation();
-        }}
-      >
         <TouchableOpacity
-          style={styles.muteButton}
+          style={styles.videoControlButton}
           accessibilityRole="switch"
           accessibilityState={{ checked: feedVideoAudio }}
           accessibilityLabel="Play sound"
@@ -529,22 +520,12 @@ const styles = StyleSheet.create({
     height: 2,
     backgroundColor: "#ccc",
   },
-  playbackRateContainer: {
+  videoControlsContainer: {
     position: "absolute",
-    left: 10,
+    flexDirection: "row",
+    gap: 10,
   },
-  playbackRateButton: {
-    borderRadius: 100,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "rgba(100, 100, 100, 0.5)",
-    width: 40,
-    aspectRatio: 1,
-  },
-  muteContainer: {
-    position: "absolute",
-  },
-  muteButton: {
+  videoControlButton: {
     borderRadius: 100,
     alignItems: "center",
     justifyContent: "center",

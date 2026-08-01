@@ -1,9 +1,11 @@
 import {
   addToMulti,
+  formatMultiData,
   getMergedMultiFeedURL,
   getMultiPath,
   getMultiSubredditNames,
   Multi,
+  removeFromMulti,
 } from "../Multireddit";
 import { api } from "../RedditApi";
 
@@ -143,6 +145,84 @@ describe("getMergedMultiFeedURL", () => {
     );
     expect((mergedURL as any).toString()).toBe(
       "https://www.reddit.com/r/apple+android",
+    );
+  });
+});
+
+describe("formatMultiData", () => {
+  const expandedSubreddit = (name: string) => ({
+    name,
+    data: {
+      id: `id_${name}`,
+      display_name: name,
+      url: `/r/${name}/`,
+      subscribers: 10,
+    },
+  });
+
+  it("formats expanded (expand_srs) subreddit entries", () => {
+    const multi = formatMultiData({
+      name: "tech",
+      display_name: "Tech",
+      icon_url: "",
+      path: "/user/bob/m/tech/",
+      subreddits: [expandedSubreddit("zebra"), expandedSubreddit("apple")],
+    });
+    expect(multi.subreddits.map((sub) => sub.name)).toEqual(["apple", "zebra"]);
+  });
+
+  it("keeps the multireddit usable when entries aren't expanded", () => {
+    // A bare `{ name }` entry used to throw inside formatSubredditData, which
+    // took the entire multireddit list down with it.
+    const multi = formatMultiData({
+      name: "tech",
+      display_name: "Tech",
+      icon_url: "",
+      path: "/user/bob/m/tech/",
+      subreddits: [{ name: "zebra" }, { name: "apple" }],
+    });
+    expect(multi.subreddits.map((sub) => sub.name)).toEqual(["apple", "zebra"]);
+    expect(multi.subreddits[0].url).toBe("https://www.reddit.com/r/apple/");
+  });
+
+  it("tolerates a multi with no subreddits key", () => {
+    const multi = formatMultiData({
+      name: "tech",
+      display_name: "Tech",
+      icon_url: "",
+      path: "/user/bob/m/tech/",
+    });
+    expect(multi.subreddits).toEqual([]);
+  });
+});
+
+describe("add/removeFromMulti endpoints", () => {
+  const multi: Multi = {
+    id: "tech",
+    type: "multi",
+    name: "tech",
+    // Reddit's `path` always carries a trailing slash.
+    url: "/user/bob/m/tech/",
+    iconURL: "",
+    subreddits: [],
+  };
+
+  beforeEach(() => {
+    mockedApi.mockReset();
+    mockedApi.mockResolvedValue("");
+  });
+
+  it("does not double the slash before /r/<subreddit> when adding", async () => {
+    await addToMulti(multi, "apple");
+    expect(mockedApi.mock.calls[0][0]).toBe(
+      "https://www.reddit.com/api/multi/user/bob/m/tech/r/apple",
+    );
+  });
+
+  it("does not double the slash before /r/<subreddit> when removing", async () => {
+    await removeFromMulti(multi, "apple");
+    expect(mockedApi.mock.calls[0][0]).toBe(
+      "https://www.reddit.com/api/multi/user/bob/m/tech/r/apple",
     );
   });
 });

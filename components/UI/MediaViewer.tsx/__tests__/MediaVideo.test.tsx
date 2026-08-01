@@ -22,7 +22,7 @@
  * status, not from a missed event.
  */
 import { act, create, ReactTestRenderer } from "react-test-renderer";
-import { ActivityIndicator, Animated } from "react-native";
+import { ActivityIndicator, Animated, StyleSheet, Text } from "react-native";
 
 import MediaVideo from "../MediaVideo.ios";
 
@@ -66,6 +66,16 @@ jest.mock("@expo/vector-icons", () => ({
   Feather: () => null,
 }));
 
+const mockToggleFeedVideoAudio = jest.fn();
+jest.mock("../../../../contexts/SettingsContexts/PostSettingsContext", () => ({
+  __esModule: true,
+  PostSettingsContext: jest.requireActual("react").createContext({
+    feedVideoAudio: false,
+    toggleFeedVideoAudio: (...args: unknown[]) =>
+      mockToggleFeedVideoAudio(...args),
+  }),
+}));
+
 const mockResolved = {
   uri: "https://cdn/v.mp4",
   status: "ready" as const,
@@ -88,6 +98,7 @@ function makePlayer(over: Record<string, unknown>) {
     volume: 0,
     loop: false,
     playbackRate: 1,
+    preservesPitch: false, // matches expo-video's Android default
     timeUpdateEventInterval: 0,
     audioMixingMode: "mixWithOthers",
     seekTolerance: {},
@@ -177,4 +188,67 @@ it("still shows a loading indicator while genuinely loading (no frame, not playi
   });
   const tree = renderFocused();
   expect(loadingOverlayCount(tree)).toBe(1);
+});
+
+/**
+ * The mute toggle used to be pinned to the top-RIGHT, the same corner
+ * PostOverlay puts its close button in. MediaViewer renders that overlay in a
+ * container with zIndex 1, above the video cell, so the close button sat on top
+ * of the mute button and ate its taps. Both video controls now share one
+ * top-LEFT row, well clear of the close button.
+ */
+describe("fullscreen video controls", () => {
+  const findControlsRow = (tree: ReactTestRenderer) =>
+    tree.root.findAll((node) => {
+      if (typeof node.type !== "string") return false;
+      const style = StyleSheet.flatten(node.props?.style);
+      return (
+        !!style &&
+        style.position === "absolute" &&
+        style.flexDirection === "row"
+      );
+    })[0];
+
+  // TouchableOpacity shows up twice per button (forwardRef wrapper + inner),
+  // so keep only the outermost pressable of each pair.
+  const findControlButtons = (tree: ReactTestRenderer) =>
+    findControlsRow(tree)
+      .findAll((node) => typeof node.props?.onPress === "function")
+      .filter((node) => typeof node.parent?.props?.onPress !== "function");
+
+  it("anchors the mute + playback rate controls to the left, away from the close button", () => {
+    mockCurrentPlayer = makePlayer({ status: "readyToPlay", playing: true });
+    const tree = renderFocused();
+
+    const style = StyleSheet.flatten(findControlsRow(tree).props.style);
+    expect(style.left).toBe(10); // mocked safe-area left (0) + 10
+    expect(style.right).toBeUndefined();
+
+    // Both controls share that row, so neither can land under the close button.
+    const buttons = findControlButtons(tree);
+    expect(buttons).toHaveLength(2);
+    expect(buttons[0].findAllByType(Text)).not.toHaveLength(0); // "1x"
+    expect(buttons[1].props.accessibilityLabel).toBe("Play sound");
+  });
+
+  it("preserves pitch when bumping the playback rate above 1x", () => {
+    // expo-video's Android player defaults preservesPitch to false, which makes
+    // >1x playback sound chipmunk-pitched.
+    mockCurrentPlayer = makePlayer({ status: "readyToPlay", playing: true });
+    const tree = renderFocused();
+
+    act(() => findControlButtons(tree)[0].props.onPress());
+
+    expect(mockCurrentPlayer!.playbackRate).toBe(1.5);
+    expect(mockCurrentPlayer!.preservesPitch).toBe(true);
+  });
+
+  it("toggles the shared feed audio setting from the mute button", () => {
+    mockCurrentPlayer = makePlayer({ status: "readyToPlay", playing: true });
+    const tree = renderFocused();
+
+    act(() => findControlButtons(tree)[1].props.onPress());
+
+    expect(mockToggleFeedVideoAudio).toHaveBeenCalled();
+  });
 });
