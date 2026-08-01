@@ -43,6 +43,12 @@ export function VideoPlayerRegistryProvider({ children }: PropsWithChildren) {
           );
         }
         const player = createVideoPlayer(pending.source);
+        // expo-video documents preservesPitch as defaulting to true, but its
+        // Android VideoPlayer initializes the field to FALSE — so setting
+        // playbackRate above 1x there also raises the pitch (chipmunk voices).
+        // Every shared player is created here, so pin it on once for both
+        // platforms rather than at each call site.
+        player.preservesPitch = true;
         pending.configure(player);
         return player;
       },

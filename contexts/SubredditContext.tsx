@@ -1,3 +1,4 @@
+import * as Sentry from "@sentry/react-native";
 import { createContext, useContext, useEffect, useState } from "react";
 import { Alert } from "react-native";
 
@@ -149,11 +150,17 @@ export function SubredditProvider({ children }: React.PropsWithChildren) {
   };
 
   const loadMultis = async () => {
-    if (currentUser) {
-      const multis = await getMyMultis();
-      setMultis(multis);
-    } else {
+    if (!currentUser) {
       setMultis([]);
+      return;
+    }
+    try {
+      setMultis(await getMyMultis());
+    } catch (e) {
+      // Multireddits are a secondary part of this screen. Letting a failure
+      // here reject loadData() left isLoadingSubreddits stuck on forever and
+      // took the rest of the subreddit list down with it.
+      Sentry.captureException(e);
     }
   };
 
@@ -200,9 +207,12 @@ export function SubredditProvider({ children }: React.PropsWithChildren) {
 
   const loadData = async () => {
     setIsLoadingSubreddits(true);
-    await loadSubreddits();
-    await loadMultis();
-    setIsLoadingSubreddits(false);
+    try {
+      await loadSubreddits();
+      await loadMultis();
+    } finally {
+      setIsLoadingSubreddits(false);
+    }
   };
 
   useEffect(() => {
