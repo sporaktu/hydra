@@ -2,7 +2,8 @@
  * Unit tests for the pure focused-only playback state (see
  * docs/specs/02-focused-video-playback.md and ADR 0003). Covers the single
  * focused-key store + per-key subscriptions, the remembered-position LRU that
- * survives player release, and center-most video selection.
+ * survives player release, and the geometry that decides which video may
+ * autoplay (fully on screen, clear of the viewport edge buffer, center-most).
  *
  * The module holds process-global state (a focused key, a listener map, and a
  * positions map), so each test re-requires a fresh copy via jest.resetModules
@@ -188,55 +189,205 @@ describe("rememberPlaybackPosition / getRememberedPlaybackPosition", () => {
   });
 });
 
-describe("pickCenterMostVideo", () => {
-  it("returns null when there are no viewable items", () => {
-    expect(focus.pickCenterMostVideo([], [{ index: 0, key: "a" }])).toBeNull();
-  });
+// A 1000pt-tall viewport starting at the top of the window: the 4% buffer
+// leaves videos eligible only between y=40 and y=960.
+const VIEWPORT = { top: 0, height: 1000 };
 
-  it("returns null when no viewable item is a video", () => {
-    expect(focus.pickCenterMostVideo([0, 1, 2], [])).toBeNull();
-  });
-
-  it("returns the only video's key when there is a single candidate", () => {
+describe("isVideoAutoplayEligible", () => {
+  it("accepts a video sitting well inside the viewport", () => {
     expect(
-      focus.pickCenterMostVideo([0, 1, 2], [{ index: 1, key: "only" }]),
-    ).toBe("only");
+      focus.isVideoAutoplayEligible({ top: 300, height: 400 }, VIEWPORT),
+    ).toBe(true);
   });
 
-  it("picks the video nearest the center of the viewable index range", () => {
-    const key = focus.pickCenterMostVideo(
-      [0, 1, 2, 3, 4],
+  it("accepts a video that exactly fills the buffered band", () => {
+    expect(
+      focus.isVideoAutoplayEligible({ top: 40, height: 920 }, VIEWPORT),
+    ).toBe(true);
+  });
+
+  it("rejects a video hanging off the bottom of the screen", () => {
+    expect(
+      focus.isVideoAutoplayEligible({ top: 800, height: 400 }, VIEWPORT),
+    ).toBe(false);
+  });
+
+  it("rejects a video hanging off the top of the screen", () => {
+    expect(
+      focus.isVideoAutoplayEligible({ top: -100, height: 400 }, VIEWPORT),
+    ).toBe(false);
+  });
+
+  it("rejects a fully visible video that is inside the buffer", () => {
+    // Entirely on screen (0..1000) but only 20pt clear of the bottom edge.
+    expect(
+      focus.isVideoAutoplayEligible({ top: 580, height: 400 }, VIEWPORT),
+    ).toBe(false);
+  });
+
+  it("measures the buffer against the viewport, not the video", () => {
+    // A short viewport shrinks the buffer with it: 4% of 100 is 4pt.
+    const shortViewport = { top: 0, height: 100 };
+    expect(
+      focus.isVideoAutoplayEligible({ top: 5, height: 90 }, shortViewport),
+    ).toBe(true);
+    expect(
+      focus.isVideoAutoplayEligible({ top: 2, height: 90 }, shortViewport),
+    ).toBe(false);
+  });
+
+  it("offsets the buffered band by the top of the viewport", () => {
+    // A viewport starting below a 100pt header: the band is 140..1060.
+    const insetViewport = { top: 100, height: 1000 };
+    expect(
+      focus.isVideoAutoplayEligible({ top: 120, height: 400 }, insetViewport),
+    ).toBe(false);
+    expect(
+      focus.isVideoAutoplayEligible({ top: 200, height: 400 }, insetViewport),
+    ).toBe(true);
+  });
+
+  it("accepts a video taller than the band when it covers the band", () => {
+    expect(
+      focus.isVideoAutoplayEligible({ top: -20, height: 1040 }, VIEWPORT),
+    ).toBe(true);
+  });
+
+  it("rejects a video taller than the band that only covers part of it", () => {
+    expect(
+      focus.isVideoAutoplayEligible({ top: 500, height: 1040 }, VIEWPORT),
+    ).toBe(false);
+  });
+
+  it("rejects an unmeasurable (zero height) video", () => {
+    expect(
+      focus.isVideoAutoplayEligible({ top: 300, height: 0 }, VIEWPORT),
+    ).toBe(false);
+  });
+
+  it("rejects everything when the viewport has no height", () => {
+    expect(
+      focus.isVideoAutoplayEligible(
+        { top: 0, height: 100 },
+        { top: 0, height: 0 },
+      ),
+    ).toBe(false);
+  });
+
+  it("honors an explicit buffer override", () => {
+    const rect = { top: 10, height: 400 };
+    expect(focus.isVideoAutoplayEligible(rect, VIEWPORT, 0)).toBe(true);
+    expect(focus.isVideoAutoplayEligible(rect, VIEWPORT, 0.04)).toBe(false);
+  });
+});
+
+describe("pickCenterMostEligibleVideo", () => {
+  it("returns null when there are no candidates", () => {
+    expect(focus.pickCenterMostEligibleVideo([], VIEWPORT)).toBeNull();
+  });
+
+  it("returns null when no candidate is fully on screen", () => {
+    const key = focus.pickCenterMostEligibleVideo(
       [
-        { index: 0, key: "top" },
-        { index: 2, key: "middle" },
-        { index: 4, key: "bottom" },
+        { key: "above", rect: { top: -300, height: 400 } },
+        { key: "below", rect: { top: 900, height: 400 } },
       ],
+      VIEWPORT,
     );
-    expect(key).toBe("middle");
+    expect(key).toBeNull();
   });
 
-  it("uses the midpoint of the viewable range, not the raw indices, as center", () => {
-    // Viewable range 10..20 => center 15; the video at 16 is nearest.
-    const key = focus.pickCenterMostVideo(
-      [10, 12, 14, 16, 18, 20],
+  it("picks the eligible video nearest the center of the viewport", () => {
+    const key = focus.pickCenterMostEligibleVideo(
       [
-        { index: 12, key: "high" },
-        { index: 16, key: "near-center" },
-        { index: 20, key: "low" },
+        { key: "high", rect: { top: 50, height: 200 } },
+        { key: "centered", rect: { top: 400, height: 200 } },
+        { key: "low", rect: { top: 700, height: 200 } },
       ],
+      VIEWPORT,
     );
-    expect(key).toBe("near-center");
+    expect(key).toBe("centered");
   });
 
-  it("breaks ties in favor of the first candidate at equal distance", () => {
-    // Center of [0..4] is 2; both candidates are distance 1 away.
-    const key = focus.pickCenterMostVideo(
-      [0, 1, 2, 3, 4],
+  it("skips a more centered video that is not fully on screen", () => {
+    // The bottom video is closer to center but hangs off the screen edge.
+    const key = focus.pickCenterMostEligibleVideo(
       [
-        { index: 1, key: "first" },
-        { index: 3, key: "second" },
+        { key: "fully-visible", rect: { top: 60, height: 300 } },
+        { key: "cut-off", rect: { top: 700, height: 400 } },
       ],
+      VIEWPORT,
+    );
+    expect(key).toBe("fully-visible");
+  });
+
+  it("breaks ties in favor of the first candidate", () => {
+    const key = focus.pickCenterMostEligibleVideo(
+      [
+        { key: "first", rect: { top: 200, height: 200 } },
+        { key: "second", rect: { top: 600, height: 200 } },
+      ],
+      VIEWPORT,
     );
     expect(key).toBe("first");
+  });
+});
+
+describe("registerVideoRect / measureVideoRects", () => {
+  it("measures every registered video", async () => {
+    focus.registerVideoRect("a", (report) => report({ top: 10, height: 100 }));
+    focus.registerVideoRect("b", (report) => report({ top: 200, height: 100 }));
+
+    await expect(focus.measureVideoRects(["a", "b"])).resolves.toEqual([
+      { key: "a", rect: { top: 10, height: 100 } },
+      { key: "b", rect: { top: 200, height: 100 } },
+    ]);
+  });
+
+  it("omits videos that were never registered", async () => {
+    focus.registerVideoRect("a", (report) => report({ top: 10, height: 100 }));
+
+    await expect(focus.measureVideoRects(["a", "gone"])).resolves.toEqual([
+      { key: "a", rect: { top: 10, height: 100 } },
+    ]);
+  });
+
+  it("omits videos that report no rect (unmounted or not laid out)", async () => {
+    focus.registerVideoRect("a", (report) => report(null));
+
+    await expect(focus.measureVideoRects(["a"])).resolves.toEqual([]);
+  });
+
+  it("stops measuring a video after it unregisters", async () => {
+    const unregister = focus.registerVideoRect("a", (report) =>
+      report({ top: 10, height: 100 }),
+    );
+    unregister();
+
+    await expect(focus.measureVideoRects(["a"])).resolves.toEqual([]);
+  });
+
+  it("keeps a recycled cell's registration when the old cell cleans up", async () => {
+    // FlashList mounts the new cell's effect before the old one's cleanup.
+    const unregisterOld = focus.registerVideoRect("a", (report) =>
+      report({ top: 10, height: 100 }),
+    );
+    focus.registerVideoRect("a", (report) => report({ top: 20, height: 200 }));
+    unregisterOld();
+
+    await expect(focus.measureVideoRects(["a"])).resolves.toEqual([
+      { key: "a", rect: { top: 20, height: 200 } },
+    ]);
+  });
+
+  it("gives up on a video whose measurement never comes back", async () => {
+    jest.useFakeTimers();
+    focus.registerVideoRect("hung", () => {});
+
+    const measuring = focus.measureVideoRects(["hung"]);
+    jest.runAllTimers();
+
+    await expect(measuring).resolves.toEqual([]);
+    jest.useRealTimers();
   });
 });

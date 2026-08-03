@@ -1,9 +1,30 @@
 # Focused-only playback (one feed video plays at a time)
 
 At most one feed video plays at any moment: the [**Focused Post**](../../CONTEXT.md)
-— the center-most video post on screen once scrolling has settled. Every other video
-post renders a static poster (the post's preview thumbnail) with **no player attached
-at all**. During a fast fling, nothing is Focused and nothing plays.
+— the center-most video post that is fully on screen once scrolling has settled. Every
+other video post renders a static poster (the post's preview thumbnail) with **no player
+attached at all**. During a fast fling, nothing is Focused and nothing plays.
+
+## Eligibility: fully on screen, with a buffer
+
+A video may only play once its whole media box sits inside the viewport with
+`AUTOPLAY_VIEWPORT_BUFFER` (4%) of the viewport height clear above and below it — half
+a video hanging off a screen edge never plays, and playback starts a beat after the
+video is properly in view rather than the instant a sliver of it appears. Of the videos
+that qualify, the one nearest the center of the viewport is Focused.
+
+This is decided from real geometry, not from viewability tokens: FlashList reports
+which items are viewable, but a "viewable" item can be one pixel on screen, and it
+reports indices rather than offsets. So each video cell registers a way to measure its
+media box (`registerVideoRect` in `utils/FeedVideoFocus.ts`), and when scrolling settles
+the scroller measures the viewable videos and compares them against the viewport in
+window coordinates. The viewport excludes the navigation header and the tab bar, both of
+which the feed scrolls underneath — a video behind the blurred tab bar is not on screen.
+
+Because a video's position changes with every scroll event, not only when viewability
+flips, scrolling itself (re)starts the settle debounce, and the decision runs when the
+feed comes to rest. Measuring is asynchronous, so decisions carry a generation counter
+and a stale one is dropped instead of committed.
 
 This deliberately abandons the app's original behavior, where every mounted video
 cell autoplayed muted simultaneously. That design had no concept of a "current"

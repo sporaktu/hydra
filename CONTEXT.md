@@ -9,7 +9,7 @@ To derive a directly-playable/viewable media URL from a post or an external host
 _Avoid_: fetch, load, get (those describe transport, not the watch-page → media-URL derivation).
 
 **Focused Post**:
-The single post that currently owns video playback privileges in a feed — the center-most video post on screen once scrolling has settled. At most one post is Focused at a time; during a fast fling, no post is Focused. When the feed-audio toggle is on, the Focused Post plays with audio.
+The single post that currently owns video playback privileges in a feed — the center-most video post that is fully on screen (clear of the top and bottom of the viewport by a small buffer) once scrolling has settled. At most one post is Focused at a time; during a fast fling, and while a video is still partly cut off by a screen edge, no post is Focused. When the feed-audio toggle is on, the Focused Post plays with audio.
 _Avoid_: active post, current post, visible post (many posts are visible; only one is Focused).
 
 **Poster**:

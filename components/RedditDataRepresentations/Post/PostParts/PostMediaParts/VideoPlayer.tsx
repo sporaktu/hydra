@@ -12,7 +12,10 @@ import Video from "../../../../UI/Gallery/Video";
 import { PostDetail } from "../../../../../api/PostDetail";
 import { FontAwesome } from "@expo/vector-icons";
 import { useSafeAreaFrame } from "react-native-safe-area-context";
-import { useVideoFocus } from "../../../../../contexts/FeedVideoFocusContext";
+import {
+  useVideoFocus,
+  useVideoRectReporter,
+} from "../../../../../contexts/FeedVideoFocusContext";
 
 type VideoPlayerProps = {
   post: Post | PostDetail;
@@ -32,6 +35,9 @@ export default function VideoPlayer({ post }: VideoPlayerProps) {
   // isFocused is always true and behavior is unchanged.
   const video = post.videos[0];
   const { focusManaged, isFocused } = useVideoFocus(video?.source ?? "");
+  // Focus is only given to a video that is fully on screen, so the feed has to
+  // be able to measure this media box wherever it currently sits.
+  const mediaRef = useVideoRectReporter(video?.source ?? "");
 
   const dontRender =
     currentDataMode === "lowData" ||
@@ -60,7 +66,7 @@ export default function VideoPlayer({ post }: VideoPlayerProps) {
         });
       }}
     >
-      <View style={{ flex: 1 }}>
+      <View style={{ flex: 1 }} ref={mediaRef}>
         {/* Have to put an invisible layer on top of the ImageViewer to keep it from stealing clicks */}
         <View style={styles.invisibleLayer} />
         {dontRender ? (
