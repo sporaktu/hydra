@@ -129,7 +129,12 @@ export default function ThemedWebView({ url }: { url: string }) {
         if (currentURL === targetURL) return true;
         try {
           const redditURL = new RedditURL(e.url);
-          if (redditURL.getPageType() === PageType.UNKNOWN) {
+          if (
+            redditURL.getPageType() === PageType.UNKNOWN &&
+            /* pushURL resolves short links (redd.it/<id>, /s/<id>), which
+               have no meaningful page type until then */
+            !redditURL.isShortenedLink()
+          ) {
             throw Error("Unknown page type");
           } else {
             pushURL(e.url);

@@ -28,17 +28,12 @@ export default function useHandleIncomingURLs() {
   const navigationReady = navigation.isReady();
 
   /**
-   * Shortened share links (/r/<sub>/s/<id>, /user/<name>/s/<id>) have to be
+   * Short links (redd.it/<id>, /r/<sub>/s/<id>, /user/<name>/s/<id>) have to be
    * resolved before their page type means anything — a user share link looks
    * like a plain user page until the redirect is followed.
    */
   const handleURL = async (url: string) => {
-    let resolvedURL = url;
-    try {
-      resolvedURL = (await new RedditURL(url).resolveURL()).toString();
-    } catch (_e) {
-      // Not a URL we can resolve, fall through to the page type check below
-    }
+    const resolvedURL = await RedditURL.resolveURLIfValid(url);
     const pageType = RedditURL.getPageType(resolvedURL);
     if (pageType === PageType.UNKNOWN) {
       Alert.alert("Unknown URL", `The URL ${url} cannot be handled by Hydra.`);

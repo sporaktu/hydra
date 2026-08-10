@@ -116,6 +116,109 @@ describe("RedditURL.resolveURL", () => {
     expect(fetchMock).not.toHaveBeenCalled();
     expect(resolved.toString()).toBe("https://www.reddit.com/user/bob");
   });
+
+  it("follows a redd.it short link to the post it points at", async () => {
+    mockRedirect("https://www.reddit.com/r/pics/comments/abc123/a_post/");
+
+    const resolved = await new RedditURL("https://redd.it/abc123").resolveURL();
+
+    expect(resolved.toString()).toBe(
+      "https://www.reddit.com/r/pics/comments/abc123/a_post/",
+    );
+    expect(resolved.getPageType()).toBe(PageType.POST_DETAILS);
+  });
+
+  it("follows a scheme-less redd.it short link", async () => {
+    mockRedirect("https://www.reddit.com/r/pics/comments/abc123/a_post/");
+
+    const resolved = await new RedditURL("redd.it/abc123").resolveURL();
+
+    expect(resolved.getPageType()).toBe(PageType.POST_DETAILS);
+  });
+
+  it("does not follow media URLs on the redd.it domain", async () => {
+    const fetchMock = mockRedirect("https://www.reddit.com/");
+
+    const image = await new RedditURL(
+      "https://i.redd.it/abc123.jpg",
+    ).resolveURL();
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(image.getPageType()).toBe(PageType.IMAGE);
+  });
+
+  it("resolves through RedditURL.resolveURLIfValid without throwing", async () => {
+    mockRedirect("https://www.reddit.com/r/pics/comments/abc123/a_post/");
+
+    await expect(
+      RedditURL.resolveURLIfValid("https://redd.it/abc123"),
+    ).resolves.toBe("https://www.reddit.com/r/pics/comments/abc123/a_post/");
+    await expect(
+      RedditURL.resolveURLIfValid("https://example.com/not-reddit"),
+    ).resolves.toBe("https://example.com/not-reddit");
+  });
+});
+
+/**
+ * Reddit answers on a pile of hosts that are all the same site, and links
+ * arrive from post bodies and share sheets in every one of those shapes.
+ * Anything the constructor rejects is punted to the browser instead of opening
+ * in Hydra, so the shapes it accepts matter.
+ */
+describe("RedditURL host normalization", () => {
+  const normalize = (url: string) => new RedditURL(url).toString();
+
+  it("folds Reddit's alternate hosts onto www.reddit.com", () => {
+    expect(normalize("https://old.reddit.com/r/pics")).toBe(
+      "https://www.reddit.com/r/pics",
+    );
+    expect(normalize("http://old.reddit.com/r/pics")).toBe(
+      "https://www.reddit.com/r/pics",
+    );
+    expect(normalize("https://reddit.com/r/pics")).toBe(
+      "https://www.reddit.com/r/pics",
+    );
+    expect(normalize("https://sh.reddit.com/r/pics/s/abc123")).toBe(
+      "https://www.reddit.com/r/pics/s/abc123",
+    );
+    expect(normalize("https://m.reddit.com/r/pics")).toBe(
+      "https://www.reddit.com/r/pics",
+    );
+    expect(normalize("http://www.reddit.com/r/pics")).toBe(
+      "https://www.reddit.com/r/pics",
+    );
+    expect(normalize("reddit.com/r/pics")).toBe(
+      "https://www.reddit.com/r/pics",
+    );
+    expect(normalize("www.reddit.com/r/pics")).toBe(
+      "https://www.reddit.com/r/pics",
+    );
+  });
+
+  it("keeps the short and media domains", () => {
+    expect(normalize("https://redd.it/abc123")).toBe("https://redd.it/abc123");
+    expect(normalize("redd.it/abc123")).toBe("https://redd.it/abc123");
+    expect(normalize("https://i.redd.it/abc123.jpg")).toBe(
+      "https://i.redd.it/abc123.jpg",
+    );
+    expect(normalize("https://v.redd.it/abc123")).toBe(
+      "https://v.redd.it/abc123",
+    );
+  });
+
+  it("rewrites profile subreddits to user pages", () => {
+    expect(normalize("https://www.reddit.com/r/u_bob")).toBe(
+      "https://www.reddit.com/user/bob",
+    );
+  });
+
+  it("rejects hosts that merely look like Reddit's", () => {
+    expect(() => normalize("https://redd.it.example.com/abc123")).toThrow();
+    expect(() =>
+      normalize("https://www.reddit.com.example.com/r/pics"),
+    ).toThrow();
+    expect(() => normalize("https://example.com/r/pics")).toThrow();
+  });
 });
 
 describe("RedditURL.isShortenedShareLink", () => {
@@ -137,5 +240,22 @@ describe("RedditURL.isShortenedShareLink", () => {
     expect(
       isShare("https://www.reddit.com/r/pics/comments/abc123/a_post/"),
     ).toBe(false);
+  });
+});
+
+describe("RedditURL.isShortenedLink", () => {
+  const isShort = (url: string) => new RedditURL(url).isShortenedLink();
+
+  it("covers the redd.it short domain as well as share links", () => {
+    expect(isShort("https://redd.it/abc123")).toBe(true);
+    expect(isShort("redd.it/abc123")).toBe(true);
+    expect(isShort("https://www.reddit.com/user/bob/s/UAuNzVTOen")).toBe(true);
+  });
+
+  it("does not treat media or normal pages as short links", () => {
+    expect(isShort("https://i.redd.it/abc123.jpg")).toBe(false);
+    expect(isShort("https://v.redd.it/abc123")).toBe(false);
+    expect(isShort("https://preview.redd.it/abc123.jpg")).toBe(false);
+    expect(isShort("https://www.reddit.com/r/pics")).toBe(false);
   });
 });

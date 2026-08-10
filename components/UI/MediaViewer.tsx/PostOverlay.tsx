@@ -31,14 +31,17 @@ export default function PostOverlay({
 
   const [isDownloading, setIsDownloading] = useState(false);
 
-  const openLink = (link: string) => {
-    const pageType = RedditURL.getPageType(link);
+  const openLink = async (link: string) => {
+    /* A short link (redd.it/<id>, /s/<id>) has no usable page type until it's
+       been followed, so resolve before deciding where to send it */
+    const url = await RedditURL.resolveURLIfValid(link);
+    const pageType = RedditURL.getPageType(url);
     /**
      * We have to use dispatch because this can be called from outside the tabs navigator.
      */
     dispatch(
       StackActions.push(PageTypeToNavName[pageType], {
-        url: link,
+        url,
       }),
     );
     closeViewer();
