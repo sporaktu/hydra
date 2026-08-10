@@ -224,10 +224,15 @@ export function Element({ element, index, inheritedStyles }: ElementProps) {
       const url = element.attribs.href;
       try {
         const redditURL = new RedditURL(url);
-        if (redditURL.getPageType() === PageType.UNKNOWN) {
+        if (
+          redditURL.getPageType() === PageType.UNKNOWN &&
+          /* Short links (redd.it/<id>, /s/<id>) only get a page type once
+             pushURL resolves them, so they aren't unknown — just unresolved */
+          !redditURL.isShortenedLink()
+        ) {
           throw Error("Unknown page type");
         } else {
-          pushURL(new RedditURL(url).toString());
+          pushURL(redditURL.toString());
         }
       } catch {
         /**

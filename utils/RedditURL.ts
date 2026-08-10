@@ -36,54 +36,62 @@ export enum PageType {
   UNKNOWN,
 }
 
+/**
+ * The only hosts Hydra will treat as Reddit. Matched exactly — a prefix check
+ * would accept things like "redd.it.example.com".
+ */
+const REDDIT_HOSTS = [
+  "www.reddit.com",
+  "redd.it",
+  "i.redd.it",
+  "v.redd.it",
+  "preview.redd.it",
+];
+
+/**
+ * Every host Reddit itself serves the site from. They're all the same site, so
+ * they're all folded onto www.reddit.com. "sh." is the host Reddit's own share
+ * sheet uses.
+ */
+const REDDIT_COM_HOST_PATTERN =
+  /^https:\/\/(?:www\.|old\.|new\.|np\.|m\.|sh\.|amp\.)?reddit\.com/i;
+
 export default class RedditURL extends URL {
   url: string;
 
   constructor(url: string) {
     super(url);
-    if (
-      /* Override super() call if short reddit link */
-      url.startsWith("/r") ||
-      url.startsWith("/u") ||
-      url.startsWith("/user") ||
-      url.startsWith("/search")
-    ) {
-      this.url = `https://www.reddit.com${url}`;
-    } else if (url.startsWith("hydra://")) {
+    if (url.startsWith("hydra://")) {
       this.url = url;
-    } else if (url.startsWith("https://old.reddit.com")) {
-      this.url = url.replace(
-        "https://old.reddit.com",
-        "https://www.reddit.com",
-      );
-    } else if (url.startsWith("http://old.reddit.com")) {
-      this.url = url.replace("http://old.reddit.com", "https://www.reddit.com");
-    } else if (url.startsWith("https://reddit.com")) {
-      this.url = url.replace("https://reddit.com", "https://www.reddit.com");
-    } else if (url.startsWith("https://")) {
-      this.url = url;
-    } else if (url.startsWith("www")) {
-      this.url = `https://${url}`;
-    } else if (url.startsWith("reddit.com")) {
-      this.url = `https://www.${url}`;
-    } else if (url.startsWith("https://www.reddit.com/r/u_")) {
-      this.url = url.replace(
-        "https://www.reddit.com/r/u_",
-        "https://www.reddit.com/user/",
-      );
+    } else if (url.startsWith("/")) {
+      /* Override super() call if short reddit link, e.g. "/r/pics" */
+      this.url = url.startsWith("//")
+        ? `https:${url}`
+        : `https://www.reddit.com${url}`;
     } else {
-      throw new Error(`Weird URL being passed ${url}`);
+      this.url = RedditURL.normalizeHost(url);
     }
     if (
       !this.url.startsWith("hydra://") &&
-      !this.url.startsWith("https://www.reddit.com") &&
-      !this.url.startsWith("https://i.redd.it") &&
-      !this.url.startsWith("https://v.redd.it") &&
-      !this.url.startsWith("https://preview.redd.it") &&
-      !this.url.startsWith("https://redd.it")
+      !REDDIT_HOSTS.includes(this.getHostName().toLowerCase())
     ) {
-      throw new Error("Not a reddit URL");
+      throw new Error(`Not a reddit URL: ${url}`);
     }
+  }
+
+  /**
+   * Folds the many hosts Reddit answers on (old/new/np/m/sh/amp, no-www,
+   * plain http, no scheme at all) onto the canonical ones, so the rest of the
+   * class only ever has to reason about www.reddit.com and redd.it.
+   */
+  private static normalizeHost(url: string): string {
+    const withScheme = /^https?:\/\//i.test(url)
+      ? url.replace(/^http:\/\//i, "https://")
+      : `https://${url}`;
+    return withScheme
+      .replace(REDDIT_COM_HOST_PATTERN, "https://www.reddit.com")
+      .replace(/^https:\/\/www\.redd\.it/i, "https://redd.it")
+      .replace("https://www.reddit.com/r/u_", "https://www.reddit.com/user/");
   }
 
   static getURLIfValid(url: string) {
@@ -91,6 +99,20 @@ export default class RedditURL extends URL {
       return { url: new RedditURL(url).toString(), isValid: true };
     } catch (_e) {
       return { url, isValid: false };
+    }
+  }
+
+  /**
+   * Resolves a URL when Hydra can make sense of it, falling back to the string
+   * it was handed. Entry points fed URLs from outside the app (the share
+   * sheet, the clipboard, a deep link, a post's own link) can't assume they're
+   * even Reddit URLs, and must never throw over one.
+   */
+  static async resolveURLIfValid(url: string): Promise<string> {
+    try {
+      return (await new RedditURL(url).resolveURL()).toString();
+    } catch (_e) {
+      return url;
     }
   }
 
@@ -285,28 +307,87 @@ export default class RedditURL extends URL {
   }
 
   /**
+   * Reddit's share sheet hands out shortened links: /r/<subreddit>/s/<id>,
+   * /user/<name>/s/<id> and /u/<name>/s/<id> (the last two are what sharing
+   * from a profile or a multireddit produces). The id says nothing about what
+   * it points at, so the page type of a share link is meaningless until the
+   * redirect has been followed — a /user/<name>/s/<id> link would otherwise
+   * look like a plain user page and load as an empty one.
+   */
+  isShortenedShareLink(): boolean {
+    return /^\/(?:r|u|user)\/[^/]+\/s\/[^/]+/.test(this.getRelativePath());
+  }
+
+  /**
+   * Reddit's short domain: https://redd.it/<postId>. Like a share link, it's
+   * an id with no page behind it until the redirect is followed. Media hosts
+   * on the same domain (i/v/preview.redd.it) are real content URLs, not short
+   * links, which is why this matches the host exactly.
+   */
+  isShortDomainLink(): boolean {
+    return (
+      this.getHostName().toLowerCase() === "redd.it" &&
+      /^\/[^/]+/.test(this.getRelativePath())
+    );
+  }
+
+  /**
+   * True for any link whose destination is only knowable by following it.
+   * Callers that decide between opening a link in Hydra and handing it to the
+   * browser have to check this: a short link's page type is a lie until
+   * resolveURL() has run.
+   */
+  isShortenedLink(): boolean {
+    return this.isShortenedShareLink() || this.isShortDomainLink();
+  }
+
+  /**
    * Properly formats shortened URLs and forwarded URLs
    */
   async resolveURL(): Promise<RedditURL> {
+    const isShortLink = this.isShortenedLink();
     if (this.getRelativePath().startsWith("/u/")) {
       this.url = this.url.replace("/u/", "/user/");
+      /* A /u/<name>/s/<id> share link still needs its redirect followed */
+      if (!isShortLink) return this;
+    }
+    if (this.getPageType() !== PageType.UNKNOWN && !isShortLink) {
       return this;
     }
-    if (
-      this.getPageType() !== PageType.UNKNOWN &&
-      !this.url.match(/\/r\/.*\/s\//) // Reddit shortened post URLs /r/subreddit/s/post
-    ) {
-      return this;
+    const resolved =
+      (await this.followRedirect("HEAD")) ??
+      /* Some edges refuse HEAD on short links, so try again with GET */
+      (isShortLink ? await this.followRedirect("GET") : null);
+    if (resolved) {
+      this.url = resolved;
     }
-    const response = await fetch(this.url, {
-      method: "HEAD",
-      redirect: "follow",
-      headers: {
-        "User-Agent": USER_AGENT,
-      },
-    });
-    this.url = response.url;
     return this;
+  }
+
+  /**
+   * Follows this URL's redirects and returns where it landed, or null if the
+   * request failed or landed somewhere that isn't a Reddit URL. Navigation
+   * calls this, so a network failure must leave the URL untouched rather than
+   * throw.
+   */
+  private async followRedirect(method: "HEAD" | "GET"): Promise<string | null> {
+    try {
+      const response = await fetch(this.url, {
+        method,
+        redirect: "follow",
+        headers: {
+          "User-Agent": USER_AGENT,
+        },
+      });
+      if (!response.url || response.url === this.url) return null;
+      const { url, isValid } = RedditURL.getURLIfValid(response.url);
+      if (!isValid) return null;
+      /* A redirect that lands on another short link resolved nothing */
+      if (new RedditURL(url).isShortenedLink()) return null;
+      return url;
+    } catch (_e) {
+      return null;
+    }
   }
 
   applyPreferredSorts(): RedditURL {
