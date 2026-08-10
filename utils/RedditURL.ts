@@ -285,28 +285,64 @@ export default class RedditURL extends URL {
   }
 
   /**
+   * Reddit's share sheet hands out shortened links: /r/<subreddit>/s/<id>,
+   * /user/<name>/s/<id> and /u/<name>/s/<id> (the last two are what sharing
+   * from a profile or a multireddit produces). The id says nothing about what
+   * it points at, so the page type of a share link is meaningless until the
+   * redirect has been followed — a /user/<name>/s/<id> link would otherwise
+   * look like a plain user page and load as an empty one.
+   */
+  isShortenedShareLink(): boolean {
+    return /^\/(?:r|u|user)\/[^/]+\/s\/[^/]+/.test(this.getRelativePath());
+  }
+
+  /**
    * Properly formats shortened URLs and forwarded URLs
    */
   async resolveURL(): Promise<RedditURL> {
+    const isShareLink = this.isShortenedShareLink();
     if (this.getRelativePath().startsWith("/u/")) {
       this.url = this.url.replace("/u/", "/user/");
+      /* A /u/<name>/s/<id> share link still needs its redirect followed */
+      if (!isShareLink) return this;
+    }
+    if (this.getPageType() !== PageType.UNKNOWN && !isShareLink) {
       return this;
     }
-    if (
-      this.getPageType() !== PageType.UNKNOWN &&
-      !this.url.match(/\/r\/.*\/s\//) // Reddit shortened post URLs /r/subreddit/s/post
-    ) {
-      return this;
+    const resolved =
+      (await this.followRedirect("HEAD")) ??
+      /* Some edges refuse HEAD on share links, so try again with GET */
+      (isShareLink ? await this.followRedirect("GET") : null);
+    if (resolved) {
+      this.url = resolved;
     }
-    const response = await fetch(this.url, {
-      method: "HEAD",
-      redirect: "follow",
-      headers: {
-        "User-Agent": USER_AGENT,
-      },
-    });
-    this.url = response.url;
     return this;
+  }
+
+  /**
+   * Follows this URL's redirects and returns where it landed, or null if the
+   * request failed or landed somewhere that isn't a Reddit URL. Navigation
+   * calls this, so a network failure must leave the URL untouched rather than
+   * throw.
+   */
+  private async followRedirect(method: "HEAD" | "GET"): Promise<string | null> {
+    try {
+      const response = await fetch(this.url, {
+        method,
+        redirect: "follow",
+        headers: {
+          "User-Agent": USER_AGENT,
+        },
+      });
+      if (!response.url || response.url === this.url) return null;
+      const { url, isValid } = RedditURL.getURLIfValid(response.url);
+      if (!isValid) return null;
+      /* A redirect that lands on another share link resolved nothing */
+      if (new RedditURL(url).isShortenedShareLink()) return null;
+      return url;
+    } catch (_e) {
+      return null;
+    }
   }
 
   applyPreferredSorts(): RedditURL {
