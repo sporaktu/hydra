@@ -1,5 +1,11 @@
 {
   "enabledPlugins": {
     "expo@expo-plugins": true
+  },
+  "permissions": {
+    "allow": [
+      "Bash(git push:*)",
+      "Bash(git tag:*)"
+    ]
   }
 }
