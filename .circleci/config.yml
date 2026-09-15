@@ -157,12 +157,19 @@ jobs:
             '
       - run:
           name: Wait for EAS build and TestFlight submission
-          # Polls with a status line every 30s so CircleCI always sees output,
-          # and gives up on its own well before the no-output timeout.
+          # Polls with a status line every 30s so CircleCI always sees output.
+          # The build is waited on in full (it reliably takes ~10 minutes). The
+          # TestFlight submission gets a bounded window: Expo's submit queue
+          # has held submissions for over an hour, and this plan caps jobs at
+          # 60 minutes, so the job cannot wait it out. A submission still
+          # queued at the end of the window is left to finish on EAS and the
+          # job exits green with a link; a submission that errors inside the
+          # window fails the job.
           no_output_timeout: 15m
           command: |
             BUILD_ID="$(cat eas-ios-build-id.txt)"
-            DEADLINE=$(( $(date +%s) + 60*60 ))
+            BUILD_DEADLINE=$(( $(date +%s) + 40*60 ))
+            SUBMIT_DEADLINE=$(( $(date +%s) + 50*60 ))
             status() { eas build:view "$BUILD_ID" --json 2>/dev/null | node -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>console.log(JSON.parse(d).status))'; }
             while :; do
               S="$(status)"
@@ -171,7 +178,7 @@ jobs:
                 FINISHED) break ;;
                 ERRORED|CANCELED) echo "EAS build $S"; exit 1 ;;
               esac
-              [ "$(date +%s)" -lt "$DEADLINE" ] || { echo "Timed out waiting for build"; exit 1; }
+              [ "$(date +%s)" -lt "$BUILD_DEADLINE" ] || { echo "Timed out waiting for build"; exit 1; }
               sleep 30
             done
             # The auto-submit is a separate EAS submission tied to this build.
@@ -183,10 +190,14 @@ jobs:
               S="$(substatus)"
               echo "$(date -u +%H:%M:%S) submission for $BUILD_ID: $S"
               case "$S" in
-                FINISHED) echo "Submitted to TestFlight"; break ;;
+                FINISHED) echo "Submitted to TestFlight"; exit 0 ;;
                 ERRORED|CANCELED) echo "EAS submission $S"; exit 1 ;;
               esac
-              [ "$(date +%s)" -lt "$DEADLINE" ] || { echo "Timed out waiting for submission"; exit 1; }
+              if [ "$(date +%s)" -ge "$SUBMIT_DEADLINE" ]; then
+                echo "Submission still $S in Expo's queue; it will finish on EAS without this job."
+                echo "Track it: https://expo.dev/accounts/${EXPO_OWNER}/projects/${EXPO_SLUG:-ghydra}/submissions"
+                exit 0
+              fi
               sleep 30
             done
 
