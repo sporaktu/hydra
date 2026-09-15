@@ -51,6 +51,7 @@ export default function ImageViewer({
   const imgRatio = aspectRatio;
   const heightIfFullSize = width / imgRatio;
   const imgHeight = Math.min(height * 0.6, heightIfFullSize);
+  const cellHeight = numImgsToDisplay === 2 ? imgHeight / 2 : imgHeight;
 
   /**
    * The long-press menu for a single image. The same ImageViewer renders post
@@ -92,14 +93,7 @@ export default function ImageViewer({
   };
 
   return (
-    <View
-      style={[
-        styles.imageViewerContainer,
-        {
-          height: numImgsToDisplay === 2 ? imgHeight / 2 : imgHeight,
-        },
-      ]}
-    >
+    <View style={[styles.imageViewerContainer, { height: cellHeight }]}>
       {images.slice(0, numImgsToDisplay).map((img, index) => {
         const imgSrc =
           typeof img === "string" ? img : loadLowData ? [img[0]] : img;
@@ -114,6 +108,13 @@ export default function ImageViewer({
             actions={makeImageMenuActions(img)}
             style={styles.touchableZone}
           >
+            {/*
+             * On iOS the native menu trigger wraps its child in an unstyled,
+             * auto-height View, so a flex: 1 touchable there collapses to
+             * zero height and the image never shows. Size it explicitly on
+             * iOS; on Android the touchable sits directly in the row and
+             * flexes like before.
+             */}
             <TouchableHighlight
               activeOpacity={1}
               onPress={() => {
@@ -127,7 +128,11 @@ export default function ImageViewer({
                   getCurrentPost: () => post ?? null,
                 });
               }}
-              style={styles.touchableZone}
+              style={
+                Platform.OS === "ios"
+                  ? { width: "100%", height: cellHeight }
+                  : styles.touchableZone
+              }
               underlayColor={theme.background}
               onLongPress={
                 // iOS gets the native context menu above; the action sheet is
@@ -136,12 +141,7 @@ export default function ImageViewer({
               }
             >
               <Image
-                style={[
-                  styles.img,
-                  {
-                    height: numImgsToDisplay === 2 ? imgHeight / 2 : imgHeight,
-                  },
-                ]}
+                style={[styles.img, { height: cellHeight }]}
                 recyclingKey={
                   typeof imgSrc === "string" ? imgSrc : imgSrc[0].uri
                 }
