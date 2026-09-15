@@ -1,13 +1,13 @@
 /**
  * Regression test for "every feed image and gallery went blank on iOS".
  *
- * Root cause: ImageViewer wraps each image's touchable in NativeContextMenu
- * for the image long-press menu. On iOS that is zeego's native trigger, which
- * (via react-native-ios-context-menu's ContextMenuView) renders its child
- * inside an UNSTYLED, auto-height <View>. A `flex: 1` touchable in an
- * auto-height column has nothing to grow into, so it collapsed to zero height
- * and the image inside never showed. Posts and comments use the same trigger
- * but their content has intrinsic height, which is why only images broke.
+ * ImageViewer wraps each image's touchable in NativeContextMenu for the image
+ * long-press menu. On iOS that is zeego's native trigger, whose Root view is
+ * rendered with `flexGrow: 0` and whose Trigger wraps the child in a plain,
+ * auto-sized View. A `flex: 1` touchable inside that has nothing to grow into
+ * on either axis. Height is handled here by sizing the touchable explicitly;
+ * width is handled in NativeContextMenu, which forwards the caller's flex to
+ * the Root as explicit grow/shrink/basis (see its own tests).
  *
  * These tests render ImageViewer on each platform and assert the touchable is
  * explicitly sized on iOS (no reliance on flex) while Android, where the

@@ -23,6 +23,7 @@ const mockRootProps: {
   onOpenChange?: (open: boolean) => void;
   style?: unknown;
 } = {};
+const mockTriggerProps: { style?: unknown } = {};
 
 jest.mock("zeego/context-menu", () => {
   const React = require("react");
@@ -42,8 +43,16 @@ jest.mock("zeego/context-menu", () => {
       mockRootProps.style = style;
       return React.createElement(RNView, { testID: "cm-Root" }, children);
     },
-    Trigger: ({ children }: { children: React.ReactNode }) =>
-      React.createElement(RNView, { testID: "cm-Trigger" }, children),
+    Trigger: ({
+      children,
+      style,
+    }: {
+      children: React.ReactNode;
+      style?: unknown;
+    }) => {
+      mockTriggerProps.style = style;
+      return React.createElement(RNView, { testID: "cm-Trigger" }, children);
+    },
     Content: ({ children }: { children: React.ReactNode }) =>
       React.createElement(RNView, { testID: "cm-Content" }, children),
     Item: ({
@@ -113,6 +122,7 @@ beforeEach(() => {
   mockItems.length = 0;
   mockRootProps.onOpenChange = undefined;
   mockRootProps.style = undefined;
+  mockTriggerProps.style = undefined;
 });
 
 describe("on Android", () => {
@@ -174,6 +184,30 @@ describe("on iOS", () => {
     expect(mockRootProps.style).toEqual(
       expect.objectContaining({ flexGrow: 1, flexShrink: 1, flexBasis: 0 }),
     );
+  });
+
+  it("passes non-flex styles through to the menu root unchanged", () => {
+    setPlatform("ios");
+    render(undefined, { width: 100 });
+    expect(mockRootProps.style).toEqual({ width: 100 });
+  });
+
+  it("gives the trigger the caller's style as written, flex shorthand included", () => {
+    setPlatform("ios");
+    render(undefined, { flex: 1 });
+    expect(mockTriggerProps.style).toEqual({ flex: 1 });
+  });
+
+  it("flattens a style array for both the root and the trigger", () => {
+    setPlatform("ios");
+    render(undefined, [{ flex: 1 }, { height: 10 }]);
+    expect(mockRootProps.style).toEqual({
+      flexGrow: 1,
+      flexShrink: 1,
+      flexBasis: 0,
+      height: 10,
+    });
+    expect(mockTriggerProps.style).toEqual({ flex: 1, height: 10 });
   });
 
   it("leaves the menu root unstyled when the caller passes no style", () => {
