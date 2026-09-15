@@ -113,3 +113,121 @@ export function pickCenterMostVideo(
   }
   return best.key;
 }
+
+/**
+ * How much of a video post has to be on screen before it may become the
+ * Focused Post. A post is "mostly visible" when EITHER holds:
+ *
+ * - at least FOCUS_ITEM_VISIBLE_PERCENT of the post itself is on screen (the
+ *   normal case), or
+ * - the post covers at least FOCUS_VIEWPORT_COVERAGE_PERCENT of the viewport
+ *   (a post taller than the viewport can never satisfy the first rule, and on
+ *   a small phone a video post with a long title can be).
+ *
+ * The feed list registers one viewability config per rule and feeds the
+ * union of both into decideFeedVideoFocus. Without these, a video's first
+ * pixel scrolling into view was enough to start it playing.
+ */
+export const FOCUS_ITEM_VISIBLE_PERCENT = 70;
+export const FOCUS_VIEWPORT_COVERAGE_PERCENT = 60;
+
+/** The parts of a FlashList ViewToken this module reads. */
+export type ViewabilityToken = {
+  index: number | null;
+  isViewable: boolean;
+  item: unknown;
+};
+
+export type VideoCandidates = {
+  /** Sorted, de-duplicated indices of every viewable item. */
+  viewableIndices: number[];
+  /** The viewable items that are video posts, with their video key. */
+  videoIndices: { index: number; key: string }[];
+};
+
+/**
+ * Collapses one or more lists of view tokens (the same index may appear in
+ * several) into the inputs pickCenterMostVideo wants.
+ */
+export function collectVideoCandidates(
+  tokens: ViewabilityToken[],
+): VideoCandidates {
+  const seen = new Set<number>();
+  const viewableIndices: number[] = [];
+  const videoIndices: { index: number; key: string }[] = [];
+  for (const token of tokens) {
+    if (!token.isViewable || token.index === null) continue;
+    if (seen.has(token.index)) continue;
+    seen.add(token.index);
+    viewableIndices.push(token.index);
+    const item = token.item as { videos?: { source: string }[] } | undefined;
+    const key = item?.videos?.[0]?.source;
+    if (key) {
+      videoIndices.push({ index: token.index, key });
+    }
+  }
+  viewableIndices.sort((a, b) => a - b);
+  videoIndices.sort((a, b) => a.index - b.index);
+  return { viewableIndices, videoIndices };
+}
+
+export type FocusDecision = {
+  /**
+   * The video this feed has focused left the screen entirely: release focus
+   * now, before any settle debounce, so its audio never outlives it.
+   */
+  releaseNow: boolean;
+  /**
+   * What to focus once scrolling settles: a video key, null for "nothing
+   * should play", or undefined to leave things as they are (and drop any
+   * pending change).
+   */
+  pending: string | null | undefined;
+};
+
+/**
+ * Decides the next Focused Post from two views of the feed:
+ *
+ * @param mostlyVisible tokens for items meeting the "mostly visible" rules
+ *   above (the union of both configs; duplicates are fine)
+ * @param anyVisible tokens for items with any pixel on screen
+ * @param focusedKey the globally focused video key, if any
+ * @param ownsFocus whether that focus belongs to this feed
+ *
+ * Starting is strict: only a mostly visible video can become Focused, and the
+ * center-most of those wins. Stopping is lenient: once playing, a video keeps
+ * focus while any of it is on screen and nothing mostly visible replaces it,
+ * so nudging the feed a little doesn't cut a video off mid-play.
+ */
+export function decideFeedVideoFocus({
+  mostlyVisible,
+  anyVisible,
+  focusedKey,
+  ownsFocus,
+}: {
+  mostlyVisible: ViewabilityToken[];
+  anyVisible: ViewabilityToken[];
+  focusedKey: string | null;
+  ownsFocus: boolean;
+}): FocusDecision {
+  const { viewableIndices, videoIndices } =
+    collectVideoCandidates(mostlyVisible);
+  const stillOnScreen =
+    focusedKey !== null &&
+    collectVideoCandidates(anyVisible).videoIndices.some(
+      (video) => video.key === focusedKey,
+    );
+  const releaseNow = ownsFocus && focusedKey !== null && !stillOnScreen;
+  const effectiveFocused = releaseNow ? null : focusedKey;
+
+  const candidate = pickCenterMostVideo(viewableIndices, videoIndices);
+  if (candidate === effectiveFocused) {
+    return { releaseNow, pending: undefined };
+  }
+  if (candidate === null && effectiveFocused !== null) {
+    // Hysteresis: the focused video is only partly visible and nothing else
+    // qualifies yet. Keep it going rather than flipping it to its Poster.
+    return { releaseNow, pending: undefined };
+  }
+  return { releaseNow, pending: candidate };
+}

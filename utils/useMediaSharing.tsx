@@ -1,4 +1,5 @@
 import { File, Paths } from "expo-file-system";
+import * as MediaLibrary from "expo-media-library";
 import { useContext, useRef } from "react";
 import {
   ActivityIndicator,
@@ -15,21 +16,53 @@ import URL from "./URL";
 import { ModalContext } from "../contexts/ModalContext";
 import { ThemeContext } from "../contexts/SettingsContexts/ThemeContext";
 
-export default function useMediaSharing() {
+type MediaType = "image" | "video";
+type MediaSource = string | ImageSource[];
+
+/**
+ * The URL worth sharing/saving/copying for a media source: a plain string as
+ * is, or the last (highest resolution) entry of a resolution array.
+ */
+export function getMediaURL(mediaSource: MediaSource): string | undefined {
+  return typeof mediaSource === "string"
+    ? mediaSource
+    : mediaSource.at(-1)?.uri;
+}
+
+async function downloadToCache(mediaUrl: string): Promise<File> {
+  const fileName = new URL(mediaUrl).getBasePath().split("/").pop();
+  const file = new File(`${Paths.cache.uri}/${fileName}`);
+  if (file.exists) {
+    file.delete();
+  }
+  await File.downloadFileAsync(mediaUrl, file);
+  return file;
+}
+
+/**
+ * Shared "Preparing…" modal + download for the share and save flows. Returns a
+ * function that downloads the media, hands the cached file to `withFile`, and
+ * cleans up, or null when a previous call is still in flight.
+ */
+function useMediaDownload() {
   const { setModal } = useContext(ModalContext);
   const { theme } = useContext(ThemeContext);
 
   const alreadyAsking = useRef(false);
 
   return async (
-    type: "image" | "video",
-    mediaSource: string | ImageSource[],
+    type: MediaType,
+    mediaSource: MediaSource,
+    withFile: (file: File) => Promise<void>,
+    onError: () => void,
   ) => {
     if (alreadyAsking.current) return;
     alreadyAsking.current = true;
-    const mediaUrl =
-      typeof mediaSource === "string" ? mediaSource : mediaSource.at(-1)?.uri;
-    if (!mediaUrl) return;
+    const mediaUrl = getMediaURL(mediaSource);
+    if (!mediaUrl) {
+      alreadyAsking.current = false;
+      return;
+    }
     try {
       setModal(
         <TouchableOpacity
@@ -60,22 +93,63 @@ export default function useMediaSharing() {
           </View>
         </TouchableOpacity>,
       );
-      const fileName = new URL(mediaUrl).getBasePath().split("/").pop();
-      const file = new File(`${Paths.cache.uri}/${fileName}`);
-      if (file.exists) {
+      const file = await downloadToCache(mediaUrl);
+      setModal(null);
+      try {
+        await withFile(file);
+      } finally {
         file.delete();
       }
-      await File.downloadFileAsync(mediaUrl, file);
-      setModal(null);
-      await Share.share({
-        url: file.uri,
-      });
-      file.delete();
     } catch (_e) {
-      Alert.alert("Error", `Failed to download ${type}`);
       setModal(null);
+      onError();
     }
     alreadyAsking.current = false;
+  };
+}
+
+export default function useMediaSharing() {
+  const download = useMediaDownload();
+
+  return (type: MediaType, mediaSource: MediaSource) =>
+    download(
+      type,
+      mediaSource,
+      async (file) => {
+        await Share.share({
+          url: file.uri,
+        });
+      },
+      () => Alert.alert("Error", `Failed to download ${type}`),
+    );
+}
+
+/**
+ * Saves an image or video straight into the photo library (asking for the
+ * add-only photos permission the first time), so a long press can offer
+ * "Save" without a trip through the share sheet.
+ */
+export function useMediaSaving() {
+  const download = useMediaDownload();
+
+  return async (type: MediaType, mediaSource: MediaSource) => {
+    const permission = await MediaLibrary.requestPermissionsAsync(true);
+    if (!permission.granted) {
+      Alert.alert(
+        "Can't save to Photos",
+        "Allow Hydra to add to your photo library in Settings to save media.",
+      );
+      return;
+    }
+    await download(
+      type,
+      mediaSource,
+      async (file) => {
+        await MediaLibrary.saveToLibraryAsync(file.uri);
+        Alert.alert(`${type === "image" ? "Image" : "Video"} saved to Photos`);
+      },
+      () => Alert.alert("Error", `Failed to save ${type}`),
+    );
   };
 }
 

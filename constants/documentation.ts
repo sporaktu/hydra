@@ -297,7 +297,11 @@ Appearance settings control how posts, comments, and tabs are displayed. Configu
 
 **Show Post Summary**: Shows AI-generated post summaries. Requires [Hydra Pro](hydra://settings/hydraPro). Learn more in the [AI Summaries guide](hydra://settings/guide/?doc=ai_summaries).
 
-**Auto Play Videos**: Automatically plays videos as you scroll. Uses more data and battery.
+**Auto Play Videos**: Automatically plays the centered video once it is mostly on screen as you scroll. Uses more data and battery. With it off, videos show a preview until you tap them, and then play immediately in full screen.
+
+**Focused Video Audio**: Plays the centered feed video with sound instead of muted. Also available as the speaker button floating over the feed.
+
+**Tapped Video Audio**: Sound for videos you open by tapping them into full screen. It follows Focused Video Audio until you set it yourself, from here or from the speaker button in the full screen video controls, after which it takes precedence for tapped videos.
 
 **Live Text**: Enables text recognition in images using iOS Live Text, allowing you to select and copy text. Learn more in the [Live Text guide](hydra://settings/guide/?doc=live_text).
 
@@ -1928,7 +1932,7 @@ These are lesser-known features and techniques that can significantly improve yo
 
 **Long press the Search tab** to instantly open a quick subreddit search overlay. This is faster than navigating to the Search tab and typing — just long press, type at least 3 characters, and jump straight to a subreddit.
 
-**Long press** on posts, comments, images, videos, subreddits, and users to access context menus with quick actions like save, share, copy, reply, and more.
+**Long press** on posts, comments, images, videos, subreddits, and users to access context menus with quick actions like save, share, copy, reply, and more. Long press a comment to copy its text, or an image (in a post or a comment) to share it, save it to your photo library, or copy its link.
 
 **Swipe Anywhere to Navigate** lets you swipe right from anywhere on the screen to go back. Enable it in [Gestures settings](hydra://settings/general/gestures). Note that enabling this disables right swipe actions — only left swipe actions remain active.
 
@@ -1950,7 +1954,7 @@ For multi-image posts, swipe left and right to browse between images. An indicat
 
 ## Video Player
 
-**Tap the playback speed button** (top-left corner in full-screen video) to cycle through 0.5x, 1x, 1.5x, and 2x playback speeds.
+**Tap the playback speed button** (top-left corner in full-screen video) to cycle through 0.5x, 1x, 1.5x, and 2x playback speeds. The **speaker button** next to it toggles sound for tapped (full-screen) videos only — the feed\'s own speaker button controls the autoplaying feed video, and full-screen videos follow that setting until you set this one.
 
 **Drag horizontally** on a video to scrub through it. Videos also support **Picture-in-Picture** on iOS — use the system PiP gesture to keep watching while you browse.
 

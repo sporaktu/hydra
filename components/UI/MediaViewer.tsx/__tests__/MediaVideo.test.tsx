@@ -25,6 +25,7 @@ import { act, create, ReactTestRenderer } from "react-test-renderer";
 import { ActivityIndicator, Animated, StyleSheet, Text } from "react-native";
 
 import MediaVideo from "../MediaVideo.ios";
+import { PostSettingsContext } from "../../../../contexts/SettingsContexts/PostSettingsContext";
 
 // --- mocks for the component's dependency tree -----------------------------
 jest.mock("expo-video", () => ({
@@ -66,14 +67,10 @@ jest.mock("@expo/vector-icons", () => ({
   Feather: () => null,
 }));
 
-const mockToggleFeedVideoAudio = jest.fn();
+const mockToggleTappedVideoAudio = jest.fn();
 jest.mock("../../../../contexts/SettingsContexts/PostSettingsContext", () => ({
   __esModule: true,
-  PostSettingsContext: jest.requireActual("react").createContext({
-    feedVideoAudio: false,
-    toggleFeedVideoAudio: (...args: unknown[]) =>
-      mockToggleFeedVideoAudio(...args),
-  }),
+  PostSettingsContext: jest.requireActual("react").createContext({}),
 }));
 
 const mockResolved = {
@@ -123,16 +120,28 @@ const baseSource = {
   needsResolution: false,
 } as never;
 
-function renderFocused(): ReactTestRenderer {
+function renderFocused({
+  tappedVideoAudio = false,
+}: { tappedVideoAudio?: boolean } = {}): ReactTestRenderer {
   let tree!: ReactTestRenderer;
   act(() => {
     tree = create(
-      <MediaVideo
-        source={baseSource}
-        focused
-        overlayOpacity={new Animated.Value(0)}
-        setIsScrollLocked={() => {}}
-      />,
+      <PostSettingsContext.Provider
+        value={
+          {
+            tappedVideoAudio,
+            toggleTappedVideoAudio: (...args: unknown[]) =>
+              mockToggleTappedVideoAudio(...args),
+          } as never
+        }
+      >
+        <MediaVideo
+          source={baseSource}
+          focused
+          overlayOpacity={new Animated.Value(0)}
+          setIsScrollLocked={() => {}}
+        />
+      </PostSettingsContext.Provider>,
     );
   });
   return tree;
@@ -228,7 +237,9 @@ describe("fullscreen video controls", () => {
     const buttons = findControlButtons(tree);
     expect(buttons).toHaveLength(2);
     expect(buttons[0].findAllByType(Text)).not.toHaveLength(0); // "1x"
-    expect(buttons[1].props.accessibilityLabel).toBe("Play sound");
+    expect(buttons[1].props.accessibilityLabel).toBe(
+      "Play sound for tapped videos",
+    );
   });
 
   it("preserves pitch when bumping the playback rate above 1x", () => {
@@ -243,12 +254,42 @@ describe("fullscreen video controls", () => {
     expect(mockCurrentPlayer!.preservesPitch).toBe(true);
   });
 
-  it("toggles the shared feed audio setting from the mute button", () => {
+  /**
+   * The viewer's mute button used to flip the FEED's audio setting, so
+   * unmuting a tapped video also unmuted the feed behind it. It now owns a
+   * separate tapped-video setting (which merely defaults to the feed's), so
+   * the two can be set independently.
+   */
+  it("toggles the tapped-video audio setting from the mute button", () => {
     mockCurrentPlayer = makePlayer({ status: "readyToPlay", playing: true });
     const tree = renderFocused();
 
     act(() => findControlButtons(tree)[1].props.onPress());
 
-    expect(mockToggleFeedVideoAudio).toHaveBeenCalled();
+    expect(mockToggleTappedVideoAudio).toHaveBeenCalled();
+  });
+
+  it("mutes the focused player while tapped-video audio is off", () => {
+    mockCurrentPlayer = makePlayer({
+      status: "readyToPlay",
+      playing: true,
+      muted: false,
+    });
+    renderFocused({ tappedVideoAudio: false });
+
+    expect(mockCurrentPlayer!.muted).toBe(true);
+    expect(mockCurrentPlayer!.play).toHaveBeenCalled();
+  });
+
+  it("unmutes the focused player when tapped-video audio is on", () => {
+    mockCurrentPlayer = makePlayer({
+      status: "readyToPlay",
+      playing: true,
+      muted: true,
+    });
+    renderFocused({ tappedVideoAudio: true });
+
+    expect(mockCurrentPlayer!.muted).toBe(false);
+    expect(mockCurrentPlayer!.audioMixingMode).toBe("doNotMix");
   });
 });
