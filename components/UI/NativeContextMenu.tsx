@@ -85,10 +85,14 @@ function rootStyle(style: ViewStyle | undefined): ViewStyle | undefined {
   if (!style) return undefined;
   const { flex, ...rest } = style;
   if (typeof flex !== "number") return style;
-  return {
-    flexGrow: flex,
-    flexShrink: flex > 0 ? 1 : 0,
-    flexBasis: 0,
-    ...rest,
-  };
+  // Mirror React Native's expansion of the shorthand: positive flex grows and
+  // shrinks from a zero basis; zero is fixed at content size; negative is
+  // shrink-only.
+  const longhands: ViewStyle =
+    flex > 0
+      ? { flexGrow: flex, flexShrink: 1, flexBasis: 0 }
+      : flex === 0
+        ? { flexGrow: 0, flexShrink: 0, flexBasis: "auto" }
+        : { flexGrow: 0, flexShrink: 1, flexBasis: "auto" };
+  return { ...longhands, ...rest };
 }
