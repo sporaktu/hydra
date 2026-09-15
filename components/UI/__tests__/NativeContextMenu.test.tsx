@@ -19,7 +19,10 @@ type CapturedItem = {
   destructive?: boolean;
 };
 const mockItems: CapturedItem[] = [];
-const mockRootProps: { onOpenChange?: (open: boolean) => void } = {};
+const mockRootProps: {
+  onOpenChange?: (open: boolean) => void;
+  style?: unknown;
+} = {};
 
 jest.mock("zeego/context-menu", () => {
   const React = require("react");
@@ -29,11 +32,14 @@ jest.mock("zeego/context-menu", () => {
     Root: ({
       children,
       onOpenChange,
+      style,
     }: {
       children: React.ReactNode;
       onOpenChange?: (open: boolean) => void;
+      style?: unknown;
     }) => {
       mockRootProps.onOpenChange = onOpenChange;
+      mockRootProps.style = style;
       return React.createElement(RNView, { testID: "cm-Root" }, children);
     },
     Trigger: ({ children }: { children: React.ReactNode }) =>
@@ -82,11 +88,18 @@ const actions = [
   { label: "Delete", handle: handleDelete, destructive: true },
 ];
 
-function render(onOpenChange?: (open: boolean) => void) {
+function render(
+  onOpenChange?: (open: boolean) => void,
+  style?: React.ComponentProps<typeof NativeContextMenu>["style"],
+) {
   let tree!: ReactTestRenderer;
   act(() => {
     tree = create(
-      <NativeContextMenu actions={actions} onOpenChange={onOpenChange}>
+      <NativeContextMenu
+        actions={actions}
+        onOpenChange={onOpenChange}
+        style={style}
+      >
         <View testID="menu-child" />
       </NativeContextMenu>,
     );
@@ -99,6 +112,7 @@ beforeEach(() => {
   handleDelete.mockClear();
   mockItems.length = 0;
   mockRootProps.onOpenChange = undefined;
+  mockRootProps.style = undefined;
 });
 
 describe("on Android", () => {
@@ -146,6 +160,26 @@ describe("on iOS", () => {
     render();
     expect(mockItems[0].destructive).toBeUndefined();
     expect(mockItems[1].destructive).toBe(true);
+  });
+
+  /**
+   * zeego renders the native menu view with `flexGrow: 0`, and in Yoga an
+   * explicit flexGrow beats the value implied by the `flex` shorthand. So a
+   * caller's `flex: 1` has to reach Root as explicit grow/shrink/basis, or
+   * the native view (and every image inside it) lays out at zero width.
+   */
+  it("gives the menu root the caller's flex as explicit grow/shrink/basis", () => {
+    setPlatform("ios");
+    render(undefined, { flex: 1 });
+    expect(mockRootProps.style).toEqual(
+      expect.objectContaining({ flexGrow: 1, flexShrink: 1, flexBasis: 0 }),
+    );
+  });
+
+  it("leaves the menu root unstyled when the caller passes no style", () => {
+    setPlatform("ios");
+    render();
+    expect(mockRootProps.style).toBeUndefined();
   });
 
   it("forwards onOpenChange to the menu root", () => {

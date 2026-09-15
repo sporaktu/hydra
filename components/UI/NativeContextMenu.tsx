@@ -12,9 +12,10 @@ type NativeContextMenuProps = {
   actions: NativeContextMenuAction[];
   onOpenChange?: (open: boolean) => void;
   /**
-   * Applied to the native trigger view on iOS, which otherwise wraps the
-   * children in a plain block view. Needed when the children rely on flexing
-   * inside their parent (e.g. an image in a row of images).
+   * Applied to the native menu view and its trigger view on iOS, which
+   * otherwise wrap the children in plain block views. Needed when the
+   * children rely on flexing inside their parent (e.g. an image in a row of
+   * images).
    */
   style?: StyleProp<ViewStyle>;
   children: React.ReactNode;
@@ -38,15 +39,22 @@ export default function NativeContextMenu({
     return <>{children}</>;
   }
 
+  const flatStyle = StyleSheet.flatten(style);
+
   return (
-    <ContextMenu.Root onOpenChange={onOpenChange}>
+    <ContextMenu.Root
+      onOpenChange={onOpenChange}
+      // zeego types Root with its web shape, which has no `style`; the iOS
+      // Root does read it and applies it to the native menu view.
+      {...({ style: rootStyle(flatStyle) } as Partial<
+        React.ComponentProps<typeof ContextMenu.Root>
+      >)}
+    >
       <ContextMenu.Trigger
         // zeego types the trigger's style as the web (CSS) and native shapes
         // intersected; on iOS it is applied as a plain RN view style.
         style={
-          StyleSheet.flatten(style) as React.ComponentProps<
-            typeof ContextMenu.Trigger
-          >["style"]
+          flatStyle as React.ComponentProps<typeof ContextMenu.Trigger>["style"]
         }
       >
         {children}
@@ -64,4 +72,23 @@ export default function NativeContextMenu({
       </ContextMenu.Content>
     </ContextMenu.Root>
   );
+}
+
+/**
+ * zeego renders the native menu view with `flexGrow: 0` in front of the
+ * caller's style, and in Yoga an explicit flexGrow beats whatever the `flex`
+ * shorthand implies. So `flex: 1` would leave the native view at grow 0 /
+ * basis 0, i.e. zero width in a row. Expand the shorthand into explicit
+ * longhands so the caller's intent actually overrides zeego's default.
+ */
+function rootStyle(style: ViewStyle | undefined): ViewStyle | undefined {
+  if (!style) return undefined;
+  const { flex, ...rest } = style;
+  if (typeof flex !== "number") return style;
+  return {
+    flexGrow: flex,
+    flexShrink: flex > 0 ? 1 : 0,
+    flexBasis: 0,
+    ...rest,
+  };
 }
