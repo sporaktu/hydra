@@ -38,8 +38,16 @@ type MediaVideoProps = {
 const PLAYBACK_RATES = [0.5, 1, 1.5, 2];
 
 function MediaVideo(props: MediaVideoProps) {
-  const { source } = props;
+  const { source, focused } = props;
   const { width, height } = useSafeAreaFrame();
+  const { tappedVideoAudio } = useContext(PostSettingsContext);
+
+  // Read by the create-time configure callback below, which the registry only
+  // runs once per player, so it must not close over a stale render.
+  const focusedRef = useRef(focused);
+  focusedRef.current = focused;
+  const tappedVideoAudioRef = useRef(tappedVideoAudio);
+  tappedVideoAudioRef.current = tappedVideoAudio;
 
   const {
     uri: resolvedUri,
@@ -51,13 +59,23 @@ function MediaVideo(props: MediaVideoProps) {
     source.source,
     resolvedUri ? VideoCache.makeCachedVideoSource(resolvedUri) : null,
     (player) => {
-      player.audioMixingMode = "mixWithOthers";
       player.loop = true;
       player.timeUpdateEventInterval = 1 / 15;
       player.seekTolerance = {
         toleranceBefore: 0.1,
         toleranceAfter: 0.1,
       };
+      if (focusedRef.current) {
+        // With feed autoplay off there is no shared player yet when a video
+        // is tapped open, so this is where its player is born: start it right
+        // here, with the tapped-video audio setting, rather than waiting for
+        // the content component to mount and run its focus effect.
+        player.audioMixingMode = "doNotMix";
+        player.muted = !tappedVideoAudioRef.current;
+        player.play();
+      } else {
+        player.audioMixingMode = "mixWithOthers";
+      }
     },
   );
 
@@ -125,7 +143,7 @@ function MediaVideoContent(
     props;
   const { width, height } = useSafeAreaFrame();
   const { top: safeAreaTop, left: safeAreaLeft } = useSafeAreaInsets();
-  const { feedVideoAudio, toggleFeedVideoAudio } =
+  const { tappedVideoAudio, toggleTappedVideoAudio } =
     useContext(PostSettingsContext);
 
   const touchStart = useRef({
@@ -234,11 +252,11 @@ function MediaVideoContent(
       // change races through — so fullscreen audio started seconds late and
       // broke after a seek or after closing and reopening. Forcing "doNotMix"
       // here makes expo-video activate the audio session immediately and keep
-      // it active across seeks/reopens. Muted state mirrors the shared
-      // feedVideoAudio setting (same one the feed's mute FAB controls), so
-      // toggling mute in either place stays in sync everywhere.
+      // it active across seeks/reopens. Muted state follows the tapped-video
+      // audio setting (the mute control in this viewer's own controls row),
+      // which defaults to the feed's audio setting until the user sets it.
       player.audioMixingMode = "doNotMix";
-      player.muted = !feedVideoAudio;
+      player.muted = !tappedVideoAudio;
       player.play();
       player.volume = 1;
     } else {
@@ -247,7 +265,7 @@ function MediaVideoContent(
       player.pause();
       player.volume = 0;
     }
-  }, [focused, player, feedVideoAudio]);
+  }, [focused, player, tappedVideoAudio]);
 
   useEffect(() => {
     return () => {
@@ -438,12 +456,12 @@ function MediaVideoContent(
         <TouchableOpacity
           style={styles.videoControlButton}
           accessibilityRole="switch"
-          accessibilityState={{ checked: feedVideoAudio }}
-          accessibilityLabel="Play sound"
-          onPress={() => toggleFeedVideoAudio()}
+          accessibilityState={{ checked: tappedVideoAudio }}
+          accessibilityLabel="Play sound for tapped videos"
+          onPress={() => toggleTappedVideoAudio()}
         >
           <Feather
-            name={feedVideoAudio ? "volume-2" : "volume-x"}
+            name={tappedVideoAudio ? "volume-2" : "volume-x"}
             size={20}
             color="white"
           />

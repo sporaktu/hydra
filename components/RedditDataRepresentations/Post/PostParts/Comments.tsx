@@ -7,6 +7,7 @@ import {
   Octicons,
 } from "@expo/vector-icons";
 import { useRecyclingState } from "@shopify/flash-list";
+import * as Clipboard from "expo-clipboard";
 import { Image } from "expo-image";
 import React, { useContext, useMemo, useRef, ComponentRef } from "react";
 import {
@@ -211,6 +212,12 @@ export function CommentComponent({
             },
           },
         ]),
+    {
+      label: "Copy Text",
+      handle: () => {
+        Clipboard.setStringAsync(comment.text);
+      },
+    },
     {
       label: "Select Text",
       handle: () => setModal(<SelectText text={comment.text} />),

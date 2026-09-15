@@ -40,3 +40,15 @@ are rendered by `expo-image`, not a video player, and keep animating.)
   registry decides *which instance* everyone attaches to.
 - Resume-on-refocus is guaranteed by remembering positions per video key
   independently of player lifetime, since players may be released while unfocused.
+
+## Amendment: mostly visible before playing
+
+Originally any visible pixel made a video post eligible to be Focused, so a
+video started playing the instant its top edge scrolled into view. Now a post
+has to be *mostly visible* first — at least 70% of the post on screen, or, for
+a post taller than the viewport, covering at least 60% of it (two FlashList
+viewability configs whose union feeds the decision; see
+`utils/FeedVideoFocus.ts`). Stopping is deliberately more lenient than
+starting: a playing video keeps focus while any of it is on screen and no
+mostly visible video replaces it, so nudging the feed doesn't flip it to its
+Poster.

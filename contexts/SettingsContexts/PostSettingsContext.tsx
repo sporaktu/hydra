@@ -16,6 +16,7 @@ const initialValues = {
   showPostSummary: true,
   autoPlayVideos: true,
   feedVideoAudio: false,
+  tappedVideoAudio: false,
   liveTextInteraction: false,
   tapToCollapsePost: true,
 };
@@ -35,6 +36,7 @@ const initialPostSettingsContext = {
   toggleShowPostSummary: (_newValue?: boolean) => {},
   toggleAutoPlayVideos: (_newValue?: boolean) => {},
   toggleFeedVideoAudio: (_newValue?: boolean) => {},
+  toggleTappedVideoAudio: (_newValue?: boolean) => {},
   toggleLiveTextInteraction: (_newValue?: boolean) => {},
   toggleTapToCollapsePost: (_newValue?: boolean) => {},
 };
@@ -98,6 +100,14 @@ export function PostSettingsProvider({ children }: React.PropsWithChildren) {
   const [storedFeedVideoAudio, setFeedVideoAudio] =
     useMMKVBoolean("feedVideoAudio");
   const feedVideoAudio = storedFeedVideoAudio ?? initialValues.feedVideoAudio;
+
+  // Audio for videos the user opens by tapping (the fullscreen viewer). Until
+  // the user flips its own toggle it simply follows the feed audio setting, so
+  // a muted feed opens muted; once set it takes precedence over the feed
+  // setting for tapped videos and never falls back again.
+  const [storedTappedVideoAudio, setTappedVideoAudio] =
+    useMMKVBoolean("tappedVideoAudio");
+  const tappedVideoAudio = storedTappedVideoAudio ?? feedVideoAudio;
 
   const [storedliveTextInteraction, setliveTextInteraction] = useMMKVBoolean(
     "liveTextInteraction",
@@ -176,6 +186,11 @@ export function PostSettingsProvider({ children }: React.PropsWithChildren) {
     [feedVideoAudio, setFeedVideoAudio],
   );
 
+  const toggleTappedVideoAudio = useCallback(
+    (newValue = !tappedVideoAudio) => setTappedVideoAudio(newValue),
+    [tappedVideoAudio, setTappedVideoAudio],
+  );
+
   const toggleLiveTextInteraction = useCallback(
     (newValue = !liveTextInteraction) => setliveTextInteraction(newValue),
     [liveTextInteraction, setliveTextInteraction],
@@ -229,6 +244,9 @@ export function PostSettingsProvider({ children }: React.PropsWithChildren) {
       feedVideoAudio: feedVideoAudio ?? initialValues.feedVideoAudio,
       toggleFeedVideoAudio,
 
+      tappedVideoAudio,
+      toggleTappedVideoAudio,
+
       liveTextInteraction:
         liveTextInteraction ?? initialValues.liveTextInteraction,
       toggleLiveTextInteraction,
@@ -263,6 +281,8 @@ export function PostSettingsProvider({ children }: React.PropsWithChildren) {
       toggleAutoPlayVideos,
       feedVideoAudio,
       toggleFeedVideoAudio,
+      tappedVideoAudio,
+      toggleTappedVideoAudio,
       liveTextInteraction,
       toggleLiveTextInteraction,
       tapToCollapsePost,

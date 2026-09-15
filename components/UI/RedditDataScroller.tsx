@@ -13,8 +13,10 @@ import { ThemeContext } from "../../contexts/SettingsContexts/ThemeContext";
 import { TabScrollContext } from "../../contexts/TabScrollContext";
 import { modifyStat, Stat } from "../../db/functions/Stats";
 import {
+  decideFeedVideoFocus,
+  FOCUS_ITEM_VISIBLE_PERCENT,
+  FOCUS_VIEWPORT_COVERAGE_PERCENT,
   getFocusedVideo,
-  pickCenterMostVideo,
   setFocusedVideo,
 } from "../../utils/FeedVideoFocus";
 import { hapticAction } from "../../utils/haptics";
@@ -65,11 +67,18 @@ function RedditDataScroller<T extends RedditDataObject>(
   const lastScrollPosition = useRef(0);
 
   // ---- Focused Post tracking (docs/adr/0003-focused-only-playback.md) ----
-  // The center-most viewable video becomes the Focused Post once scrolling
-  // settles (a short debounce after the last viewability change). During a
-  // fast fling candidates churn faster than the debounce, so nothing is
-  // Focused and nothing plays. Losing viewability clears focus immediately so
-  // a video (and its audio) never keeps playing after it leaves the screen.
+  // The center-most MOSTLY VISIBLE video becomes the Focused Post once
+  // scrolling settles (a short debounce after the last viewability change).
+  // During a fast fling candidates churn faster than the debounce, so nothing
+  // is Focused and nothing plays. Leaving the screen entirely clears focus
+  // immediately so a video (and its audio) never keeps playing off screen.
+  //
+  // "Mostly visible" comes from two extra viewability configs (see
+  // FeedVideoFocus for the thresholds): one for "most of the post is on
+  // screen" and one for "the post fills most of the screen" (a post taller
+  // than the viewport can only satisfy the latter). The list's default
+  // config, which counts any visible pixel, still feeds the caller's own
+  // onViewableItemsChanged and tells us when a video has fully left.
   const FOCUS_SETTLE_MS = 150;
   const focusCommitTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingFocusKey = useRef<string | null>(null);
@@ -88,33 +97,31 @@ function RedditDataScroller<T extends RedditDataObject>(
     setFocusedVideo(key);
   };
 
-  // Snapshot of the latest viewable items so focus can be re-evaluated
-  // without a scroll event (e.g. returning to this screen after a blur).
-  const lastViewableItems = useRef<ViewToken<T>[]>([]);
+  // Snapshots of the latest viewable items per config, so focus can be
+  // re-evaluated whenever any of them changes, and without a scroll event
+  // (e.g. returning to this screen after a blur).
+  const anyVisibleItems = useRef<ViewToken<T>[]>([]);
+  const mostlyVisibleItems = useRef<ViewToken<T>[]>([]);
+  const fillingViewportItems = useRef<ViewToken<T>[]>([]);
 
-  const handleViewableVideosChanged = (viewableItems: ViewToken<T>[]) => {
-    lastViewableItems.current = viewableItems;
-    const viewableIndices: number[] = [];
-    const videoIndices: { index: number; key: string }[] = [];
-    viewableItems.forEach((token) => {
-      if (!token.isViewable || token.index === null) return;
-      viewableIndices.push(token.index);
-      const item = token.item as RedditDataObject & {
-        videos?: { source: string }[];
-      };
-      const videoKey = item.videos?.[0]?.source;
-      if (videoKey) {
-        videoIndices.push({ index: token.index, key: videoKey });
-      }
+  // Only touches refs and module state, so it is safe to capture once in the
+  // viewability pairs below.
+  const evaluateVideoFocus = useCallback(() => {
+    const decision = decideFeedVideoFocus({
+      mostlyVisible: [
+        ...mostlyVisibleItems.current,
+        ...fillingViewportItems.current,
+      ],
+      anyVisible: anyVisibleItems.current,
+      focusedKey: getFocusedVideo(),
+      ownsFocus: ownsFocus(),
     });
-    const candidate = pickCenterMostVideo(viewableIndices, videoIndices);
 
-    // The focused video left the screen: release focus right away.
-    if (ownsFocus() && !videoIndices.some((v) => v.key === getFocusedVideo())) {
+    if (decision.releaseNow) {
       commitFocus(null);
     }
 
-    if (candidate === getFocusedVideo()) {
+    if (decision.pending === undefined) {
       pendingFocusKey.current = null;
       if (focusCommitTimer.current) {
         clearTimeout(focusCommitTimer.current);
@@ -122,13 +129,38 @@ function RedditDataScroller<T extends RedditDataObject>(
       }
       return;
     }
-    pendingFocusKey.current = candidate;
+    pendingFocusKey.current = decision.pending;
     if (focusCommitTimer.current) clearTimeout(focusCommitTimer.current);
     focusCommitTimer.current = setTimeout(() => {
       focusCommitTimer.current = null;
       commitFocus(pendingFocusKey.current);
     }, FOCUS_SETTLE_MS);
-  };
+  }, []);
+
+  // FlashList builds its viewability helpers once from this prop, so keep the
+  // array (and the configs inside it) stable for the life of the list.
+  const focusViewabilityPairs = useRef<
+    NonNullable<FlashListProps<T>["viewabilityConfigCallbackPairs"]>
+  >([
+    {
+      viewabilityConfig: {
+        itemVisiblePercentThreshold: FOCUS_ITEM_VISIBLE_PERCENT,
+      },
+      onViewableItemsChanged: ({ viewableItems }) => {
+        mostlyVisibleItems.current = viewableItems;
+        evaluateVideoFocus();
+      },
+    },
+    {
+      viewabilityConfig: {
+        viewAreaCoveragePercentThreshold: FOCUS_VIEWPORT_COVERAGE_PERCENT,
+      },
+      onViewableItemsChanged: ({ viewableItems }) => {
+        fillingViewportItems.current = viewableItems;
+        evaluateVideoFocus();
+      },
+    },
+  ]);
 
   // Release focus (stopping playback/audio) when this feed's screen blurs or
   // unmounts — otherwise a focused video would keep playing underneath the
@@ -137,8 +169,8 @@ function RedditDataScroller<T extends RedditDataObject>(
   useEffect(() => {
     if (isScreenFocused) {
       // Returning to this screen: no scroll event will fire, so replay the
-      // last viewability snapshot to restore the Focused Post.
-      handleViewableVideosChanged(lastViewableItems.current);
+      // last viewability snapshots to restore the Focused Post.
+      evaluateVideoFocus();
       return;
     }
     if (ownsFocus()) {
@@ -157,7 +189,8 @@ function RedditDataScroller<T extends RedditDataObject>(
   const onViewableItemsChanged = useCallback(
     (info: { viewableItems: ViewToken<T>[]; changed: ViewToken<T>[] }) => {
       props.onViewableItemsChanged?.(info);
-      handleViewableVideosChanged(info.viewableItems);
+      anyVisibleItems.current = info.viewableItems;
+      evaluateVideoFocus();
     },
 
     [props.onViewableItemsChanged],
@@ -233,6 +266,7 @@ function RedditDataScroller<T extends RedditDataObject>(
         lastScrollPosition.current = scrollPosition;
       }}
       onViewableItemsChanged={onViewableItemsChanged}
+      viewabilityConfigCallbackPairs={focusViewabilityPairs.current}
       onScrollEndDrag={(e) => {
         props.onScrollEndDrag?.(e);
         flushScrollDistance();

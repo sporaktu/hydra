@@ -49,6 +49,8 @@ export default function Appearance() {
     toggleAutoPlayVideos,
     feedVideoAudio,
     toggleFeedVideoAudio,
+    tappedVideoAudio,
+    toggleTappedVideoAudio,
     liveTextInteraction,
     toggleLiveTextInteraction,
     tapToCollapsePost,
@@ -321,6 +323,24 @@ export default function Appearance() {
             ),
             text: "Focused video audio",
             onPress: () => toggleFeedVideoAudio(),
+          },
+          {
+            key: "tappedVideoAudio",
+            icon: (
+              <MaterialIcons name="volume-up" size={24} color={theme.text} />
+            ),
+            rightIcon: (
+              <Switch
+                trackColor={{
+                  false: theme.iconSecondary,
+                  true: theme.iconPrimary,
+                }}
+                value={tappedVideoAudio}
+                onValueChange={() => toggleTappedVideoAudio()}
+              />
+            ),
+            text: "Tapped video audio",
+            onPress: () => toggleTappedVideoAudio(),
           },
           {
             key: "liveTextInteraction",

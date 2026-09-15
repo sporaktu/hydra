@@ -240,3 +240,140 @@ describe("pickCenterMostVideo", () => {
     expect(key).toBe("first");
   });
 });
+
+const token = (index: number | null, videoKey?: string, isViewable = true) => ({
+  index,
+  isViewable,
+  item: videoKey ? { videos: [{ source: videoKey }] } : {},
+});
+
+describe("collectVideoCandidates", () => {
+  it("skips non-viewable and index-less tokens", () => {
+    const result = focus.collectVideoCandidates([
+      token(0, "a", false),
+      token(null, "b"),
+      token(2, "c"),
+    ]);
+    expect(result.viewableIndices).toEqual([2]);
+    expect(result.videoIndices).toEqual([{ index: 2, key: "c" }]);
+  });
+
+  it("de-duplicates the same index reported by several configs and sorts", () => {
+    const result = focus.collectVideoCandidates([
+      token(3, "c"),
+      token(1),
+      token(3, "c"),
+      token(2, "b"),
+      token(1),
+    ]);
+    expect(result.viewableIndices).toEqual([1, 2, 3]);
+    expect(result.videoIndices).toEqual([
+      { index: 2, key: "b" },
+      { index: 3, key: "c" },
+    ]);
+  });
+});
+
+describe("decideFeedVideoFocus", () => {
+  it("does not start a video that is only barely on screen", () => {
+    const decision = focus.decideFeedVideoFocus({
+      mostlyVisible: [token(0), token(1)],
+      anyVisible: [token(0), token(1), token(2, "v")],
+      focusedKey: null,
+      ownsFocus: false,
+    });
+    // Nothing is playing and nothing qualifies, so there is nothing to do.
+    expect(decision).toEqual({ releaseNow: false, pending: undefined });
+  });
+
+  it("focuses the center-most mostly visible video", () => {
+    const decision = focus.decideFeedVideoFocus({
+      mostlyVisible: [token(1, "a"), token(2), token(3, "b"), token(4)],
+      anyVisible: [
+        token(0, "z"),
+        token(1, "a"),
+        token(2),
+        token(3, "b"),
+        token(4),
+      ],
+      focusedKey: null,
+      ownsFocus: false,
+    });
+    // Indices 1-4 are mostly visible (center 2.5), so "b" at 3 beats "a" at 1;
+    // "z" is only barely on screen and never in the running.
+    expect(decision).toEqual({ releaseNow: false, pending: "b" });
+  });
+
+  it("accepts a candidate from either mostly-visible config", () => {
+    // A post taller than the viewport only ever shows up in the coverage
+    // config's tokens; the union is what matters.
+    const decision = focus.decideFeedVideoFocus({
+      mostlyVisible: [token(5, "tall")],
+      anyVisible: [token(4), token(5, "tall"), token(6)],
+      focusedKey: null,
+      ownsFocus: false,
+    });
+    expect(decision.pending).toBe("tall");
+  });
+
+  it("leaves things alone when the focused video is still the best candidate", () => {
+    const decision = focus.decideFeedVideoFocus({
+      mostlyVisible: [token(1, "a")],
+      anyVisible: [token(1, "a")],
+      focusedKey: "a",
+      ownsFocus: true,
+    });
+    expect(decision).toEqual({ releaseNow: false, pending: undefined });
+  });
+
+  it("keeps a playing video going while it is partly visible and nothing replaces it", () => {
+    const decision = focus.decideFeedVideoFocus({
+      mostlyVisible: [token(2)],
+      anyVisible: [token(1, "a"), token(2)],
+      focusedKey: "a",
+      ownsFocus: true,
+    });
+    expect(decision).toEqual({ releaseNow: false, pending: undefined });
+  });
+
+  it("hands focus to a mostly visible video over a partly visible one", () => {
+    const decision = focus.decideFeedVideoFocus({
+      mostlyVisible: [token(2, "b")],
+      anyVisible: [token(1, "a"), token(2, "b")],
+      focusedKey: "a",
+      ownsFocus: true,
+    });
+    expect(decision).toEqual({ releaseNow: false, pending: "b" });
+  });
+
+  it("releases focus immediately once the focused video has fully left the screen", () => {
+    const decision = focus.decideFeedVideoFocus({
+      mostlyVisible: [token(3)],
+      anyVisible: [token(3), token(4)],
+      focusedKey: "a",
+      ownsFocus: true,
+    });
+    // Released right away; with no replacement there is nothing to schedule.
+    expect(decision).toEqual({ releaseNow: true, pending: undefined });
+  });
+
+  it("releases focus this feed owns when its video leaves, then schedules the next", () => {
+    const decision = focus.decideFeedVideoFocus({
+      mostlyVisible: [token(3, "b")],
+      anyVisible: [token(3, "b"), token(4)],
+      focusedKey: "a",
+      ownsFocus: true,
+    });
+    expect(decision).toEqual({ releaseNow: true, pending: "b" });
+  });
+
+  it("does not release focus another feed owns", () => {
+    const decision = focus.decideFeedVideoFocus({
+      mostlyVisible: [],
+      anyVisible: [],
+      focusedKey: "elsewhere",
+      ownsFocus: false,
+    });
+    expect(decision.releaseNow).toBe(false);
+  });
+});
