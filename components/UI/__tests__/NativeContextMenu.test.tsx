@@ -186,10 +186,27 @@ describe("on iOS", () => {
     );
   });
 
-  it("passes non-flex styles through to the menu root unchanged", () => {
+  it("keeps non-flex styles off the menu root so spacing doesn't double", () => {
     setPlatform("ios");
-    render(undefined, { width: 100 });
-    expect(mockRootProps.style).toEqual({ width: 100 });
+    render(undefined, { width: 100, margin: 8 });
+    expect(mockRootProps.style).toBeUndefined();
+    expect(mockTriggerProps.style).toEqual({ width: 100, margin: 8 });
+  });
+
+  it("expands zero and negative flex the way React Native does", () => {
+    setPlatform("ios");
+    render(undefined, { flex: 0 });
+    expect(mockRootProps.style).toEqual({
+      flexGrow: 0,
+      flexShrink: 0,
+      flexBasis: "auto",
+    });
+    render(undefined, { flex: -1 });
+    expect(mockRootProps.style).toEqual({
+      flexGrow: 0,
+      flexShrink: 1,
+      flexBasis: "auto",
+    });
   });
 
   it("gives the trigger the caller's style as written, flex shorthand included", () => {
@@ -205,7 +222,6 @@ describe("on iOS", () => {
       flexGrow: 1,
       flexShrink: 1,
       flexBasis: 0,
-      height: 10,
     });
     expect(mockTriggerProps.style).toEqual({ flex: 1, height: 10 });
   });

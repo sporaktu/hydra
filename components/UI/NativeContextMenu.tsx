@@ -1,6 +1,9 @@
 import React from "react";
 import { Platform, StyleProp, StyleSheet, ViewStyle } from "react-native";
 import * as ContextMenu from "zeego/context-menu";
+// Type-only deep import: the public ContextMenu.Root type is the web shape,
+// which omits `style`; this is the shape zeego's iOS Root actually reads.
+import type { MenuRootProps } from "zeego/lib/typescript/menu/types";
 
 export type NativeContextMenuAction = {
   label: string;
@@ -12,10 +15,11 @@ type NativeContextMenuProps = {
   actions: NativeContextMenuAction[];
   onOpenChange?: (open: boolean) => void;
   /**
-   * Applied to the native menu view and its trigger view on iOS, which
-   * otherwise wrap the children in plain block views. Needed when the
-   * children rely on flexing inside their parent (e.g. an image in a row of
-   * images).
+   * Applied to the native trigger view on iOS, which otherwise wraps the
+   * children in a plain block view. Its flex shorthand is also forwarded to
+   * the native menu view so the whole wrapper takes its share of the parent.
+   * Needed when the children rely on flexing inside their parent (e.g. an
+   * image in a row of images).
    */
   style?: StyleProp<ViewStyle>;
   children: React.ReactNode;
@@ -40,16 +44,12 @@ export default function NativeContextMenu({
   }
 
   const flatStyle = StyleSheet.flatten(style);
+  const rootProps: Pick<MenuRootProps, "style"> = {
+    style: rootFlex(flatStyle),
+  };
 
   return (
-    <ContextMenu.Root
-      onOpenChange={onOpenChange}
-      // zeego types Root with its web shape, which has no `style`; the iOS
-      // Root does read it and applies it to the native menu view.
-      {...({ style: rootStyle(flatStyle) } as Partial<
-        React.ComponentProps<typeof ContextMenu.Root>
-      >)}
-    >
+    <ContextMenu.Root onOpenChange={onOpenChange} {...rootProps}>
       <ContextMenu.Trigger
         // zeego types the trigger's style as the web (CSS) and native shapes
         // intersected; on iOS it is applied as a plain RN view style.
@@ -79,20 +79,14 @@ export default function NativeContextMenu({
  * caller's style, and in Yoga an explicit flexGrow beats whatever the `flex`
  * shorthand implies. So `flex: 1` would leave the native view at grow 0 /
  * basis 0, i.e. zero width in a row. Expand the shorthand into explicit
- * longhands so the caller's intent actually overrides zeego's default.
+ * longhands, mirroring React Native's own expansion, so the caller's intent
+ * overrides zeego's default. Only the flex longhands go to the menu view; the
+ * rest of the style stays on the trigger so spacing and borders don't double.
  */
-function rootStyle(style: ViewStyle | undefined): ViewStyle | undefined {
-  if (!style) return undefined;
-  const { flex, ...rest } = style;
-  if (typeof flex !== "number") return style;
-  // Mirror React Native's expansion of the shorthand: positive flex grows and
-  // shrinks from a zero basis; zero is fixed at content size; negative is
-  // shrink-only.
-  const longhands: ViewStyle =
-    flex > 0
-      ? { flexGrow: flex, flexShrink: 1, flexBasis: 0 }
-      : flex === 0
-        ? { flexGrow: 0, flexShrink: 0, flexBasis: "auto" }
-        : { flexGrow: 0, flexShrink: 1, flexBasis: "auto" };
-  return { ...longhands, ...rest };
+function rootFlex(style: ViewStyle | undefined): MenuRootProps["style"] {
+  const flex = style?.flex;
+  if (typeof flex !== "number") return undefined;
+  if (flex > 0) return { flexGrow: flex, flexShrink: 1, flexBasis: 0 };
+  if (flex === 0) return { flexGrow: 0, flexShrink: 0, flexBasis: "auto" };
+  return { flexGrow: 0, flexShrink: 1, flexBasis: "auto" };
 }
