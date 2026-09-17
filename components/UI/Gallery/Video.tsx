@@ -100,15 +100,24 @@ function Video({ video, audioEnabled = false, poster }: VideoProps) {
     video.source,
     effectiveUri ? VideoCache.makeCachedVideoSource(effectiveUri) : null,
     (player) => {
-      player.audioMixingMode = audioEnabledRef.current
-        ? "doNotMix"
-        : "mixWithOthers";
-      player.muted = !audioEnabledRef.current;
       player.loop = true;
       player.timeUpdateEventInterval = 1 / 15;
       player.bufferOptions = {
         maxBufferBytes: 1024 * 1024 * 5, // 5MB - Android only setting (prevents crashes)
       };
+      if (isViewerShowing.current) {
+        // A player born underneath the fullscreen viewer (this cell mounted or
+        // recycled while it was up) must not start: only the video the viewer
+        // is showing may play, and with feed audio on this one would be heard
+        // over it. The viewer-closed handoff below starts it.
+        player.audioMixingMode = "mixWithOthers";
+        player.muted = true;
+        return;
+      }
+      player.audioMixingMode = audioEnabledRef.current
+        ? "doNotMix"
+        : "mixWithOthers";
+      player.muted = !audioEnabledRef.current;
       player.play();
     },
   );

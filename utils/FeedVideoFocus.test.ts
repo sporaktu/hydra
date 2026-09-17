@@ -376,4 +376,41 @@ describe("decideFeedVideoFocus", () => {
     });
     expect(decision.releaseNow).toBe(false);
   });
+
+  // keepVisibleFocus: replaying snapshots after the fullscreen viewer closes,
+  // where the layout is probably about to change again (rotating back).
+  describe("with keepVisibleFocus", () => {
+    it("keeps the focused video over a more central one while any of it is on screen", () => {
+      const decision = focus.decideFeedVideoFocus({
+        mostlyVisible: [token(2, "b")],
+        anyVisible: [token(1, "a"), token(2, "b")],
+        focusedKey: "a",
+        ownsFocus: true,
+        keepVisibleFocus: true,
+      });
+      expect(decision).toEqual({ releaseNow: false, pending: undefined });
+    });
+
+    it("still releases and replaces a focused video that has left the screen", () => {
+      const decision = focus.decideFeedVideoFocus({
+        mostlyVisible: [token(3, "b")],
+        anyVisible: [token(3, "b"), token(4)],
+        focusedKey: "a",
+        ownsFocus: true,
+        keepVisibleFocus: true,
+      });
+      expect(decision).toEqual({ releaseNow: true, pending: "b" });
+    });
+
+    it("still starts a video when nothing is focused", () => {
+      const decision = focus.decideFeedVideoFocus({
+        mostlyVisible: [token(1, "a")],
+        anyVisible: [token(1, "a")],
+        focusedKey: null,
+        ownsFocus: false,
+        keepVisibleFocus: true,
+      });
+      expect(decision).toEqual({ releaseNow: false, pending: "a" });
+    });
+  });
 });

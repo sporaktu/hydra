@@ -107,10 +107,28 @@ function makePlayer(over: Record<string, unknown>) {
 }
 
 let mockCurrentPlayer: ReturnType<typeof makePlayer> | null = null;
-jest.mock("../../../../contexts/VideoPlayerRegistryContext", () => ({
-  __esModule: true,
-  useSharedVideoPlayer: () => mockCurrentPlayer,
-}));
+// When true, the fake registry treats mockCurrentPlayer as newly created and
+// runs the component's configure callback on it, in an effect after the
+// component's own — the real hook acquires (and so configures) post-commit.
+let mockPlayerIsNew = false;
+jest.mock("../../../../contexts/VideoPlayerRegistryContext", () => {
+  const { useEffect } = require("react");
+  return {
+    __esModule: true,
+    useSharedVideoPlayer: (
+      _key: string,
+      _source: unknown,
+      configure: (player: unknown) => void,
+    ) => {
+      useEffect(() => {
+        if (mockPlayerIsNew && mockCurrentPlayer) {
+          configure(mockCurrentPlayer);
+        }
+      }, []);
+      return mockCurrentPlayer;
+    },
+  };
+});
 
 const baseVideo = {
   source: "https://cdn/v.mp4",
@@ -126,6 +144,7 @@ function overlayTexts(tree: ReactTestRenderer): string[] {
 
 afterEach(() => {
   mockCurrentPlayer = null;
+  mockPlayerIsNew = false;
   mockVisibilityListeners.clear();
   mockViewerIsShowing = false;
   jest.clearAllMocks();
@@ -300,4 +319,45 @@ it("pauses inline playback when the viewer opens over it", () => {
     setViewerShowing(true);
   });
   expect(mockCurrentPlayer!.pause).toHaveBeenCalled();
+});
+
+// Regression tests for "rotating the device in fullscreen plays audio from a
+// different feed video": the feed re-lays out under the viewer and a cell that
+// becomes the Focused Post there creates a brand-new player, whose create-time
+// setup used to start it unmuted.
+
+it("starts a new player unmuted when it is the Focused Post with feed audio on", () => {
+  mockPlayerIsNew = true;
+  mockCurrentPlayer = makePlayer({ status: "readyToPlay", muted: true });
+  const video = { source: "new-player-audio", needsResolution: false } as never;
+  act(() => {
+    create(<Video video={video} audioEnabled />);
+  });
+  expect(mockCurrentPlayer!.play).toHaveBeenCalled();
+  expect(mockCurrentPlayer!.muted).toBe(false);
+  expect(mockCurrentPlayer!.audioMixingMode).toBe("doNotMix");
+});
+
+it("does not start a player created while the viewer is open, even with feed audio on", () => {
+  mockViewerIsShowing = true;
+  mockPlayerIsNew = true;
+  mockCurrentPlayer = makePlayer({ status: "readyToPlay", muted: false });
+  const video = {
+    source: "new-player-under-viewer",
+    needsResolution: false,
+  } as never;
+  act(() => {
+    create(<Video video={video} audioEnabled />);
+  });
+  expect(mockCurrentPlayer!.play).not.toHaveBeenCalled();
+  expect(mockCurrentPlayer!.muted).toBe(true);
+  expect(mockCurrentPlayer!.audioMixingMode).toBe("mixWithOthers");
+
+  // Once the viewer closes, the feed takes over with its own audio setting.
+  act(() => {
+    setViewerShowing(false);
+  });
+  expect(mockCurrentPlayer!.play).toHaveBeenCalled();
+  expect(mockCurrentPlayer!.muted).toBe(false);
+  expect(mockCurrentPlayer!.audioMixingMode).toBe("doNotMix");
 });
