@@ -166,7 +166,7 @@ Each directory under `Packages/` is its own `Package.swift` with `swift-tools-ve
 | 2 | **RedditAPI** | `RedditClient` actor, request builder, endpoint catalog, decoding into AppCore types, `SessionStore` actor (cookies + modhash), `RedgifsResolver` actor, `OpenGraphFetcher`, login-flow policy object. | AppCore | SwiftUI, Persistence, any Feature |
 | 3 | **Persistence** | GRDB database, migrations, six table stores, `SettingsStore` (`UserDefaults`-backed `@Observable`), `KeychainStore`, maintenance job. | AppCore, GRDB | SwiftUI (except a tiny `Environment` shim), RedditAPI, any Feature |
 | 4 | **RedditMarkdown** | Reddit-flavored markdown → `MarkdownDocument` AST; SwiftUI block renderer; link-tap routing protocol; plain-text extraction (for filters, accessibility, "copy text"). | AppCore, Theming, swift-cmark-gfm | RedditAPI, Persistence |
-| 5 | **Theming** | `Theme` model (19 colours + mode flags), `ThemeStore` `@Observable`, environment plumbing, theme import/export codec, Liquid Glass tint rules. | AppCore, Persistence (custom theme table) | RedditAPI, Features |
+| 5 | **Theming** | `Theme` model (20 colours + mode flags), `ThemeStore` `@Observable`, environment plumbing, theme import/export codec, Liquid Glass tint rules. | AppCore, Persistence (custom theme table) | RedditAPI, Features |
 | 6 | **Entitlements** | `Entitlements` `@Observable`, the `Feature.isGated` table, `EntitlementProvider` protocol, the `requiresEntitlement(_:style:)` view modifier, `PaywallPresenter`, `PaywallSheet` / `PlusSettingsScreen` / `PlusBadge` / `FeatureLockView`. Ships a `FreeEverythingProvider` so the app is fully functional before `05` lands StoreKit. | AppCore, Theming (for the lock chrome), StoreKit | RedditAPI, Features |
 | 7 | **MediaKit** | Image pipeline, `PlayerRegistry` actor, focus engine, video source ladder + fallbacks + watchdog, playback-position memory, Live Text bridge, save/share. Resolution of "lazy" sources is injected via a protocol. | AppCore, Theming, DesignSystem | RedditAPI (uses `VideoSourceResolving` protocol instead), Persistence |
 | 8 | **AppRouting** | `Route` enum, `Router` per tab, `RouteResolver` (link → route), deep-link/clipboard/share-extension intake, `ModalCoordinator` (single slot + startup priority queue), forward-navigation ("stack future") store. | AppCore | SwiftUI feature views, RedditAPI |
@@ -414,6 +414,14 @@ TabView(selection: $selection) {
 - **Tab re-tap pops one level.** The `selection` binding is intercepted: setting the same value while that tab's `Router.path` is non-empty calls `router.pop()` and leaves the selection unchanged. Repeated taps walk the stack one level per tap, never pop-to-root (`spec/01 §3.1`).
 - **Tab long-press.** `.onLongPressGesture` on the tab's label content is not available for system `Tab`s; we attach a `simultaneousGesture(LongPressGesture(minimumDuration: 0.4))` to a transparent overlay aligned to the tab bar's slot geometry. Search long-press opens the Quick Subreddit Search sheet; Account long-press opens Quick Account Swap **only when at least one account exists**. Both fire `sensoryFeedback(.selection, …)` (`spec/01 §3.2`). If this overlay proves fragile across bar minimization states, the fallback is a `UITabBarController` interop shim behind `UIViewControllerRepresentable`; recorded as `tab-longpress-mechanism` in `08`.
 - **First tap on the Search tab** shows the one-time "Did you know? You can quick search for subreddits by long pressing the search tab." alert (`spec/01 §3.1`, one-time-alert primitive in §5.13).
+- **Content insets under the bar.** Which screens draw *beneath* the (glass) tab bar and which sit
+  above it is a fixed allow-list, not a per-screen judgement call. **Beneath the bar, adding no bottom
+  inset:** the feed screens (home, subreddit, multireddit, user), post detail, search results, the
+  inbox list, Gallery Mode and the fullscreen media viewer. **Above the bar, taking
+  `.safeAreaPadding(.bottom, tabBarHeight)`:** the Subreddits hub, Accounts, the message thread, the
+  subreddit sidebar, the wiki, the plain web view, and every Settings screen. A screen in the first
+  group must also keep its scroll content reachable — it relies on the bar minimizing on scroll — so a
+  screen that does **not** scroll belongs in the second group (`spec/01` §3, §4.1, §16).
 - **iOS 27 crash guard.** A `TabView` crashes if `selection` names a hidden or unavailable tab. Our tab set is fixed, so this cannot happen today, but `selection` is validated against the live tab set in one place (`TabRouters.validateSelection()`), so a future customisable tab bar cannot regress into it (`spec/10 §A3`).
 
 ### 5.5 Per-tab navigation stacks and the `Route` enum
@@ -699,7 +707,7 @@ public struct Theme: Identifiable, Hashable, Sendable {
 }
 
 public struct ThemeColors: Hashable, Sendable {
-    // 19 customisable tokens, exactly the set the original exposed:
+    // 20 customisable tokens, exactly the set the original exposed:
     public var text, subtleText, verySubtleText: ThemeColor          // text hierarchy
     public var background, tint, divider: ThemeColor                 // core
     public var buttonBackground, buttonText, iconOrTextButton: ThemeColor  // interactive
@@ -720,7 +728,9 @@ public struct ThemeColor: Hashable, Sendable {
 }
 ```
 
-The count of 19 customisable tokens and the fixed 6-colour comment-depth cycle match the original exactly, so imported themes map 1:1.
+The count of **20** customisable tokens and the fixed 6-colour comment-depth cycle match the original exactly, so imported themes map 1:1 — including the legacy payloads the migration bridge accepts (§8.5a).
+
+*(Counting note: the surveys' prose says "19 roles" while `spec/06` §3.3's own palette table lists twenty — `text`, `subtleText`, `verySubtleText`, `background`, `tint`, `divider`, `buttonBackground`, `buttonText`, `iconOrTextButton`, `iconPrimary`, `iconSecondary`, `upvote`, `downvote`, `delete`, `showHide`, `reply`, `share`, `collapse`, `bookmark`, `moderator`. The table is the code; "19" is an off-by-one in the survey's prose. This document set says **20** everywhere, and `04c` §18.3 enumerates all twenty with their labels.)*
 
 ### 8.2 Resolution order
 
@@ -740,7 +750,7 @@ extension EnvironmentValues { public var theme: ResolvedTheme { get set } }
 
 ### 8.4 Custom themes and the Theme Maker
 
-Stored in the `custom_themes` table keyed by unique `name`, value = JSON of a `CustomTheme` (`{ name, extends, plus any subset of the 19 tokens }`). Unset tokens fall through to `extends`. Saving upserts by name, then activates it. Deleting the active theme reverts to the default.
+Stored in the `custom_themes` table keyed by unique `name`, value = JSON of a `CustomTheme` (`{ name, extends, plus any subset of the 20 tokens }`). Unset tokens fall through to `extends`. Saving upserts by name, then activates it. Deleting the active theme reverts to the default.
 
 ### 8.5 Import / export format
 
@@ -749,8 +759,42 @@ The original shares themes by embedding a sentinel plus one-level JSON inside Re
 **Decision (recorded as `theme-import-format-compat` in `08`):** a **new sentinel and a new format**; we neither emit nor import the original's.
 
 - **Format.** `::appname-theme::<base64url(JSON of CustomTheme)>`, newline-wrapped. Base64url-encoding the payload means no brace, quote or newline ever reaches the markdown, so the original's one-level-braces limitation disappears: nested objects and braces inside a theme name are fine.
-- **We do not read `::hydra-theme-import::`.** Wire compatibility would mean adopting a format defined by an AGPL project and interoperating with its community; a fresh format keeps the clean-room boundary clean. There is therefore no legacy-format import path, no dual-emit toggle and no "Also share in legacy format" setting.
-- **Built-in theme catalogue is new.** We ship 6–8 new themes with our own palettes; copying the original's named catalogue would be copying data whose names carry third-party associations. An imported `extends` that names no theme in our catalogue falls back to the default theme rather than being rejected — there is no legacy alias map, because there are no legacy payloads to resolve. Recorded as `theme-count` in `08`.
+- **Import accepts two sentinels; export emits exactly one.** `APPNAME` **emits** only
+  `::appname-theme::` and never the legacy form. On the **import** side it additionally recognises the
+  original's `::hydra-theme-import::{…}` sentinel followed by a brace-balanced JSON object, decodes it
+  through the same `CustomTheme` decoder, and offers the same import card. This is the **theme
+  migration bridge** (§8.5a): it lets the owner export their favourite themes out of the app they are
+  replacing, using that app's own share feature, and carry them into `APPNAME` as custom themes.
+  Import-only recognition of a data format is not code reuse, carries no third-party name into any
+  `APPNAME` screen or any text `APPNAME` produces, and creates no interoperability obligation — the
+  legacy format is read, never written. There is therefore no dual-emit toggle and no "Also share in
+  legacy format" setting. Recorded as `theme-import-format-compat` in `08`.
+
+### 8.5a Theme migration bridge
+
+The one clean-room-safe path from the old app to the new one, and the reason §8.5's importer accepts
+two sentinels:
+
+1. In the app being replaced, the owner shares each favourite theme with its existing share feature,
+   which embeds `::hydra-theme-import::{…}` in a Reddit comment or message.
+2. In `APPNAME`, that text renders with the usual import card, and **Import** or **Import & Apply**
+   writes the theme into `custom_themes` exactly as a natively-shared theme would.
+3. From then on the theme is an ordinary `APPNAME` custom theme: it re-shares as
+   `::appname-theme::<base64url>` and nothing about it names the original app.
+
+Constraints that make this safe and cheap:
+
+- **Read-only.** The legacy sentinel appears in exactly one place in the codebase — the import
+  scanner's alternation — and nowhere in any encoder, any UI string or any file `APPNAME` writes.
+- **Same decoder.** The legacy payload is JSON of the same 20-role shape (§8.1), so it decodes
+  through the existing `CustomTheme` decoder after the brace-balanced scan. A payload whose `extends`
+  names a theme `APPNAME` does not have falls back to the default theme, exactly as §8.5 says.
+- **Legacy payloads are the only place a brace-balanced scan runs.** `APPNAME`'s own payload is
+  base64url, so the nested-brace limitation the original had never applies to anything we emit.
+- **It does not replace authoring.** The bridge migrates *custom* themes; the **12 built-in palettes
+  still have to be authored** before Phase 0 can finish (`07` §A item 13a), because built-ins ship
+  inside the app and there is nothing to import them from.
+- **Built-in theme catalogue is new.** We ship **12** new themes with our own palettes and our own names; copying the original's named catalogue would be copying data whose names carry third-party associations. The count, the required roles per theme and the naming rules are normative in `04c` §18.2. An imported `extends` that names no theme in our catalogue falls back to the default theme rather than being rejected. Recorded as `theme-count` in `08`.
 - **Parsing is defensive.** A payload that fails base64url decoding, fails JSON decoding, or decodes to something that is not a `CustomTheme` is stripped from the rendered text and silently dropped; the chip simply does not appear.
 - **Scanning is brace-balanced, not regex.** Detection finds the sentinel and consumes the following base64url run to the next whitespace; the HTML-era single-level `{…}` regex is not reproduced.
 
@@ -1141,6 +1185,14 @@ presentation is right is a property of the surface, not of the feature. Note wha
 no `.hidden` style. A gated affordance that disappears when locked is undiscoverable and therefore
 never converts, and `05` §5.9 forbids it.
 
+**What the chrome looks like is normative in `05-monetization.md` §5.11**, not here: the trailing
+`Plus` capsule badge, the disabled-*looking* but still tappable row, the rule that a gate never hides
+a control or a navigation entry, that current values stay visible and keep working, and that a
+composed flow (adding a second account, importing a theme, setting an alternate icon) gates at the
+final committing button rather than at its entry point. `DesignSystem` and `Entitlements` implement
+that contract once, in `PlusBadge` and `requiresEntitlement(_:style:)`; no feature package draws its
+own lock chrome.
+
 
 ### 13.4 Rules
 
@@ -1201,13 +1253,27 @@ Each alternate is its own Icon Composer file added to the project; Xcode writes 
 | `UIApplicationSupportsIndirectInputEvents` | Pointer/trackpad correctness |
 | `ITSAppUsesNonExemptEncryption = false` | Export compliance |
 | `UILaunchScreen` | Required under the 27 SDK |
-| `CFBundleURLTypes` | `appname` scheme |
+| `CFBundleURLTypes` | `appname` scheme (one entry, `CFBundleURLSchemes = ["appname"]`) |
+| `CFBundleIcons` / `CFBundleAlternateIcons` | Written by Xcode from the *Alternate App Icon Sets* build setting (§14.5) |
 
 No camera, location, microphone, contacts, Bluetooth or HealthKit strings.
 
+**The complete, normative list** — these keys, the App Group entitlement the share extension needs on
+**both** targets, and the list of capabilities we deliberately do *not* declare — lives in
+`06-build-plan-and-acceptance.md` §1.3. It is a Phase 0 deliverable and a launch blocker: without
+`NSPhotoLibraryAddUsageDescription` the first Save-to-Photos crashes, without
+`NSPhotoLibraryUsageDescription` the first image-post pick crashes, without `CFBundleURLTypes` every
+deep link fails, and without the App Group the share extension cannot hand anything off.
+
 ### 14.7 Background modes
 
-`audio` is enabled so that the fullscreen viewer's audio session survives a brief interruption and so a future Picture-in-Picture is possible. Note that v1 **unmounts all players on background**, matching the original — no background audio, no PiP. Enabling PiP later is a one-property change on the player view plus a `UIBackgroundModes` entry already present; recorded as `background-audio-pip` in `08`.
+**None are declared.** `UIBackgroundModes` is absent from `Info.plist`. v1 unmounts every player the
+moment the scene reports `.background` (§10.3, `04b` §7.4), so there is no background audio and no
+Picture-in-Picture; there is no background fetch and no background inbox refresh either
+(`background-inbox-refresh`, `push-removed` in `08`). Declaring `audio` "just in case" would be an
+unused capability the App Review team is entitled to ask about, so we do not. Adding PiP later is one
+property on the player view **plus** adding the `audio` mode and answering for it; recorded as
+`background-audio-pip` in `08`.
 
 ---
 

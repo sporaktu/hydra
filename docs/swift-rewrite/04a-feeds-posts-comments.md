@@ -100,12 +100,20 @@ variants, in-subreddit search results, gallery mode — is backed by one generic
 **Load-more algorithm** (exactly reproduce):
 
 1. Guard: refuse if `isLoadingMore`, `fullyLoaded`, `hitFilterLimit`, or `accessFailure != nil`.
+   An **access failure** (banned / private / user-not-found / multireddit-unavailable) short-circuits
+   the whole loop, is rendered by `AccessFailureView` (§2.2), and is **not** reported to the crash
+   reporter — it is Reddit's answer, not our defect. **Any other** thrown error sets `loadFailed`,
+   clears the spinner, and **is** sent to the crash reporter as a captured exception with the route
+   as context, so a parser regression on one feed shape is visible rather than silent.
 2. For `attempt` in `0..<filterRetries`:
    a. Fetch one page with `limit = pageLimits[min(attempt, pageLimits.count-1)]` and
       `after = unfilteredCursor`. On the very first page for a feed, `after` is the **empty string**
       (feeds always send the parameter); for non-feed endpoints it is omitted.
    b. Set `unfilteredCursor` to the **last raw item's own fullname** — not the listing envelope's
-      `after`. `[DECISION: pagination-cursor]`
+      `after`. `[DECISION: pagination-cursor]` The cursor advances on **every** attempt, including
+      one whose items are *all* filtered out. Not advancing it there is the classic failure of this
+      loop: the ramp re-requests the same page five times, the retries look like they are doing
+      something, and the feed dead-ends on a filter the user could have scrolled past.
    c. If the raw page is empty → `fullyLoaded = true`; stop the loop entirely.
    d. Apply, in order: de-duplication against already-loaded items (match on `id` **and** `kind`),
       then every rule in `filterRules`.
@@ -165,6 +173,12 @@ display name.
 `.alert("Warning", …)` with Reddit's own message verbatim and buttons `Cancel` / `Proceed`. Cancel →
 the listing resolves to an empty array and no further request is made. Proceed → the API layer POSTs
 the acceptance and re-issues the original request exactly once.
+
+**After Cancel the store must not re-prompt in a loop.** Cancelling sets `fullyLoaded` on the store,
+so the screen settles as an empty feed and the next `onAppear` issues **nothing** — returning to the
+tab, popping back to it, or a scroll that would normally trigger load-more all do nothing. The only
+thing that re-presents the interstitial is an explicit **pull-to-refresh**. Without this the user
+gets the same warning alert every time the view re-appears.
 
 ### 2.3 Filter rules
 
@@ -231,6 +245,15 @@ PostFeedScreen
 └─ .navigationDestination(for: Route.self) { … }   // owned by the tab root
 ```
 
+**The feed is frozen, not torn down, while a screen sits on top of it.** Pushing a post detail (or
+switching tabs) keeps the screen's `ListingStore` alive with its `items`, both cursors and its
+`fullyLoaded` / `hitFilterLimit` flags intact — SwiftUI retains the stack entry, so this is free
+(`02-architecture.md` §6.2, §6.3). On losing visibility the screen releases **video focus** (§9) and
+cancels prefetch, and nothing else. On regaining it, the feed **does not re-fetch**: scroll position
+and loaded items are exactly as they were, with no network call. State that changed elsewhere — a
+vote cast on the detail screen — arrives through the `FeedMutationBus` and patches the one row
+(§7.4).
+
 ### 3.2 Per-target configuration table
 
 | Target | Header title | Switcher title? | Search bar in list header? | Sort options | Context ("…") options | Endpoint |
@@ -258,7 +281,10 @@ PostFeedScreen
 A multireddit feed is **not** fetched from the multireddit's own listing. Resolve the member
 subreddit names (endpoint M2 with its three-source fallback chain), then fetch the merged
 `r/a+b+c` listing (P2). If the definition says the multi has **zero** subreddits, return an empty
-array with no request — render as a normal empty feed, **not** as an error. If the merged listing
+array with no request — render as a normal empty feed, **not** as an error. "Normal" is literal: the
+header, the switcher title, the sort control and the "…" menu all render exactly as they would on a
+populated multireddit, and only the list is empty (with no message, §2.2). The empty case must never
+reach `AccessFailureView`; that view is reserved for `multiUnavailable`. If the merged listing
 fails for any reason other than banned/private, fall back to the multireddit's own listing; if that
 also fails, surface `AccessFailure.multiUnavailable`. Details in `03-data-and-networking.md`.
 
@@ -376,6 +402,12 @@ Embedded-theme extraction: before rendering any body text, run `extractThemeToke
 `04c` §Theme share/import). Matched tokens are stripped from the displayed text and each yields a
 `ThemeImportChip` rendered inline. `[GATE: gate.customThemes]`
 
+**Data mode before the first network-path update.** Until `NWPathMonitor` delivers its first path,
+the effective data mode is conservatively **`.lowData`** (`04b` §13). The visible consequence on this
+screen is that the very first paint after a cold launch may show **one** image in the strip instead of
+two, and at the smallest variant, until the path lands a moment later. This is intentional — guessing
+"normal" and then downgrading is worse than the reverse.
+
 **NSFW / spoiler blur.** When `(settings.blurNSFW && post.isNSFW) || (settings.blurSpoilers &&
 post.isSpoiler)`, overlay the whole media block with a `.thickMaterial`-equivalent blur plus a
 centered pill: eye glyph + the label `"NSFW"` or `"Spoiler"` (NSFW wins if both apply). Tapping the
@@ -439,16 +471,24 @@ OpenGraph fetch rules (timeout, exclusions, `.svg` drop) live in `04b` §11 and
 
 ### 4.9 Poll card
 
-Bordered, rounded. Header: `poll.voteCount.formatted()` + `" votes"`. Body: one radio row per
-option; tapping selects it locally (filled inner circle). Footer: a **"Vote"** button.
+Bordered, rounded. Header: the total vote count via `prettyNum` + `" votes"`.
 
-**The vote button is a stub.** In the original it shows an alert reading `voted` and issues no
-network request; no per-option counts or percentages are ever displayed, and there is no poll-vote
-endpoint anywhere in the app. Reproduce as: selection is local-only, the Vote button is present and
-tappable, and on tap it presents `.alert("Voting on polls isn't supported yet", …)` with a single OK.
-Do not send anything. `[DECISION: poll-voting-stub]`
+**Read-only, with results. There is no Vote button and no selection state.** The original renders a
+radio list whose "Vote" button calls a local alert and issues no request, so users believe they voted
+when nothing happened. `APPNAME` renders the poll honestly instead (`03` §4.13,
+`[DECISION: poll-voting-stub]`):
 
-Polls are also not creatable — `NewPostSheet` offers Text/Link/Image only (§16.5).
+| Data available | Rendering |
+|---|---|
+| `poll.options[].voteCount` is present (Reddit supplies counts once the poll has closed, or once *this* account has voted elsewhere) | One row per option: the option text, its count, and a proportional bar whose width is `voteCount / max(totalVoteCount, 1)` filled `theme.tint` on `theme.divider`. The option matching `poll.userSelectedOptionID`, when set, is marked with a checkmark glyph and its text rendered in `theme.iconOrTextButton` |
+| counts absent | One **inert** row per option — the option text only, no radio circle, no bar, no tap target — above the total vote count |
+
+Below either form, one line in `theme.subtleText`:
+**"Voting on polls isn't supported."** When `poll.endsAt` is in the future, append
+`" Poll ends in <prettyTimeSince(endsAt)>."`
+
+Nothing on the card is tappable and nothing is ever sent. Poll *creation* is unsupported too —
+`NewPostSheet` offers Text/Link/Image only (§16.5).
 
 ### 4.10 Compact thumbnail
 
@@ -470,12 +510,12 @@ never renders `PostMediaView`, so there is exactly one blur toggle per card).
 
 A single wrapping `HStack`, `theme.subtleText` unless noted:
 
-- Vote glyph + **raw** upvote integer. The glyph is `arrow.up` unless the user's current vote is a
-  downvote, in which case it is `arrow.down`; there is no neutral glyph. Tint: `theme.upvote` if
-  upvoted, `theme.downvote` if downvoted, else `theme.subtleText`. **Not abbreviated** — the feed
-  card prints the raw integer (unlike the sidebar and quick-search rows, which use the K/M/B
-  formatter).
-- Comment glyph + raw `commentCount`.
+- Vote glyph + the upvote count through **`prettyNum`** (K/M/B, §5). The glyph is `arrow.up` unless
+  the user's current vote is a downvote, in which case it is `arrow.down`; there is no neutral glyph.
+  Tint: `theme.upvote` if upvoted, `theme.downvote` if downvoted, else `theme.subtleText`. The
+  original printed the raw integer here, so a big thread rendered `128437` in a feed row; that is a
+  defect, not a style, and `08` #33's default abbreviates it. `[DECISION: number-format-parity]`
+- Comment glyph + `commentCount`, through the same `prettyNum`.
 - Clock glyph + `post.timeSince` (long form, produced by the model layer; the card appends nothing).
 - Optional inline subreddit icon + name + `" by "` + author when `subredditAtTop` is off.
 - **No** upvote ratio, **no** awards anywhere (awards are not modeled at all).
@@ -549,7 +589,11 @@ scroll. Horizontal activation slop is `SWIPE_ENGAGE_X_POST` (20 pt) for posts an
 `SWIPE_ENGAGE_X_COMMENT` (15 pt) for comments.
 
 **Bands.** Absolute horizontal translation buckets into: `0` (< 75), `±1` (75 ≤ |x| < 130),
-`±2` (|x| ≥ 130). Positive translation (dragging right) reveals an icon anchored to the **left**
+`±2` (|x| ≥ 130). A long slot that is **unset** falls back to the **same direction's short action**,
+so a user who assigns only `right` still gets that action from a long right swipe rather than an
+inert band. `Disabled` is an explicit value and **never** falls back — it means "this band does
+nothing". Unset and `Disabled` are therefore different states and must be modelled as such
+(`spec/09` §6.1). Positive translation (dragging right) reveals an icon anchored to the **left**
 edge; negative reveals on the right. The user-facing setting names are by drag direction:
 
 | Setting key | Drag | Band | Post default | Comment default |
@@ -614,7 +658,7 @@ Ordered items, each with a gate; items failing their gate are **omitted**, never
 | 4 | `Filter Subreddit` | the row is in a list that can remove itself (true on every feed) | Opens a **nested** menu: `Filter for a day` / `Filter for a week` / `Filter forever` → writes `now+24h`, `now+7d`, or `true` into `filteredSubreddits[subreddit]`, then removes the post from the current list immediately |
 | 5 | `Hide Post` / `Unhide Post` | same | Writes/removes a `hidden_posts` row (30-day expiry) and removes the post from the list immediately when hiding |
 | 6 | `Save` / `Unsave` | always | Endpoint V2 |
-| 7 | `Share` | always | Share sheet with `post.link` (**always the Reddit permalink**, never the external link) |
+| 7 | `Share` | always | Share sheet with `post.link` — **always the Reddit permalink**, never the post's external link and never the media file. There is **no media share and no media save anywhere in a post's long-press menu**; those live only on the inline media's own long-press menu and in the fullscreen viewer's overlay (`04b` §9.3) |
 
 Two further actions exist **only** as VoiceOver custom actions and never appear in the visual menu:
 
@@ -644,6 +688,10 @@ non-word (`\W`) — i.e. **true whole-word matching**: `cat` matches `"the cat s
 Post haystack (space-joined): **title, author, self-text, every poll option's text, OpenGraph title,
 OpenGraph description.**
 Comment haystack: **comment text + author.**
+
+**One trie, two haystacks.** The same cached trie instance serves both the post filter and the
+comment filter — there is no separate comment filter list, no second setting and no second trie. It is
+built once from `filters.text` and invalidated only when that setting changes.
 
 The rule is always in the chain; an empty list produces an empty trie that trivially passes. There is
 no separate on/off toggle. `[GATE: gate.filters]`
@@ -789,7 +837,14 @@ Full video behavior is in `04b`. The feed-side contract:
   bypassing the debounce — audio must never outlive visibility.
 - Losing SwiftUI scene/navigation focus (tab switch, push, disappear) releases focus immediately;
   regaining it re-evaluates from the last visibility snapshot with no scroll event required.
-- **Resume positions** are remembered by video key in an LRU map capped at **200** entries,
+- **The focus key is `VideoSource.key` = (pre-resolution playback URL, gallery index)** — byte-for-byte
+  the same key as the shared player registry (`04b` §5) and the resume-position map (`04b` §7.1).
+  Never key focus on the post id: one post can carry several videos, and a Redgifs source's URL
+  changes when it resolves while its key must not.
+- **Only `videos[0]` participates.** For a post with several videos, the first supplies the focus key
+  and the poster; the rest never play inline and are reachable only by opening the fullscreen viewer
+  (`04b` §7.4).
+- **Resume positions** are remembered by that same key in an LRU map capped at **200** entries,
   independent of player lifetime; regaining focus always resumes, never restarts.
 - Audio plays only when `focusManaged && isFocused && settings.feedVideoAudio`.
 
@@ -858,7 +913,16 @@ mode. Would you like to try it out?"` and buttons `Cancel` / `Open`.
 4. **Moderator** — only if any.
 5. **Subscriber** — only if any, alphabetically (locale-aware) sorted by the data layer.
 6. **Trending** — only if any; populated **only when logged out** (when logged out the other four
-   sections are all empty, so in practice Trending and the rest are mutually exclusive).
+   sections are all empty, so in practice Trending and the rest are mutually exclusive). The same two
+   exclusions the Search tab applies (`04c` §7.1) apply here: drop subreddits the user is already
+   subscribed to, and drop any subreddit literally named `"Home"` (which would otherwise sit beside
+   the Home button and mean something else).
+
+**Partial-failure rule.** The sections are fetched independently and a failure in one must never take
+down the hub. In particular the **multireddit** fetch (M1, with its fallback chain) is independent: if
+it throws, log it and render the hub **without** the Multireddits section. A multireddit failure must
+not blank Favorites, Moderator, Subscriber or Trending, and must not surface an access-failure screen
+over the whole hub — the original shipped exactly that bug and fixed it, and it must not come back.
 
 Each section is preceded by an uppercase header on a `theme.tint` background: `FAVORITES`,
 `MULTIREDDITS`, `MODERATOR`, `SUBSCRIBER`, `TRENDING`.
@@ -1064,6 +1128,13 @@ Traversal rules:
 
 The root (`PostDetail`) is never emitted as a row — it is the list header.
 
+**Performance contract (a Phase 3 gate measurement, not an aspiration).** Flattening a **2 000-node**
+tree completes in **under 100 ms** on the oldest supported device, off the main actor; the **first
+screen** of a 2 000-comment thread renders in **under 1 s** from "fetch complete"; and peak memory
+**does not scale with total thread size**, because `List` recycles rows and the flat array holds
+values, not views. Collapsing a 500-child thread is an array splice, not a re-render of the list.
+`02-architecture.md` §18.1 carries the same numbers as budgets.
+
 ### 14.2 Comment row layout
 
 ```
@@ -1078,10 +1149,14 @@ CommentRow(comment)
 ```
 
 - **Depth indent:** 10 pt per level, unbounded.
-- **Depth border color:** cycle a fixed 6-color rainbow, identical in every theme and **not**
-  customizable: `#e40303, #ff8c00, #e6d600, #008026, #24408e, #732982`. Index with
-  `(depth − 1) % 6` for comment rows and `depth % 6` for `loadMore` / `collapsedReplies` stub rows
-  (they represent the *next* level down).
+- **Depth border color:** cycle the six `theme.commentDepthColors` values — one fixed set, identical
+  in every theme and **not** customizable, even in the Theme Maker. The six values are **defined in
+  `04c` §18.2** and are **new colours chosen for this app**; the original's cycle is creative
+  expression and is not reproduced, so no hex value for it appears anywhere in this document set
+  (`[DECISION: theme-count]`). Index with `(depth − 1) % 6` for comment rows and `depth % 6` for
+  `loadMore` / `collapsedReplies` stub rows (they represent the *next* level down).
+- **Body leading padding:** **15 pt** in the normal case. `displayInList` mode overrides it to 10
+  (§14.4); nothing else changes it.
 - **Right-side vote indicator:** when `Settings.voteIndicator` is on (default `false`) **and** the
   user has voted, draw a 1 pt right border in `theme.upvote` / `theme.downvote`; otherwise zero
   width.
@@ -1167,9 +1242,10 @@ top. No repositioning happens on expand. Implement with a `GeometryReader` backg
 publishing its frame in the list's coordinate space, plus `ScrollViewReader.scrollTo(id, anchor:
 .top)`.
 
-Toggling `tapToCollapseComment` or `voteIndicator` in Settings presents an alert:
-**"Existing pages may need to be refreshed for this change to take effect."** The other comment
-settings toggle silently.
+Toggling `tapToCollapseComment` or `voteIndicator` in Settings shows **no alert and needs no
+refresh**: the comment row reads both settings reactively, so an already-open thread repaints in
+place. The original demanded a refresh for these two; `APPNAME` has **no restart or refresh alert on
+any setting anywhere** (`04c` §17.2, `06` items 57 and 271).
 
 ### 15.2 Collapse Thread
 
@@ -1235,7 +1311,7 @@ to the last confirmed position. The overlay fades back out on release.
 | 4 | `Collapse Thread` | not `displayInList` | §15.2 |
 | 5 | `Copy Text` | always | copies `comment.body` (**raw markdown**) to the pasteboard; no toast |
 | 6 | `Select Text` | always | opens the selection sheet (§17) with `comment.body` |
-| 7 | `Reply` | always | presents `NewCommentSheet(parent: comment)`, gated by `interactionDisabledStatus` exactly like the post-level reply button; on success reloads **only this comment** (endpoint C3) after a flat 5 s delay and re-merges it in place |
+| 7 | `Reply` | always | presents `NewCommentSheet(parent: comment)`, gated by the post's `interactionDisabledStatus` **before the sheet opens** — when it is non-nil, present `.alert("This post has been \(status)")` with a single OK and open nothing, where `status` is the raw `"locked"` / `"archived"` string interpolated verbatim (§13 item 4 has the identical check); on success reloads **only this comment** (endpoint C3) after a flat 5 s delay and re-merges it in place |
 | 8 | `Save` / `Unsave` | always | V2 |
 | 9 | `Edit`, `Delete` | **only** when `currentUser.userName == comment.author` | Edit presents `EditCommentSheet`; Delete is marked destructive and additionally confirms via `.alert("Delete Comment", "Are you sure...", [Cancel, Delete])` before calling V3 and removing the node locally |
 | 10 | `Share` | always | share sheet with the comment's canonical URL |
@@ -1339,7 +1415,7 @@ non-observed box so cursor movement doesn't re-render):
 | **Quote** | quote | **three-way**, see below |
 | Strikethrough | strikethrough | wraps in `~~…~~` |
 | Spoiler | eye.slash | wraps in `>!…!<` |
-| Attach Theme | paintbrush | only when the caller passes `showCustomThemeOption` (computed from the target subreddit — see `04c` §Theme sharing). Presents a list of the user's saved custom themes; selecting one confirms via `.alert("Do you want to attach the \"<name>\" theme to your text?", [Cancel, Attach])`, and Attach inserts a newline-wrapped theme token at the selection. `[GATE: gate.customThemes]` |
+| Attach Theme | paintbrush | only when the caller passes `showCustomThemeOption`, which is exactly "the target subreddit is in `themeSharingSubreddits`" and is **false for every subreddit while that constant is empty** (`04c` §18.5). Presents a list of the user's saved custom themes; selecting one confirms via `.alert("Do you want to attach the \"<name>\" theme to your text?", [Cancel, Attach])`, and Attach inserts a newline-wrapped theme token at the selection. `[GATE: gate.customThemes]` |
 
 **Quote's three behaviors, in order:**
 1. Editor text is completely empty → set the whole text to literally `"> "`.
@@ -1583,10 +1659,10 @@ and defaults**; its namespaced `APPNAME` equivalents (`post.compactMode`, `filte
 | `postSubredditSort[<name>]` | enum | — | Remembered per-subreddit post sort |
 | `postSubredditSortTop[<name>]` | enum | — | Remembered per-subreddit Top window |
 | `commentSubredditSort[<name>]` | enum | — | Remembered per-subreddit comment sort |
-| `voteIndicator` | Bool | `false` | Right-edge colored border on voted comments (+ refresh alert) |
+| `voteIndicator` | Bool | `false` | Right-edge colored border on voted comments; no refresh alert |
 | `collapseAutoModerator` | Bool | `true` | Top-level AutoModerator comments start collapsed |
 | `commentFlairs` | Bool | `true` | Comment author flair chip |
-| `tapToCollapseComment` | Bool | `true` | Tap a comment row to collapse (+ refresh alert) |
+| `tapToCollapseComment` | Bool | `true` | Tap a comment row to collapse; no refresh alert |
 | `collapseChildrenOnly` | Bool | `false` | Collapsing shows an "N more replies" stub |
 | `scrollToNextButtonPosition` | enum (10 slots) | `.bottomRight` | Floating button dock |
 | `dataMode.wifi` / `.cellular` | enum | `.normal` / `.normal` | Low-data media behavior (§4.5, §4.8, §9) |
@@ -1743,10 +1819,10 @@ Write these as `@Test` functions in Swift Testing (new tests; XCTest reserved fo
 | `soleImageLinkParagraphBecomesInlineImage` | And an ordinary link paragraph does not. |
 | `giphyLinkExtractsFifthSegment` | Produces the expected `i.giphy.com` URL. |
 | `tableColumnWidthHeuristic` | 3 columns → `(w−30)/3`; 4 columns → 100 pt. |
-| `whitespaceTextNodesStripped` | No blank blocks between tags. |
-| `anchorWrappingImageSuppressed` | Produces an empty container. |
+| `noWhitespaceStrippingPassNeeded` | Block spacing comes from the AST, so no whitespace-only block is ever emitted. |
+| `anchorWrappingImageSuppressed` | A link whose only child is an image renders the image, with the link as its tap target. |
 | `backslashEscapeStrippedOnExternalOpen` | `%5C` removed before opening. |
-| `orderedListNumbersIgnoreStartAttribute` | Uses DOM position. |
+| `orderedListNumbersHonourStart` | An ordered list honours `start`, and a nested list numbers from its own `start` while the outer continues. |
 | `spoilerTogglesIndependently` | Two spoilers in one body keep separate state. |
 | `themeTokenStrippedFromText` | And yields one chip per token. |
 
@@ -1758,20 +1834,20 @@ Write these as `@Test` functions in Swift Testing (new tests; XCTest reserved fo
 
 | Source (in `docs/swift-rewrite/spec/`) | Section | Covered here |
 |---|---|---|
-| `01-navigation-shell.md` §4.2 (screen registry), §5.1–5.2 (switcher, sort/context buttons), §5.3 (nav helpers), §7.5–7.6 (sort parsing, preferred sorts), §13 (scroll-to-next button), §14 (haptics), §15 (one-time alerts) | routing, toolbar, sorts, floating button | §3.2, §8, §15.4, §16.4, §7.1 |
-| `01` §3 (tab bar hide-on-scroll), §3.1 (tab re-tap) | scroll-to-top semantics | §2.5, §19 |
-| `01` §10 (split view) | explicitly out of scope | §Scope note |
-| `02-api-contract.md` §2.1 (P1–P3), §2.2 (C1–C3), §2.3 (V1–V5), §2.4 (S1–S4), §2.5 (R4), §2.9 (M2–M5) | endpoints used | §2.1, §3.3, §7.4–7.5, §11.1, §14.5, §16.5 |
-| `02` §4.1–4.9 (models), §4.13 (formatting) | post/comment model fields, time & number formatting | §4, §5, §14 |
-| `02` §5.1–5.2 (cursors, list state machine), §7 (error copy) | pagination + error states | §2.1, §2.2 |
-| `03-feed-and-posts.md` §1–§2 (screens, data loading), §3 (gallery offer), §4 (post card), §5 (tap targets), §6 (context menu), §7 (swipes), §8 (voting), §9 (feed video/FABs), §10 (save/share), §11 (seen), §12 (hidden), §13 (subreddit filters), §14 (text filters), §16 (sorting), §17 (switcher), §18 (Subreddits page), §19 (subreddit menu), §20 (low data), §21 (stats), §22 (formatting), §23 (settings) | the whole feed half | §2–§11, §19 |
-| `03` §15 (AI filters) | omitted by owner decision | §1.2 |
-| `04-post-details-comments.md` §1 (composition), §2 (header), §3 (flattening + rows), §4 (collapse), §5 (scroll-to-next), §6 (markdown), §7 (comment menu), §8 (comment swipes), §9 (comment sort), §10 (select text), §11 (composers), §12 (virtualization), §13 (context mode), §14 (pull-to-refresh), §15 (settings) | the whole comments half | §12–§19 |
-| `05-media.md` §1.2 (link preview/OpenGraph), §7.1–7.3 (focus, autoplay, FABs), §11 (low data) | feed-side media contract | §4.5, §4.8, §9 |
-| `06-settings-themes.md` §2.2 (sorting), §2.3 (filters), §4.1–4.2 (appearance), §11.2 (key inventory) | settings that affect these screens | §19 |
-| `08-feature-inventory.md` A, B, C, I, J, N, O, P | acceptance checklist coverage | throughout |
-| `09-persistence-pro-utils.md` §1.2 (seen/hidden/drafts tables), §1.3 (maintenance), §6.1 (Slideable), §6.4 (action catalog), §7.1–7.2 (formatters) | persistence + interaction primitives | §7.1, §7.6–7.7, §16.5.3, §5 |
-| `10-swiftui-2026-baseline.md` A3 (List vs LazyVStack, `onScrollTargetVisibilityChange`, `contextMenu` icons, selectable `Text` on iOS 27, `sensoryFeedback`, `swipeActions` outside `List`, markdown limits) | API choices | §2.1, §7.1, §7.2, §9, §12.1, §17, §18 |
+| `spec/01-navigation-shell.md` §4.2 (screen registry), §5.1–5.2 (switcher, sort/context buttons), §5.3 (nav helpers), §7.5–7.6 (sort parsing, preferred sorts), §13 (scroll-to-next button), §14 (haptics), §15 (one-time alerts) | routing, toolbar, sorts, floating button | §3.2, §8, §15.4, §16.4, §7.1 |
+| `spec/01` §3 (tab bar hide-on-scroll), §3.1 (tab re-tap) | scroll-to-top semantics | §2.5, §19 |
+| `spec/01` §10 (split view) | explicitly out of scope | §Scope note |
+| `spec/02-api-contract.md` §2.1 (P1–P3), §2.2 (C1–C3), §2.3 (V1–V5), §2.4 (S1–S4), §2.5 (R4), §2.9 (M2–M5) | endpoints used | §2.1, §3.3, §7.4–7.5, §11.1, §14.5, §16.5 |
+| `spec/02` §4.1–4.9 (models), §4.13 (formatting) | post/comment model fields, time & number formatting | §4, §5, §14 |
+| `spec/02` §5.1–5.2 (cursors, list state machine), §7 (error copy) | pagination + error states | §2.1, §2.2 |
+| `spec/03-feed-and-posts.md` §1–§2 (screens, data loading), §3 (gallery offer), §4 (post card), §5 (tap targets), §6 (context menu), §7 (swipes), §8 (voting), §9 (feed video/FABs), §10 (save/share), §11 (seen), §12 (hidden), §13 (subreddit filters), §14 (text filters), §16 (sorting), §17 (switcher), §18 (Subreddits page), §19 (subreddit menu), §20 (low data), §21 (stats), §22 (formatting), §23 (settings) | the whole feed half | §2–§11, §19 |
+| `spec/03` §15 (AI filters) | omitted by owner decision | §1.2 |
+| `spec/04-post-details-comments.md` §1 (composition), §2 (header), §3 (flattening + rows), §4 (collapse), §5 (scroll-to-next), §6 (markdown), §7 (comment menu), §8 (comment swipes), §9 (comment sort), §10 (select text), §11 (composers), §12 (virtualization), §13 (context mode), §14 (pull-to-refresh), §15 (settings) | the whole comments half | §12–§19 |
+| `spec/05-media.md` §1.2 (link preview/OpenGraph), §7.1–7.3 (focus, autoplay, FABs), §11 (low data) | feed-side media contract | §4.5, §4.8, §9 |
+| `spec/06-settings-themes.md` §2.2 (sorting), §2.3 (filters), §4.1–4.2 (appearance), §11.2 (key inventory) | settings that affect these screens | §19 |
+| `spec/08-feature-inventory.md` A, B, C, I, J, N, O, P | acceptance checklist coverage | throughout |
+| `spec/09-persistence-pro-utils.md` §1.2 (seen/hidden/drafts tables), §1.3 (maintenance), §6.1 (Slideable), §6.4 (action catalog), §7.1–7.2 (formatters) | persistence + interaction primitives | §7.1, §7.6–7.7, §16.5.3, §5 |
+| `spec/10-swiftui-2026-baseline.md` A3 (List vs LazyVStack, `onScrollTargetVisibilityChange`, `contextMenu` icons, selectable `Text` on iOS 27, `sensoryFeedback`, `swipeActions` outside `List`, markdown limits) | API choices | §2.1, §7.1, §7.2, §9, §12.1, §17, §18 |
 
 ### 21.2 Decision tags used in this document
 
@@ -1807,6 +1883,7 @@ no aliases, and the register's "Default (assumed)" column is what this document 
 | `nested-list-render-bug` | Nested lists number correctly |
 | `giant-emoji-bug` | Emoji-only bodies clamp to body size |
 | `text-height-repair-omit` | The RN paragraph-height workaround is not ported |
+| `theme-count` | The six comment-depth colours are new and are defined in `04c` §18.2, not here |
 | `raw-json-param` | `raw_json=1` on every read; no client-side entity decoding |
 | `snudown-renderer` | One first-party markdown pipeline for fetched content and previews |
 | `quote-first-line` | The composer's quote-on-first-line no-op is fixed |

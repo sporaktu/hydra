@@ -38,6 +38,12 @@ and the header-left "Accounts" button on the User page when that page is the roo
 Vertical list of every saved account in the order they were added (switching never reorders),
 followed by a synthetic trailing row labeled **`"Logged Out"`**.
 
+- **What `"Logged Out"` does:** selecting it logs out of the active account and browses anonymously.
+  It **does not remove anything** — every saved account stays in this list and its session stays in
+  the Keychain, so any of them can be switched straight back into by tapping its row. Only the
+  explicit Delete action (below) removes an account. This is stated here as well as in §2.5's Logout
+  row because this list is where a reader looks for it (`spec/07` §1.6).
+
 - **Empty state:** with zero accounts the whole body is replaced by centered `Text("No accounts")` at
   18 pt. The `"Logged Out"` row is **not** shown in that case.
 - **Row:** username on the left; a checkmark glyph on the right when the row is the active one
@@ -312,7 +318,7 @@ with a button that opens `https://www.reddit.com/settings/account` through the e
 |---|---|
 | Leading glyph | `message-square`-equivalent, tinted `theme.iconPrimary` when unread, `theme.subtleText` when read |
 | Title line | Static prefix `"Reply to your comment in "` in `theme.text`, followed by the parent post's title in a subtler tint, clamped to **2 lines** |
-| Body | The reply's HTML, rendered by the shared renderer (`04a` §18) |
+| Body | The reply's **markdown** (`data.body`, `03` §4.11), rendered by the shared renderer (`04a` §18). `03` §4.11 models no HTML field on an inbox item, and `raw_json=1` means the markdown arrives unescaped |
 | Footer | `"in "` + **`r/<subreddit>`** (tappable → subreddit feed) + `" by "` + **`<author>`** (tappable → user page); then a metadata row: vote glyph tinted by the current user's vote (`theme.upvote` / `theme.downvote` / `theme.subtleText`) + score, then a clock glyph + relative time |
 | Tap | Marks the item read (optimistic local flip + endpoint I2) and navigates to the comment's **context** link, deep-linking into the thread |
 | Swipe | Short-right (drag right, short) = **upvote**; long-right = **downvote**; short-left = **toggle read/unread** (mail glyph) |
@@ -320,13 +326,18 @@ with a button that opens `https://www.reddit.com/settings/account` through the e
 
 Voting recomputes the row's local vote/score state optimistically from the returned effective vote.
 
+**Inbox swipe actions are fixed.** Unlike feed and comment rows, inbox rows are **not** affected by
+`gestures.postSwipe` / `gestures.commentSwipe`: the map above is hard-coded, and changing the swipe
+settings changes nothing here. Consequently `[GATE: gate.gestures]` never applies to the inbox
+(`spec/07` §2.4).
+
 **Private message row:**
 
 | Part | Detail |
 |---|---|
 | Leading glyph | mail glyph, same read/unread tint rule |
 | Title | The message `subject`, max **2 lines**, `theme.text` |
-| Body | The message HTML |
+| Body | The message **markdown** (`data.body`), rendered by the shared renderer (`04a` §18) |
 | Footer | `"from "` + **`<author>`** (tappable → user page) + clock glyph + relative time |
 | Tap | Marks read, navigates to `Route.messageThread(id)` (§5) |
 | Swipe | Short-right = **mark-as-read toggle only**. No vote actions — messages are not votable. |
@@ -357,9 +368,15 @@ Route `Route.messageThread(MessageID)`. Title **`"Messages"`**. Renders **nothin
   field means none.
 - While loading: a centered `ProgressView`. Auto-scroll to the bottom whenever the message count
   changes (a message loaded or sent).
+- **After a successful send the thread refetches** — the composer fires the parent reload callback,
+  which re-issues endpoint **I3** and replaces the whole array, and the resulting count change is what
+  drives the auto-scroll. **Nothing is inserted optimistically**: a sent reply appears only once the
+  server has confirmed it and returned it in the thread. (Sends are the one write in the app that is
+  not optimistic, because a message bubble that later vanishes is worse than a half-second wait.)
 - **Bubbles:** the current user's own messages are right-aligned with a `theme.iconPrimary`
   background; the other party's are left-aligned with `theme.tint`. Each bubble shows the author name
-  and a **short** relative timestamp above the HTML-rendered body.
+  and a **short** relative timestamp above the body, which is the message's **markdown** rendered by
+  the shared renderer (`04a` §18) — the same one pipeline as everywhere else (`03` §4.11).
 - **Reply button:** pinned to the bottom, shown only when the thread contains at least one message
   from someone other than the current user. Tapping it opens the reply composer seeded with the most
   recent message from that other user (used as the reply target).
@@ -471,8 +488,15 @@ upvoted/downvoted/hidden/saved sections show **no** sort control.
 The **header** fetch passes "allow suspended", so a suspended user's page still attempts to load. The
 **content** fetch does not, so it throws for a suspended or banned user. Both surface through the
 shared access-failure view with the exact strings in `04a` §2.2 (`🚫 <name> has been banned`,
-`🚫 <name> does not exist`), replacing the entire content area with centered subtle text and **no
+`🚫 <name> does not exist`), replacing the content area with centered subtle text and **no
 retry button**.
+
+**What the split state looks like.** For a suspended user the two fetches therefore disagree, and the
+screen renders **both** halves of that disagreement: the header (avatar, the three stats, the section
+buttons, the "…" menu) renders normally from the header fetch, and only the **content area below it**
+is replaced by the access-failure view. The screen is never blanked, and the header is never hidden
+just because the listing failed. For a genuinely nonexistent user (`error == 404`) both fetches fail
+and the access-failure view takes the whole screen.
 
 #### 6.5 Compact user row (search results)
 
@@ -504,7 +528,10 @@ SearchScreen
   yet, show a small `ProgressView` instead of the trending list.
 
 **Triggering.** The search fires on **submit** (return key) **and on blur** (leaving the field), but
-only when the text differs from the last text actually searched. It does **not** search on every
+only when the text differs from the last text actually searched. Both behaviours are flags on the
+**one shared search-bar primitive** (`DesignSystem.SearchBar`), not bespoke logic per screen:
+`searchOnBlur` is `true` here and `false` on the in-subreddit bar (§7.2), and `clearOnSearch` is
+`false` here and `true` there. Build one control with two flags, never two search bars. It does **not** search on every
 keystroke. Changing the scope pill immediately re-runs the search against the same text. Clearing the
 text also triggers a search, which — since the query is now empty — clears the results.
 
@@ -515,6 +542,10 @@ text also triggers a search, which — since the query is now empty — clears t
 | posts | the standard post card (`04a` §4), fully interactive |
 | subreddits | `/r/<name>` title, description (or **`"No description"`** when empty) clamped to 3 lines, footer with subscriber count, `"Joined"` / `"Not Subscribed"`, and time-since-creation |
 | users | the compact user row (§6.5) |
+
+**Zero results render nothing.** A search that returns no items renders an empty list with the
+spinner cleared and **no message** — the same deliberate silence as an empty feed (`04a` §2.2) and
+Gallery Mode (`04b` §10.3). Do not invent an empty state here either.
 
 **Query construction and quirks** (endpoint Q1):
 - `type` is `link` / `sr` / `user`; `sr_detail=true` always included.
@@ -532,7 +563,8 @@ text also triggers a search, which — since the query is now empty — clears t
 
 A search bar is the **list header** of a single-subreddit feed only (never on Home or a multireddit).
 It clears itself immediately after a search fires and submits **only on the return key** (not on
-blur). On submit with non-empty text, push
+blur). Both are flags on the shared primitive named in §7.1 — `clearOnSearch = true`,
+`searchOnBlur = false` — and nothing here is a second implementation of a search field. On submit with non-empty text, push
 `Route.subredditSearch(SubredditSearchTarget)`.
 
 #### 7.3 Subreddit search results screen
@@ -603,7 +635,9 @@ subreddit name.
    with a `+` / `−` toggle glyph trailing. Tapping toggles that rule's expansion; expansion state is a
    set, so **multiple rules can be open simultaneously**. Expanded content renders the rule's full
    HTML description through the shared renderer. If a subreddit has **zero** rules the `Rules` header
-   still renders with an empty list beneath it — there is no empty-state text.
+   still renders with an empty list beneath it — there is no empty-state text. An empty rules list
+   **does not suppress item 3**: the description still renders beneath the empty header exactly as it
+   would otherwise.
 3. The subreddit's full sidebar description, rendered as HTML. Links navigate in-app through the same
    link-handling rules as everywhere else.
 
@@ -687,6 +721,33 @@ left to load in place.
 
 With `WebPage`, implement this in a `NavigationDeciding` conformance.
 
+#### 11.3 Unsupported-link screen
+
+`Route.unsupported(URL?)` (`02-architecture.md` §5.5). This is the screen the router pushes when an
+in-app navigation resolves to `PageKind.unknown` — a Reddit-shaped link `APPNAME` cannot classify, or
+a link followed out of a rendered body that turns out not to be renderable natively. It is **not**
+the path for an *incoming* external URL: one of those raises the `"Unknown URL"` alert in §13 and
+navigates nowhere.
+
+Layout: a single centered column, `theme.background`, vertically and horizontally centred, 20 pt
+spacing, 24 pt horizontal margins.
+
+1. A **bug glyph at 48 pt** in `theme.subtleText` (SF Symbol `ladybug`).
+2. Body copy, centred, `theme.text`:
+   **"APPNAME was unable to load this page. It may be because this type of link is not yet
+   supported."**
+3. **Only when the route carries a URL**, a second line inviting the user to open it in a browser —
+   **"You can try opening it in your browser:"** in `theme.subtleText` — followed by the **raw URL**
+   rendered on its own line, `.underline()`, in `theme.iconOrTextButton`, wrapping rather than
+   truncating, and tappable. The tap hands the URL to the external-link opener (§12), so it obeys the
+   user's browser choice like every other external link.
+
+With no URL (`Route.unsupported(nil)`), only the glyph and the first line render — there is no link
+line, no placeholder and no retry button.
+
+Navigation title: **`"Error"`**, static. Standard back button. The screen sits **above** the tab bar
+with normal bottom padding (`02-architecture.md` §5.4's content-inset allow-list).
+
 ### 12. External link handling
 
 A single choke point for every URL the app will not render natively. Governed by
@@ -696,7 +757,7 @@ Settings → General → External Links (§16.7), key `links.externalBrowser` of
 
 | `BrowserChoice` | Label | Behavior |
 |---|---|---|
-| `inApp` | **APPNAME** (default) | Opens an in-app browser, presented full screen, with a "close"-styled dismiss control. Device orientation is unlocked while it is open and re-locked to portrait when it closes. Reader mode is applied per `openInReaderMode`. Use `SFSafariViewController` via a representable (`entersReaderIfAvailable` gives reader mode for free) — or a `WebView` if more control is needed, at the cost of reimplementing reader mode. |
+| `inApp` | **APPNAME** (default) | Opens an in-app browser, presented full screen, with a "close"-styled dismiss control. Device orientation is unlocked while it is open and re-locked to portrait when it closes — the unlock/re-lock pair itself is **owned by `02-architecture.md` §5.11**, and this row only names one of the two surfaces that use it (the other is the media viewer, `04b` §2.1); do not re-implement it here. Reader mode is applied per `openInReaderMode`. Use `SFSafariViewController` via a representable (`entersReaderIfAvailable` gives reader mode for free) — or a `WebView` if more control is needed, at the cost of reimplementing reader mode. |
 | `system` | **Default Browser** | Open the URL unmodified; the system hands it to the default browser. |
 | `chrome` | **Chrome** | Rewrite to `googlechromes://` (https) or `googlechrome://` (http) with the scheme stripped from the original. |
 | `brave` | **Brave** | `braves://` / `brave://`, same shape. |
@@ -722,6 +783,12 @@ navigation.
 
 All four sources funnel into one handler.
 
+**Ordering on a cold launch.** `handleURL(_:)` may only run **after routing is ready** — that is,
+after the tab router exists and `loginInitialized` is true (§2.5). A URL that arrives earlier (the
+launch URL, or a share-extension entry drained at startup) is **queued, never dropped**, and the
+queue is flushed once in the order it was filled the moment routing becomes ready. Pushing before the
+stack exists is how a cold-launch deep link silently lands nowhere.
+
 **`handleURL(_:)`:**
 1. Resolve short links (follow redirects for `redd.it/<id>` and `/r|u|user/<x>/s/<id>`). If resolution
    fails or the string is not a Reddit URL at all, keep the original string — never throw.
@@ -737,7 +804,7 @@ All four sources funnel into one handler.
 | # | Source | Details |
 |---|---|---|
 | 1 | **Custom scheme** `APPNAME://openurl?url=<encoded>` | Case-insensitive prefix match. Handled both for a cold-launch URL and for URLs delivered while running (`.onOpenURL`). The `url=` value is extracted by stripping the prefix. **No other custom-scheme path is accepted from outside** — a bare `APPNAME://settings` arriving externally is ignored; internal deep links of that shape are only ever constructed by the app itself. |
-| 2 | **Clipboard detection** | On cold start (once routing is ready) and on **every** transition to the foreground, if `Settings.readClipboard` is on (**default `false`**), read the pasteboard's URL. If it parses as a Reddit URL, present `.alert("Open Reddit URL?", "A Reddit URL was detected on your clipboard. Would you like to open it?\n\n<url>")` with `Cancel` / `Open`. **Both** branches clear the pasteboard URL afterwards so the same content does not re-prompt. A re-entrancy guard prevents stacking prompts. If the setting is off, or there is no URL, or it is not a Reddit URL, nothing happens silently. On iOS, reading the pasteboard triggers the system paste prompt unless the user allows it for the app — this is what the settings copy in §16.4 explains. |
+| 2 | **Clipboard detection** | On cold start (once routing is ready) and on **every** transition to the foreground, if `Settings.readClipboard` is on (**default `false`**), read the pasteboard's URL. If it parses as a Reddit URL, present `.alert("Open Reddit URL?", "A Reddit URL was detected on your clipboard. Would you like to open it?\n\n<url>")` with `Cancel` / `Open`. **Both** branches clear the pasteboard URL afterwards so the same content does not re-prompt. A re-entrancy guard prevents stacking prompts: it is taken the moment the alert is presented and **released only when the user answers it** (either button, or a dismissal), so a foreground transition while the alert is up is a no-op rather than a second alert. If the setting is off, or there is no URL, or it is not a Reddit URL, nothing happens silently. On iOS, reading the pasteboard triggers the system paste prompt unless the user allows it for the app — this is what the settings copy in §16.4 explains. |
 | 3 | **Share extension** | The app registers a share extension accepting **exactly one web URL**. Checked on the same triggers as the clipboard (routing-ready + every foreground). The payload is passed straight to `handleURL` with **no confirmation prompt**, and the queue is cleared. |
 | 4 | **Universal links** | **Not enabled in v1.** Associated Domains would require serving an `apple-app-site-association` file from `reddit.com`, which the owner does not control, so universal links are not a realistic option. The entry points are the custom scheme, the Share Extension, the "Open in APPNAME" App Intent and clipboard detection. `[DECISION: universal-links-absent]` |
 
@@ -756,29 +823,59 @@ keep the iCloud-shortcut row only if `08` wants literal parity.
 
 Settings is the 5th tab. Every settings screen is an ordinary `NavigationStack` destination — pushing
 deeper is a normal push, and the system back gesture pops one level, exactly like any other screen.
+
+Three rules hold for **every** list in this document, and are stated once here:
+
+- **A conditional row is removed, never disabled.** Rows whose visibility depends on another setting —
+  the default-Top-sort picker (§16.2), thumbnails-on-right (§17.1), reader mode (§16.7), the App Icon
+  root row (§15), the clear-custom-sorts buttons (§16.2) — are **filtered out of the list entirely**
+  when their condition is false. They are never rendered greyed out, and the surrounding separators
+  are computed from the *rendered* collection, not the unfiltered one (`[DECISION: list-divider-index]`).
+- **The one exception is a gated row.** A row behind a `[GATE: gate.*]` stays visible with its current
+  value and a trailing `Plus` badge, looks disabled but remains tappable, and presents the paywall on
+  tap. That chrome is normative in `05-monetization.md` §5.11; a gate never removes a row and never
+  hides a navigation entry.
+- **No custom dimming layer.** `.confirmationDialog`, `.contextMenu` and `.alert` presentations use
+  the **system scrim** and nothing else. The original drew its own dimming overlay behind action
+  sheets only because its action-sheet library did not dim; adding one on top of SwiftUI's would
+  double-darken and would not follow Reduce Transparency.
 The tab's stack holds `Route.settings(SettingsRoute)` entries (`02-architecture.md` §5.5); the nested
 enum is:
 
 ```
 enum SettingsRoute: Hashable {
-    case root, guide(GuideQuery), general, gestures, sorting, openInApp, filters,
+    case root, help(HelpQuery), general, gestures, sorting, openInApp, filters,
          startup, legal, externalLinks, theme, themeMaker(editing: String?),
          appearance, appIcon, dataUse, stats, privacy, advanced, paywall
 }
 ```
 
-The **Guide** destination is heavy (a large bundled corpus) — load it lazily.
+The **Help** destination carries a bundled corpus and an FTS5 index — load it lazily.
+`HelpQuery` is `.index | .category(String) | .article(key: String) | .search(String)`, matching
+§21.3's four states.
 
 ### 15. Settings root
 
-A search bar at the top: placeholder **`"Ask a question..."`**, autocorrect on, clears its text on
-submit. Submitting non-empty text pushes `.guide(.search(text))`.
+**Settings search.** A search bar at the top: placeholder **`"Search settings"`**, autocorrect on.
 
-Below it, one grouped list titled **`"Settings"`**:
+- **Typing filters the settings rows in place.** The match is case-insensitive and runs against each
+  row's own label **and** the section titles of the screen that row leads to, so typing "swipe"
+  surfaces Gestures and typing "cache" surfaces Advanced. Matches render as a **flat list** — the row
+  as it normally appears, with its parent screen's name as a subtitle — replacing the grouped list
+  for as long as there is text. Selecting a match pushes that row's destination directly.
+- **Submitting with no row match falls through to Help search**: the field's text is handed to
+  `.help(.search(text))` (§21.3), and the field clears. Submitting *with* matches on screen does
+  nothing extra — the matches are already the answer.
+- **There is no "ask a question" free-text answer box.** The original's placeholder invited one and
+  its help browser rendered an AI answer card above the results; neither is rebuilt
+  (`[DECISION: guide-ai-answer-drop]`).
+
+Below it, one grouped list titled **`"Settings"`**, in exactly this order (it is what `06` item 307
+checks):
 
 | # | Row | Glyph | Destination / action |
 |---|---|---|---|
-| 1 | **Guide** | book | `.guide(.index)` |
+| 1 | **Help** | book | `.help(.index)` — the hand-written help section (§21.3). Labelled **Help**, not "Guide": the 38-topic Guide it replaces is gone (`[DECISION: guide-included-or-not]`) |
 | 2 | **General** | gear | `.general` |
 | 3 | **Theme** | moon | `.theme` |
 | 4 | **Appearance** | eye | `.appearance` |
@@ -789,16 +886,19 @@ Below it, one grouped list titled **`"Settings"`**:
 | 9 | **Stats** | chart.bar | `.stats` |
 | 10 | **Privacy** | lock | `.privacy` |
 | 11 | **Advanced** | wrench | `.advanced` |
-| 12 | **Patch Notes** | arrow.down.app | Presents the update-info modal (§21.1) — this is the app's changelog surface |
-| 13 | **Request A Feature** | arrow.triangle.pull | Navigates **in-app** to the owner's chosen feedback destination, sorted `top?t=all` (not an external link). The original targeted its own community; `APPNAME` must not, per the clean-room rule. `[DECISION: subscribe-nag-removed]` |
+| 12 | **What's New** | arrow.down.app | Presents the update-info modal (§21.1) — this is the app's changelog surface. Labelled **What's New**, not the original's "Patch Notes" |
+| 13 | **Feedback** | arrow.triangle.pull | Opens the single owner-configured constant `feedbackDestinationURL` through the **external-link opener** (§12), so it obeys the user's browser choice. **There is no default value and no third-party subreddit**: if the owner has not set the constant, the row is not rendered at all. The original navigated in-app to its own community sorted `top?t=all`; `APPNAME` must not carry that destination, per the clean-room rule. Labelled **Feedback**, not "Request A Feature" |
 
-**Footer text** (not a control), centered, three lines:
+**Footer text** (not a control), two lines:
 ```
 APPNAME: <version>
 Build #<build>
 ```
-The original's third line reports an over-the-air update group, which has no meaning in a native app —
-drop it. `[DECISION: drop-update-group-footer]`
+Centred, **non-interactive** (no tap target, no selection, not exposed to VoiceOver as a button),
+`theme.verySubtleText` at 12 pt, with 16 pt of space above it and the list's bottom edge. The
+original's third line reports an over-the-air update group, which has no meaning in a native app —
+drop it, which is why the footer is two lines rather than three.
+`[DECISION: drop-update-group-footer]`
 
 **List row separator quirk to *not* reproduce.** The original's list component computes separators from
 the *unfiltered* index, so a list whose last **visible** row is followed by a hidden row incorrectly
@@ -875,8 +975,11 @@ opens the paywall.
 | Remember subreddit sort | Toggle | `rememberPostSubredditSort` | — | `false` |
 
 Below the section, **only** when remembering is on **and** at least one subreddit is remembered, a
-button: **`"Clear custom post sorts (N subs)"`**. Tapping deletes every per-subreddit post-sort entry
-and resets the displayed count to 0.
+button: **`"Clear custom post sorts (N subs)"`**. Tapping enumerates the per-subreddit dictionaries
+and removes **every** entry under the matching key prefix (`sorting.post.*` **and**
+`sorting.postTop.*` for posts; `sorting.comment.*` for comments), then sets the displayed count to 0
+in place — no refetch, no navigation, and **no confirmation prompt**. The count is derived from the
+dictionary, so it reaches 0 as soon as the write lands.
 
 **Section "Comments":**
 
@@ -920,8 +1023,10 @@ its explanatory copy and a locked state; existing filter data is **preserved and
 | Mark as Seen On Scroll | Toggle | `filters.markSeenOnScroll` | `false` | **Takes effect immediately — no restart, no alert.** The rewrite reads the setting reactively. When the new value is `true` **and** hide-seen is also on, show a non-blocking informational note: `"You may notice slower loads with this setting enabled because all the hidden posts still have to be loaded in the background."` `[DECISION: mark-seen-live]` |
 
 If any per-route hide-seen override disagrees with the global value, a text block lists those routes
-verbatim. There is **no UI here to create** an override — only to see ones created from a feed's "…"
-menu.
+verbatim. Those rows are **informational only**: they are not tappable, carry no swipe action and
+cannot be removed from this screen. There is **no UI here to create** an override either — clearing
+one is done from the originating feed's "…" menu, which is also the only place one can be made
+(`04a` §7.7).
 
 **Section "Text Filter List":** a multiline text field bound to `filterText` (default `""`), with this
 description below, verbatim:
@@ -971,6 +1076,12 @@ Description below, verbatim (with the product name substituted):
 | Row | Control | Key | Default |
 |---|---|---|---|
 | **Read Links from Clipboard** | Toggle | `links.readClipboard` | `false` (`[DECISION: clipboard-read-default]`) |
+
+**Footnote on the default, so nobody "fixes" it back.** The original's own sources disagree: its
+settings screen ships `false`, a constant elsewhere says `true`. **`false` is authoritative** — it is
+what the original's UI actually shipped, it is the privacy-respecting choice (iOS prompts on every
+clipboard read), and it is what `[DECISION: clipboard-read-default]` decides. `03` §8.1 carries the
+same note.
 
 Description, verbatim:
 
@@ -1043,11 +1154,17 @@ exist** — the setting is dead and not carried forward.
 
 | Row | Control | Key | Default | Notes |
 |---|---|---|---|---|
-| Right side vote indicators | Toggle | `voteIndicator` | `false` | Toggling presents `.alert("Existing pages may need to be refreshed for this change to take effect.")` |
+| Right side vote indicators | Toggle | `voteIndicator` | `false` | Silent — takes effect at once |
 | Collapse AutoModerator | Toggle | `collapseAutoModerator` | `true` | Silent |
 | Show flairs | Toggle | `commentFlairs` | `true` | Silent |
-| Tap to collapse | Toggle | `tapToCollapseComment` | `true` | Same refresh alert |
+| Tap to collapse | Toggle | `tapToCollapseComment` | `true` | Silent — takes effect at once |
 | Collapse children only | Toggle | `collapseChildrenOnly` | `false` | Silent |
+
+**Every row on this screen is silent.** The original popped
+`"Existing pages may need to be refreshed for this change to take effect."` on the two comment
+toggles; in `APPNAME` the comment rows read both settings reactively, so an already-open thread
+repaints in place and **no alert is shown for any setting anywhere in the app**
+(`06` items 57 and 271, `07` guardrail "no restart alerts", `04a` §15.1).
 
 **The "Show comment summary" row does not exist.**
 
@@ -1072,7 +1189,7 @@ ThemeScreen
 ├─ List { Toggle("Different Dark Mode Theme", isOn: $useDifferentDarkTheme) }
 ├─ if useDifferentDarkTheme { HStack { Button("Light"); Button("Dark") } }   // local edit target
 ├─ ThemeList
-└─ Button("Explore Community Themes")   // in-app browse to a themes subreddit
+└─ Button("Explore Community Themes")   // owner-configured destination, §18.5; omitted when unset
 ```
 
 **"Different Dark Mode Theme"** (`useDifferentDarkTheme`, default `false`):
@@ -1114,9 +1231,14 @@ match. In SwiftUI, drive this with `.preferredColorScheme` on the root plus a
   - `Edit` → `.themeMaker(editing: name)`.
   - `Delete` (from either path) → `.alert("Delete Theme", "Are you sure you want to delete '<name>'?",
     [Cancel, Delete(destructive)])`. On confirm, delete the row; **if the deleted theme was the active
-    one, revert to the default built-in theme**. Note that a lapsed subscription never deletes a
+    one, revert to the default built-in theme**. Deleting a theme that is **not** currently active
+    changes nothing else: no re-resolution, no repaint, and the theme list's selection is untouched. Note that a lapsed subscription never deletes a
     custom theme and never deselects an active one (`05-monetization.md` §3.3).
   `[GATE: gate.customThemes]`
+
+**"Explore Community Themes"** opens the single owner-configured `themeCommunityURL` constant through
+the external-link opener (§12). Like the Feedback row (§15), it has **no default value and names no
+third-party community**; when the owner has not set it, the button is not rendered.
 
 **Theme row:** the theme name (leading, fixed 100 pt width), a horizontal **color band** (a thin strip
 divided into equal segments, one per hex-color field of the theme in key order — non-color fields such
@@ -1126,24 +1248,65 @@ valid hex strings), and a trailing checkmark in the theme's own `iconOrTextButto
 #### 18.2 Built-in theme catalogue
 
 **Clean-room constraint.** The original's twelve named themes and their specific hex palettes are
-creative expression and **must not be reproduced**. `APPNAME` ships **6–8 new built-in themes with
-new palettes, all free**, authored for this app in Phase 0 (`[DECISION: theme-count]`,
+creative expression and **must not be reproduced**. `APPNAME` ships **12 new built-in themes with new
+names and new palettes, all free**, authored for this app (`[DECISION: theme-count]`,
 `02-architecture.md` §8.5). What is reproduced is the *structure*, which is functional data shape,
-not expression:
+not expression. This section is the normative contract for the catalogue; the palettes themselves are
+an owner/design deliverable (`07` §A item 13a).
 
-| Structural element | Contract |
+**Count and composition.**
+
+| Element | Contract |
 |---|---|
-| Colour roles per theme | Exactly the **19** customisable roles listed in §18.3, in the five groups named there |
-| Per-role renditions | Four: `light`, `dark`, `lightIncreasedContrast`, `darkIncreasedContrast` (`02-architecture.md` §8.1). A theme that specifies only `light`/`dark` inherits those for the contrast variants |
-| Per-theme flags | `systemModeStyle` (`light` or `dark`) and `statusBar` (`light` or `dark`) |
-| Comment depth colours | One fixed cycle of **6** colours, shared by every theme and not customisable even in the Theme Maker. The colours themselves are **new** — the original's cycle is not reused |
-| Default theme | One of the new dark themes; its key is the fallback for an unresolved theme key |
-| Declared order | The catalogue's declaration order is also the list order on this screen |
+| Number of built-in themes | **Exactly 12** — matching the original catalogue's *slot count*, which is a shape, not expression. Fewer makes the picker look unfinished next to the app it replaces; more is authoring cost with no benefit |
+| Light / dark split | Both modes are first-class: **at least 4 themes with `systemModeStyle == .light` and at least 4 with `.dark`**, the remaining 4 at the author's discretion. The default theme is one of the dark ones |
+| Declared order | The catalogue's declaration order **is** the list order on this screen; the default theme is declared first |
+| Default theme | Named in the catalogue as the fallback for any unresolved theme key, for an imported `extends` naming an unknown base, and for the revert-on-delete path (§18.1) |
 
-Every new palette must satisfy, at authoring time: text-on-background and text-on-tint meet WCAG AA at
-both contrast settings; `background` is opaque (Reduce Transparency renders bars with it); `upvote`
-and `downvote` are distinguishable without colour vision. These are the snapshot-test axes in
-`02-architecture.md` §5.10 rule 5.
+**Required roles per theme.** Every built-in theme defines a value for **all of** the following —
+there is no "unset" at the built-in level, because built-ins are what unset custom fields fall
+through to:
+
+| Group | Count | Roles |
+|---|---|---|
+| Text Hierarchy | 3 | `text`, `subtleText`, `verySubtleText` |
+| Core Colors | 3 | `background`, `tint`, `divider` |
+| Interactive Elements | 3 | `buttonBg`, `buttonText`, `iconOrTextButton` |
+| Icons | 2 | `iconPrimary`, `iconSecondary` |
+| Actions | 9 | `upvote`, `downvote`, `delete`, `showHide`, `reply`, `share`, `collapse`, `bookmark`, `moderator` |
+| **Total** | **20** | exactly the set listed with its labels and descriptions in §18.3 |
+
+*(The surveys' prose says "19 roles"; `spec/06` §3.3's own palette table lists twenty, and so does the
+`CustomTheme` struct in §18.3. Twenty is correct — `02-architecture.md` §8.1 carries the same note.)*
+| Per-role renditions | Four: `light`, `dark`, `lightIncreasedContrast`, `darkIncreasedContrast` (`02-architecture.md` §8.1). A theme that specifies only `light`/`dark` inherits those for the contrast variants |
+| Non-colour fields | **`systemModeStyle`** (`light` \| `dark`) — drives pickers, scroll bars and the splash — and **`statusBar`** (`light` \| `dark`). Both are required per theme |
+| Comment depth colours | One fixed cycle of **6** colours, shared by every theme and not customisable even in the Theme Maker. The six values are **new, chosen for this app**; the original's cycle is not reused (`04a` §14.2 renders them and defines nothing) |
+
+**Naming rules for the 12 themes** (each one is a rejection Apple or a trademark holder could
+otherwise raise):
+
+1. **No third-party brand, product, company or character name.** The original's catalogue included
+   themes named after two live software trademarks and a comic-book character; none of that may
+   recur, in any spelling or near-miss (`06` §5 R3).
+2. **No name from the original's catalogue**, and no obvious synonym of one.
+3. **Nothing evoking the original app's own name or mythology**, per `[DECISION: app-name]`.
+4. **Descriptive or evocative, one or two words**, drawn from colour, material, light or landscape
+   vocabulary — the kind of name that reads as a palette and can be translated later.
+5. **Unique, case-insensitively**, against each other *and* against any name a user might already
+   have in `custom_themes`, since a built-in key always wins resolution (§18.1 step 1).
+
+**Authoring constraints**, checked before a palette is accepted: text-on-background and text-on-tint
+meet WCAG AA at **both** contrast settings; `background` is fully opaque (Reduce Transparency renders
+bars with it); `upvote` and `downvote` are distinguishable without colour vision; and the whole set
+passes the snapshot matrix in `02-architecture.md` §5.10 rule 5 (every theme × light/dark × Reduce
+Transparency × Increase Contrast).
+
+**Theme migration bridge.** The owner does not have to re-create their favourite *custom* themes by
+hand. The app they are replacing can share a theme through its own share feature, and `APPNAME`'s
+importer accepts that legacy payload as well as its own (§18.5, `02-architecture.md` §8.5a) — so a
+favourite theme moves across in two taps and arrives as an ordinary `APPNAME` custom theme. The
+bridge covers **custom** themes only: these 12 built-ins ship inside the app and still have to be
+authored before Phase 0 can close.
 
 **All built-in themes are free to everyone.** The original's documentation labelled five of its twelve
 as paid with a five-minute preview; its shipped code never enforced that, and `05-monetization.md`
@@ -1169,7 +1332,11 @@ Opened either fresh (**"Custom Theme +"**) or in edit mode (long-press a custom 
 **On appear:** if editing an existing theme by name, load it into the live draft. Otherwise reset to a
 new draft named `"Custom"` extending the **currently active base theme's key**.
 **On disappear:** always reset the draft to a fresh `{ name: "Custom", extends: baseTheme.key }` — so
-leaving the screen (back, or after saving) clears any unsaved edits from the live preview.
+leaving the screen (back, or after saving) clears any unsaved edits from the live preview. **The reset
+does not undo a save.** Step 4 of the save flow below has already written the theme to
+`custom_themes` and made it active, and the active theme is resolved from that table, never from the
+draft — so the just-saved theme survives the reset and stays applied, while anything edited after the
+save is discarded.
 
 **Draft model:**
 ```
@@ -1211,7 +1378,7 @@ The theme key and the comment depth colours **cannot** be customized. (The origi
    never the live draft.
 7. **Save Theme** button.
 
-**The 19 color fields, by group, with exact labels and descriptions:**
+**The 20 color fields, by group, with exact labels and descriptions** (3 + 3 + 3 + 2 + 9):
 
 *Text Hierarchy*
 
@@ -1278,6 +1445,11 @@ keyboard is visible so it cannot block the hex field.
   forms. The original handled only 6 digits and silently returned black for everything else; that
   produced invisible-black themes from perfectly valid input.
 - `rgbToHex` produces uppercase `#RRGGBB`.
+- **Only the 6-digit form round-trips through the sliders.** A `#RGB` or `#RRGGBBAA` value entered by
+  hand in the hex field is accepted and **stored verbatim**, but the R/G/B sliders read it as black
+  until it is re-entered in 6-digit form, and moving a slider re-encodes the value as `#RRGGBB`
+  (dropping any alpha). This is a deliberate limitation of a three-slider picker, not a bug; the
+  validator accepts all three widths so a pasted value is never rejected.
 - `validateHex` is **properly anchored**: `^#(?:[0-9A-F]{3}|[0-9A-F]{6}|[0-9A-F]{8})$`,
   case-insensitive, whole-string. The original's alternation was unparenthesized, so `^#` bound only
   to the first branch and `$` only to the last, and any bare 6- or 8-hex run inside a longer string
@@ -1293,16 +1465,35 @@ sentinel and surrounded by newlines:
 \n::appname-theme::<base64url(JSON of CustomTheme)>\n
 ```
 
-- The payload is exactly the encoded `CustomTheme` — `name`, `extends`, plus whichever of the 19
+- The payload is exactly the encoded `CustomTheme` — `name`, `extends`, plus whichever of the 20
   optional colour fields the user set — then base64url-encoded, so no brace, quote or newline ever
   reaches the markdown.
-- **`APPNAME` neither emits nor imports the original's `::hydra-theme-import::{…}` format.** Staying
-  wire-compatible would mean adopting a format defined by an AGPL project and interoperating with its
-  community, which the clean-room rule forbids (`[DECISION: theme-import-format-compat]`).
+- **`APPNAME` emits only its own sentinel.** Nothing the app writes — a shared theme, a draft, an
+  exported payload — ever contains `::hydra-theme-import::`, and there is no dual-emit toggle and no
+  "also share in the legacy format" setting.
+- **Import accepts both sentinels (the migration bridge).** On the **read** side the scanner
+  recognises `::appname-theme::<base64url>` **and** the legacy `::hydra-theme-import::{…}` form —
+  sentinel followed by a **brace-balanced** JSON object — and decodes both through the same
+  `CustomTheme` decoder into the same import card. This is what lets the owner export their favourite
+  themes from the app they are replacing, using that app's own share feature, and import them here
+  (`02-architecture.md` §8.5a, `[DECISION: theme-import-format-compat]`). Import-only recognition of a
+  data format is not code reuse: no third-party name reaches any `APPNAME` screen, any `APPNAME`
+  output or any stored theme — an imported legacy theme is indistinguishable from a native one the
+  moment it lands in `custom_themes`, and re-sharing it emits the `::appname-theme::` form.
+  Brace-balanced scanning runs **only** for the legacy alternation; `APPNAME`'s own payload is
+  base64url and needs none.
 - Detection scans for the sentinel and decodes the base64url run that follows it up to the next
   whitespace. Because the payload is encoded, the original's single-level-braces limitation does not
   exist: nested objects and braces inside string values are fine. A payload that fails to decode, or
   decodes to something that is not a `CustomTheme`, is treated as malformed (below).
+
+**Where attaching is offered.** The composer's paintbrush button is **not** shown on every composer.
+It appears only when the target subreddit is one of `APPNAME`'s own theme-sharing communities, held
+in a single constant `themeSharingSubreddits: Set<String>` (lowercased, matched case-insensitively
+against the target subreddit's name). The original hard-codes three of its own communities; those are
+**not** carried over, and the owner fills the set with theirs. **When the set is empty the button
+never appears** — which is the shipping default until the owner names a community — and
+`showCustomThemeOption` in `04a` §16.5.1 is exactly this predicate. Nothing else gates the button.
 
 **Attaching.** From the composer's paintbrush button (`04a` §16.5.1): pick one of the user's custom
 themes, confirm via
@@ -1442,10 +1633,22 @@ decimals; otherwise `"<miles>mi / <km>km"` with **1** decimal. `scrollKm = scrol
 | **Total Opens** | `app_foregrounds` | always |
 | **Upvote Ratio** | `positiveVotes / totalVotes × 100` | only when any votes exist |
 
-`daysSinceTrackingStarted` uses `max(installDate, trackingEpoch)` where the original hard-codes
-**2025-08-12** as the earliest date stats are considered to have been tracked, even for older installs.
-For a new app, set `trackingEpoch` to the rewrite's own first-release date.
+`daysSinceTrackingStarted` is
+`max(1, daysBetween(max(installDate, trackingEpoch), now))` — **the floor of 1 is mandatory**: on
+install day the elapsed span is 0 and every "per day" figure would divide by zero. With the floor,
+Opens per Day on day one is simply the raw foreground count. `trackingEpoch` is the earliest date
+stats are considered to have been tracked; the original hard-codes **2025-08-12**, a date from its own
+release history, so for a new app set it to **`APPNAME`'s own first-release date**.
 `[DECISION: stats-tracking-epoch]`
+
+**Two number formatters, deliberately not unified.** `prettyNum` (the K/M/B abbreviator, `04a` §5) is
+used for karma and subscriber counts and **nowhere on this screen**. Stats uses its own
+`statNum(_ value: Double, precision: Int, unit: String?) -> String`: the value rendered as a
+locale-grouped decimal with **exactly** `precision` fraction digits, optionally followed by a space
+and a correctly pluralised `unit` (`"1 banana"`, `"2.3 bananas"` — pluralise on the *rendered* value,
+so `1.0` is singular and `0` is plural). Every figure in the cards, usage rows and fun facts below
+goes through `statNum` with the precision stated in its own row. Keep the two functions separate;
+merging them changes the output of both.
 
 **4. "Your Favorite Communities"** — shown only when at least one subreddit has been visited. The
 **top 10** by visit count, descending; each row: rank `#N`, `r/<name>`, a proportional progress bar
@@ -1461,7 +1664,7 @@ each simply appears once its threshold is met:
 | **Positive Vibes** | upvote ratio `>= 80` **and** total votes `>= 10` |
 | **Content Creator** | `posts_created >= 10` |
 | **Commentary Master** | `comments_created >= 10` |
-| **Explorer** | unique subreddits visited `>= 10` |
+| **Explorer** | unique subreddits visited `>= 10` — that is `COUNT(*)` over `subreddit_visits`, the number of **rows**, **not** `SUM(count)` |
 | **Knowledge Seeker** | `posts_viewed >= 100` |
 
 **6. "Fun Facts"** — a dynamically built list of emoji-prefixed sentences, each included only when its
@@ -1537,7 +1740,7 @@ scroll-hitch metric type is gone; use the new hitch-time metric or the app crash
 
 | Row | Label | Behavior |
 |---|---|---|
-| **Clear Image Cache (N MB)** | live on-disk size, recomputed whenever this screen regains focus | Clears **immediately**, presents `.alert("Cache Cleared", "The image cache has been cleared.")`, and zeroes the displayed size right away |
+| **Clear Image Cache (N MB)** | live on-disk size, recomputed whenever this screen regains focus | Clears **immediately**, presents `.alert("Cache Cleared", "The image cache has been cleared.")`, and zeroes the displayed size right away. **Independently of this button**, an OS memory-pressure warning clears the **in-memory** image cache; the disk cache and therefore this readout are untouched by it, so the number does not move when the system reclaims memory (`04b` §12.1) |
 | **Clear Video Cache (N MB)** | live native cache size | **Deferred.** Sets the persisted `media.videoCacheClearRequested` flag and presents `.alert("The video cache will be cleared next time you restart APPNAME.")`. The actual clear runs at the next cold start, before anything that could mount a player, and resets the flag regardless of outcome. |
 
 Caps and per-source cacheability rules: `04b` §12.
@@ -1545,7 +1748,7 @@ Caps and per-source cacheability rules: `04b` §12.
 **Section "Self Hosted Server" — not built.**
 
 The original exposes a "Use Custom Server" toggle plus a URL field validated against a health endpoint,
-used only by the in-app documentation search's embedding and question endpoints. Guide search is
+used only by the in-app documentation search's embedding and question endpoints. Help search is
 rebuilt fully on-device (§21.3), the backend is the original project's infrastructure, and the setting
 carries a known bug (the URL is persisted and used even when the toggle is off). **The section, its
 two keys (`useHydraServer`, `customHydraServerUrl`) and the `/api/status` health check do not exist in
@@ -1553,7 +1756,7 @@ two keys (`useHydraServer`, `customHydraServerUrl`) and the `/api/status` health
 
 **Also not present:** a "Customer ID" row. The original's docs describe one; the code has none.
 
-### 21. Guide, About, startup modals
+### 21. Help, About, startup modals
 
 #### 21.1 Startup modals
 
@@ -1563,7 +1766,7 @@ shown — never two in one session.
 
 | Priority | Id | Condition | Behavior |
 |---|---|---|---|
-| 1 | `updateInfo` | The stored `lastSeenUpdate` value differs from this build's hard-coded update key | A "What's new" sheet listing the current release's feature entries (title + description pairs). On dismiss, store the current key so it does not reappear until the next release. Also presented on demand from Settings → **Patch Notes**. |
+| 1 | `updateInfo` | The stored `lastSeenUpdate` value differs from this build's hard-coded update key | A "What's new" sheet listing the current release's feature entries (title + description pairs). On dismiss, store the current key so it does not reappear until the next release. Also presented on demand from Settings → **What's New** (§15 row 12). |
 | 2 | `promptForReview` | `app_launches > 30` **and** `storeReviewRequested` is not yet true | The review prompt (below) |
 
 **Review prompt.** A centered card containing: the app icon, 5 gold stars, the headline
@@ -1590,12 +1793,16 @@ targets its own subreddit, which is also a clean-room concern. The per-account t
 #### 21.2 About / version
 
 There is **no dedicated About screen.** Version and build are the footer text on the Settings root
-(§15). The closest thing to a changelog is the **Patch Notes** row, which presents the same update
-modal that auto-appears once per release.
+(§15). The closest thing to a changelog is the **What's New** row (§15 row 12), which presents the
+same update modal that auto-appears once per release.
 
-#### 21.3 Guide (in-app documentation browser)
+#### 21.3 Help (in-app documentation browser)
 
-**All Guide prose must be written from scratch.** The original's ~40 documentation articles are its own
+Reached from Settings root row 1 and from `SettingsRoute.help(HelpQuery)`. The screen is called
+**Help** everywhere in the UI; "Guide" survives only in the decision ids and in the internal
+`guide.sqlite` / `guide_fts` names.
+
+**All Help prose must be written from scratch.** The original's ~40 documentation articles are its own
 copyrighted text and additionally describe features that no longer exist (a paid tier, AI summaries, AI
 filters, push notifications). Reuse **none** of it. `[DECISION: guide-prose-rewrite]`
 
@@ -1614,7 +1821,8 @@ to the index.
 
 **Categories index** — a list titled **"Categories"**, each row showing a name and a description. The
 original ships 11 categories over ~40 articles; the rewrite ships a **much smaller, hand-written help
-section of 10–14 short topics** covering only the feature surface that actually exists
+section of 10–14 short articles** grouped under the categories below, covering only the feature
+surface that actually exists
 (`[DECISION: guide-included-or-not]`). Category structure (new prose required for every entry):
 
 | Category | Covers |
@@ -1636,14 +1844,21 @@ rendered whenever an unresolved article key is requested.
 
 **Article view.** Render the article's markdown through the same Reddit-flavored markdown pipeline used
 for post and comment bodies (`02-architecture.md` §9). Internal `appname://…` deep links written as
-markdown links resolve through `RedditLink` / `RouteResolver` like any other link. Guide pages are the
+markdown links resolve through `RedditLink` / `RouteResolver` like any other link.
+
+**One rewrite path, two callers.** The markdown compiler does not treat `appname://` as a link
+protocol, so in-article `appname://…` markdown links must be rewritten into real anchors **before**
+rendering. The **same** rewrite serves Help deep links opened *from a settings row* (`06` item 318):
+a settings row that offers "Learn more" resolves to `SettingsRoute.help(.article(key))` through the
+identical code path an in-article link takes, so there is exactly one place that knows how an
+`appname://` help link becomes a route. Help pages are the
 one place where **inline text selection is enabled** (`.textSelection(.enabled)`), because there is no
 tap-to-collapse gesture to lose it to (`02-architecture.md` §9.5).
 
 **Search — fully on-device, lexical (SQLite FTS5 + BM25).**
 
 There is **no embedding model, no vector index, no cosine similarity and no network call** anywhere in
-Guide search. The original computed cosine similarity against a baked-in vector matrix but fetched the
+Help search. The original computed cosine similarity against a baked-in vector matrix but fetched the
 *query's* embedding from its own backend, so its "offline search" never actually worked offline; with
 the backend dropped (§20.4) the embedding approach has no query side left. `APPNAME` replaces it with
 a plain lexical index, which is entirely offline, needs no model, and is more than good enough for a
@@ -1664,8 +1879,8 @@ the top 3 matched articles to a hosted model and rendered a markdown answer abov
 backend and no AI features in v1 (`[DECISION: ai-removed]`), the search view renders **only** the
 result list. `[DECISION: guide-ai-answer-drop]`
 
-
-The Settings-root search bar is simply a shortcut into this same search state.
+The Settings-root search bar (§15) filters settings rows locally first and falls through to **this**
+search state on submit when nothing matches.
 
 ---
 
@@ -1720,6 +1935,10 @@ the user created them explicitly, the other two because they are meant to be per
 3. **Once the database is ready** (independently of the splash): increment `app_launches` **and**
    `app_foregrounds` by 1 each, schedule DB maintenance after the first interaction, and register a
    scene-phase observer that increments `app_foregrounds` again on every transition to active.
+   **If a counter event fires before the database is open** — a foreground transition during a slow
+   migration, say — the increment is **deferred until it is, never dropped and never double-counted**:
+   buffer the pending deltas in memory and flush them as a single atomic upsert per key once the
+   database opens. The invariant `app_foregrounds >= app_launches` must survive that path too.
 4. **Once the session is restored:** dismiss the splash, evaluate the startup-modal queue (§21.1), and
    select the initial tab from `initialTab`, overridden by a valid `startupURL`.
 5. **No network call happens before the UI renders.** The entire cold path is local.
@@ -1875,14 +2094,14 @@ launch, and it **must** ship a launch screen or be rejected.
 
 | Source (in `docs/swift-rewrite/spec/`) | Section | Covered here |
 |---|---|---|
-| `01-navigation-shell.md` §3.2 (tab long-press), §3.3 (initial tab), §4.3 (inbox header button), §6 (incoming URLs), §11 (settings routing), §12.2–12.3 (startup modals, community nudge), §17 (error page), §18 (external links), §19 (web views), §21 (app icons) | accounts entry points, settings routing, URL handling, web views, modals | §1, §13, §14, §16.7, §11, §19, §21.1 |
-| `02-api-contract.md` §2.5 (R4–R7), §2.6 (Q1), §2.7 (I1–I6), §2.8 (U1–U3), §2.10 (the `/prefs` rewrite — **dropped**, §3.4), §2.13 (server endpoints — **dropped**, §20.4) | endpoints used here; the endpoint ids are `03-data-and-networking.md` §5.2's | §2, §4, §5, §6, §7, §8, §3.4, §20.4 |
-| `02-api-contract.md` §3.1–3.7 (login web view, procedure, token, cookies, multi-account, expiry) | the whole login model | §2 |
-| `06-settings-themes.md` §1 (routing + root), §2.1–2.7 (General subtree), §3.1–3.6 (theme, palettes, maker, picker, sharing), §4.1–4.3 (appearance), §5 (app icon), §7 (data use), §8 (stats), §9 (privacy), §10 (advanced), §11 (persistence), §12 (guide), §13 (notifications), §14 (Pro), §15 (about) | the whole settings tree | §14–§22 |
-| `07-accounts-inbox-search-subs.md` §1 (accounts, login, pulse, multi-account, quick swap, session storage, settings normalization), §2 (inbox), §3 (messages), §4 (user page), §5 (search, in-subreddit, quick search), §6 (sort/context vocabulary), §7 (subreddits hub), §8 (sidebar), §9 (wiki), §10 (multireddits) | Parts I–III | §1–§10 |
-| `08-feature-inventory.md` E, F, G, H, L, Q, T, U, V, W | acceptance checklist | throughout |
-| `09-persistence-pro-utils.md` §1 (GRDB tables + maintenance), §2.1–2.2 (key store, Keychain cookies), §3 (server/AI), §4 (inbox polling), §5.3 (inbound sharing), §7.3 (color helpers), §8 (UI primitives), §11 (startup sequence) | persistence, startup, primitives | §22, §2.5, §4.1, §13, §18.4, §1.4 |
-| `10-swiftui-2026-baseline.md` A1 (scene lifecycle, launch screen), A2 (Liquid Glass + alternate icons via Icon Composer), A3 (`WebPage`/`WebView`, tabs, `canOpenURL` deprecation, MetricKit rewrite, GRDB, on-device models, Accelerate-friendly math) | API choices throughout | §2.1, §11, §12, §18.2, §19, §20.3, §21.3, §22.3 |
+| `spec/01-navigation-shell.md` §3.2 (tab long-press), §3.3 (initial tab), §4.3 (inbox header button), §6 (incoming URLs), §11 (settings routing), §12.2–12.3 (startup modals, community nudge), §17 (error page), §18 (external links), §19 (web views), §21 (app icons) | accounts entry points, settings routing, URL handling, web views, modals | §1, §13, §14, §16.7, §11, §19, §21.1 |
+| `spec/02-api-contract.md` §2.5 (R4–R7), §2.6 (Q1), §2.7 (I1–I6), §2.8 (U1–U3), §2.10 (the `/prefs` rewrite — **dropped**, §3.4), §2.13 (server endpoints — **dropped**, §20.4) | endpoints used here; the endpoint ids are `03-data-and-networking.md` §5.2's | §2, §4, §5, §6, §7, §8, §3.4, §20.4 |
+| `spec/02-api-contract.md` §3.1–3.7 (login web view, procedure, token, cookies, multi-account, expiry) | the whole login model | §2 |
+| `spec/06-settings-themes.md` §1 (routing + root), §2.1–2.7 (General subtree), §3.1–3.6 (theme, palettes, maker, picker, sharing), §4.1–4.3 (appearance), §5 (app icon), §7 (data use), §8 (stats), §9 (privacy), §10 (advanced), §11 (persistence), §12 (guide), §13 (notifications), §14 (Pro), §15 (about) | the whole settings tree | §14–§22 |
+| `spec/07-accounts-inbox-search-subs.md` §1 (accounts, login, pulse, multi-account, quick swap, session storage, settings normalization), §2 (inbox), §3 (messages), §4 (user page), §5 (search, in-subreddit, quick search), §6 (sort/context vocabulary), §7 (subreddits hub), §8 (sidebar), §9 (wiki), §10 (multireddits) | Parts I–III | §1–§10 |
+| `spec/08-feature-inventory.md` E, F, G, H, L, Q, T, U, V, W | acceptance checklist | throughout |
+| `spec/09-persistence-pro-utils.md` §1 (GRDB tables + maintenance), §2.1–2.2 (key store, Keychain cookies), §3 (server/AI), §4 (inbox polling), §5.3 (inbound sharing), §7.3 (color helpers), §8 (UI primitives), §11 (startup sequence) | persistence, startup, primitives | §22, §2.5, §4.1, §13, §18.4, §1.4 |
+| `spec/10-swiftui-2026-baseline.md` A1 (scene lifecycle, launch screen), A2 (Liquid Glass + alternate icons via Icon Composer), A3 (`WebPage`/`WebView`, tabs, `canOpenURL` deprecation, MetricKit rewrite, GRDB, on-device models, Accelerate-friendly math) | API choices throughout | §2.1, §11, §12, §18.2, §19, §20.3, §21.3, §22.3 |
 
 ### 24.2 Decision tags used in this document
 

@@ -503,6 +503,52 @@ therefore never converts.
    **re-executed automatically** (the presenter stores a `pendingAction` closure). Making the user
    tap again after paying is the worst possible first impression.
 
+### 5.11 What a gated affordance looks like (normative)
+
+§5.9 says which *style* a gate uses; this section says what the user actually sees. It is normative
+for every `[GATE: gate.*]` tag in `04a`, `04b` and `04c`, and it is what `06` item 311 checks.
+
+**The badge.** A gated control keeps its label, its glyph and its current value, and gains a trailing
+**`PlusBadge`**: a small capsule reading `Plus`, in `theme.iconOrTextButton` on a
+`theme.tint` fill, `.caption2` weight semibold, 6 pt horizontal / 2 pt vertical padding, fully
+rounded, aligned to the row's trailing edge before any chevron. One badge per row, never one per
+sub-control: a screen whose every row is gated (Gestures, Sorting) badges each row, not the screen
+title.
+
+**The five rules.**
+
+1. **Disabled-looking, but tappable.** The control's content renders at `0.55` opacity so it reads as
+   unavailable, and its own action is swallowed — but the whole row stays hit-testable and the tap
+   presents the paywall sheet, contextualised by that `Feature` (§5.10 rule 3). A control that
+   swallows the tap and does nothing is a bug.
+2. **Never hidden, never removed.** A gate never removes a row, never hides a menu item, never hides
+   a navigation entry and never collapses a section. `GateStyle` has no `.hidden` case for exactly
+   this reason (`02-architecture.md` §13.3). The one thing a gate may replace is a whole *screen
+   body*, via `.lockScreen`, and that replacement must describe what is inside (Stats, the Theme
+   Maker).
+3. **Current values stay visible and keep working.** A locked Gestures screen shows the real swipe
+   assignments and those assignments still fire on a row swipe; a locked Filters screen shows the
+   real filter list and that data is preserved, merely not applied (§3.3). Locking changes what the
+   user can *change*, not what they can *see*.
+4. **Composed flows gate at the action button, not at the entry point.** Where reaching a gated
+   capability takes several steps — adding a second account, importing a shared theme, setting an
+   alternate icon — every step up to and including the last screen renders normally, and the gate
+   sits on the **final committing control**: the Accounts "+" (when `accounts.count >= 1`), the
+   theme card's **Import** / **Import & Apply** buttons, the icon grid's selection tap. The user
+   never gets halfway and finds the road closed behind them, and §5.10 rule 4's "never block content
+   the user has already entered" is the same rule seen from the other side.
+5. **Menu items and swipe actions follow the same contract.** A gated `.contextMenu` row keeps its
+   label and gains `Plus` as a trailing `Text` in the menu item; a gated swipe action still reveals
+   its icon and colour and presents the paywall on release. Nothing silently disappears from a menu.
+
+**Accessibility.** A badged control appends `", Plus feature"` to its VoiceOver label and keeps its
+normal trait (button, toggle, …) — it is **not** given the `notEnabled` trait, because it is tappable
+and the tap does something useful.
+
+**During the unknown window.** Between launch and the first completed entitlement refresh the badge
+and the lock chrome are **not drawn at all** (§5.7); the control renders as if unlocked. A badge that
+appears a second after the screen does is worse than one that appears with it.
+
 ---
 
 ## 6. Paywall and Plus settings UI
@@ -562,7 +608,9 @@ does not improvise:
 
 ### 6.4 Settings → APPNAME Plus screen
 
-A row in the Settings root, below Appearance, above App Icon, labelled **APPNAME Plus**.
+A row in the Settings root, labelled **APPNAME Plus** — row **7 of 13**, directly below **Account**
+and above **Data Use**, exactly as `04c` §15 lists it. It is always visible and always free to open
+(§4.1); it is not a gate.
 
 **When not subscribed:** a compact version of the paywall's feature list, the plan picker, the CTA,
 Restore Purchases, and the legal links.

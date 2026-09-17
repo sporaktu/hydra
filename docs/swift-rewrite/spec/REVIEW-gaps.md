@@ -239,3 +239,236 @@ The **highest-risk single item** is D1/D2: shipping twelve palettes copied from 
 three of them named after live third-party trademarks, is both the clean-room violation with the
 clearest legal edge and the one that is cheapest to fix now and most expensive to fix after the
 theme system is built against those exact tokens.
+
+---
+
+## Fix pass disposition
+
+**Editor:** fix pass, 2026-09-17, run after `REVIEW-consistency.md`. Every row of sections A–D
+above was re-verified against the **current** text of `00`, `02`–`08` before being actioned, because
+the consistency pass had already resolved part of this audit and had renumbered or rewritten some of
+the sections the proposed insertions named. Proposed text was adapted to the current section numbers,
+to the canonical gate ids (`05` §4) and decision ids (`08` §1–§3), and to the clean-room rule — no
+proposal was pasted verbatim where it would have carried the original app's names, palettes or
+communities across.
+
+**Totals: 87 applied · 45 already resolved by the consistency pass · 1 rejected.**
+(133 findings: A = 62 / 9 / 1, B = 8 / 16 / 0, C = 15 / 17 / 0, D = 2 / 3 / 0.)
+
+### A. Missing behaviors
+
+| # | Verdict | What was done |
+|---|---|---|
+| A1 | applied | `04c` §11.3 written: `Route.unsupported(URL?)`, 48 pt bug glyph, the body copy from `spec/01` §17 with the product name substituted, the conditional underlined tappable raw URL handed to the external-link opener, the no-URL case, the static "Error" title. **Blocker closed.** |
+| A2 | applied | `04c` §18.5 "Where attaching is offered": the paintbrush appears only for subreddits in a single `themeSharingSubreddits: Set<String>`; empty set = never shown (the shipping default). The original's three community names are **not** carried over. `04a` §16.5.1's `showCustomThemeOption` re-pointed at it; `07` §A gains item 13b. |
+| A3 | applied | `06` §1.3 gained a normative Info.plist/entitlement table. **Blocker closed.** |
+| A4 | applied | Same table. **Blocker closed.** |
+| A5 | applied | Same table, with `CFBundleURLName` + `CFBundleURLSchemes = ["appname"]`. **Blocker closed.** |
+| A6 | applied | Same table, on **both** targets, plus `ShareExtension.entitlements` added to `06` §1.2's tree and a paragraph under it. **Blocker closed.** |
+| A7 | already resolved | `04b` §3.4, §7.4 and the §9.3 exposure table already carry `[GATE: gate.downloads]`. |
+| A8 | already resolved | `04c` §16.1 already carries `[GATE: gate.gestures]`. |
+| A9 | already resolved | `04c` §16.2 already carries `[GATE: gate.sortMemory]`. |
+| A10 | applied | `04b` §7.3 gained `[GATE: gate.videoAutoplay]` covering both FABs and their mirrored Appearance rows; §16.3's gate table updated. This was the last of the eleven gates with no tag in `04b`/`04c`. |
+| A11 | already resolved | `04c` §19 already carries `[GATE: gate.appIcons]`. |
+| A12 | already resolved | `04a` §16.5 already carries `[GATE: gate.compose]`. |
+| A13 | applied | New normative section **`05` §5.11** "What a gated affordance looks like": the `PlusBadge` capsule spec, five rules (disabled-looking but tappable; never hidden; current values stay visible and keep working; composed flows gate at the final committing control; menus and swipe actions follow the same contract), the VoiceOver rule and the unknown-window rule. Pointers added from `02` §13.3, `04c` §14 and `06` item 311. |
+| A14 | applied | `04c` §15 rewritten: the bar is "Search settings", typing filters rows in place against labels + destination section titles, matches render flat with the parent screen as subtitle, submit falls through to Help search, no "ask a question" box. `06` item 275 rewritten to match (inventory item 275 asks for both halves). |
+| A15 | applied | `04a` §11 "Partial-failure rule": a multireddit fetch failure renders the hub without that section and never blanks the others or raises an access-failure screen. |
+| A16 | applied | `04c` §20.2: `statNum(_:precision:unit:)` specified alongside `prettyNum`, with the pluralise-on-rendered-value rule and an explicit "keep them separate". |
+| A17 | applied | `02` §5.4 "Content insets under the bar": the beneath-the-bar and above-the-bar allow-lists, plus the rule that a non-scrolling screen belongs above. |
+| A18 | applied | `04a` §3.1: the feed is frozen, not torn down — stores, cursors and flags retained, only video focus released, no re-fetch on return, cross-screen mutations arrive via `FeedMutationBus`. |
+| A19 | applied | `04a` §7.1 Bands: an **unset** long slot falls back to the same direction's short action; `Disabled` is explicit and never falls back. |
+| A20 | applied | `04c` §18.4: only the 6-digit form round-trips through the sliders; 3- and 8-digit values are stored verbatim and read as black until re-entered. |
+| A21 | applied | `04c` §14: `.confirmationDialog` / `.contextMenu` / `.alert` use the **system scrim** only; no custom dimming layer. |
+| A22 | applied | `04b` §2.2 (one page ahead/behind vertically, nothing horizontally) and §10.3 (two viewport heights of grid cells). |
+| A23 | applied | `03` §1.2: `isOK` is `(200..<300)`; `CancellationError` is never surfaced; `.timedOut` and `.offline` are never collapsed. |
+| A24 | already resolved | `04a` §4.11 already says the card renders `post.timeSince` verbatim and appends nothing. |
+| A25 | applied | `04a` §14.2: base body leading padding stated as **15 pt**, overridden to 10 by `displayInList`. |
+| A26 | applied | `04a` §14.1 "Performance contract": 2 000 nodes flatten <100 ms, first screen <1 s, memory independent of thread size, collapse is an array splice — a Phase 3 gate measurement. |
+| A27 | applied | `04c` §16.2: the clear action removes every entry under the matching key prefix (both post keys), zeroes the count in place, no refetch, **no confirmation**. |
+| A28 | applied | `04a` §11 Trending bullet: the same two exclusions as the Search tab — already-subscribed subreddits and any subreddit literally named `"Home"`. |
+| A29 | already resolved | `04a` §11 already states favourites render in stored insertion order and Subscriber in the data layer's locale-aware order. |
+| A30 | applied | `04a` §9: the focus key is `VideoSource.key` = (pre-resolution playback URL, gallery index), identical to the registry and resume-position keys; never the post id. |
+| A31 | applied | `04a` §9: only `videos[0]` supplies the focus key and poster; the rest never play inline. |
+| A32 | applied | `04a` §2.1 step 1: an access failure short-circuits and is **not** reported; any other throw sets `loadFailed`, clears the spinner and is captured with the route as context. |
+| A33 | applied | `04a` §7.3: one trie serves both the post and the comment haystack; there is no separate comment filter list. |
+| A34 | applied | `03` §7.3: if the seen write throws, the change event is **not** published. |
+| A35 | already resolved | `04b` §6.5 already carries the starvation rationale on the cooldown row. |
+| A36 | applied | `04b` §3.1: the feed strip, the gallery grid and the viewer must share **one** `ImagePipeline` instance and cache — the placeholder guarantee depends on it. |
+| A37 | applied | `04b` §1.2 carve-out: animated GIF *images* animate unconditionally **except** in the Gallery Mode grid, where they render as a still first frame and resume in the viewer. |
+| A38 | applied | `04a` §4.5 footnote: the effective data mode is `.lowData` until the first `NWPathMonitor` update, so the first paint may show one image. |
+| A39 | applied | `04c` §15: footer is centred, non-interactive, `theme.verySubtleText`, 12 pt, 16 pt above the list edge — and two lines, not three. |
+| A40 | applied | `04c` §16.3: the override rows are informational only — not tappable, no swipe action, not removable here. |
+| A41 | applied | `04c` §18.1: deleting a non-active theme changes nothing else — no re-resolution, no repaint, selection untouched. |
+| A42 | applied | `04c` §18.3: the reset-on-disappear does not undo the save; the active theme resolves from `custom_themes`, never from the draft. |
+| A43 | applied | `04c` §20.2: `daysSinceTrackingStarted = max(1, …)`, with the install-day consequence spelled out. **Divide-by-zero closed.** |
+| A44 | applied | `04c` §20.2: Explorer counts `COUNT(*)` over `subreddit_visits`, not `SUM(count)`. |
+| A45 | applied | `04c` §20.4: an OS memory-pressure warning clears the **in-memory** cache independently of the button; the disk cache and the readout are untouched. |
+| A46 | applied | `04c` §21.3: one rewrite path serves in-article `appname://` links **and** Help deep links opened from a settings row; `06` item 318 re-pointed at it. |
+| A47 | applied | `04c` §1.2: selecting `"Logged Out"` logs out but leaves every account in the list and in the Keychain. |
+| A48 | applied | `04c` §4.3: inbox swipe actions are **fixed** and unaffected by the swipe settings, so `gate.gestures` never applies there. |
+| A49 | applied | `04c` §5: after a successful send the thread **refetches** (I3) via the parent reload callback, then auto-scrolls; nothing is inserted optimistically. |
+| A50 | applied | `04c` §6.4: in the split state the header renders normally and only the **content area** is replaced by the access-failure view; the screen is never blanked. |
+| A51 | applied | `04c` §8: an empty rules list does not suppress item 3 — the description still renders beneath the empty header. |
+| A52 | applied | `04a` §3.3: a legitimately-empty multireddit renders as a normal empty feed with header, switcher title, sort control and "…" menu, and never reaches `AccessFailureView`. |
+| A53 | applied | `04c` §13: intake runs only after the tab router exists and `loginInitialized` is true; earlier URLs are **queued, never dropped**, and flushed in order. |
+| A54 | applied | `04c` §13: the clipboard guard is held from presenting the alert until the user answers it, then released; a foreground while it is up is a no-op. |
+| A55 | applied | `04a` §2.2: after Cancel the store sets `fullyLoaded` and re-issues nothing on the next `onAppear`; only pull-to-refresh re-presents the interstitial. |
+| A56 | rejected | **Rejected: moot.** The global-vs-per-account throttle it describes belongs to the `/prefs` normalisation, which `08` #26 drops entirely — there is no timestamp, no throttle key and no `A1`/`A2` endpoint left for the consequence to apply to. `04c` §3.4 already states the replacement banner is one-time **per account**. |
+| A57 | applied | `04a` §2.1 step 2b: the cursor advances on **every** attempt, including one whose items are all filtered out, with the "same page five times" failure mode named. |
+| A58 | applied | `04b` §1.1 rule 3 amended: an entry is dropped when it lacks a `p` array **or** `s.mp4` (`03` §4.4 already had both). |
+| A59 | applied | `03` §4.16 gained a closing paragraph naming the two helpers it does not own — Stats' `statNum` (`04c` §20.2) and the composer pipeline (`04a` §18.2) — adapted, because the one-pipeline decision deleted the `>\s+<` collapse the audit's text assumed. |
+| A60 | applied | `03` §6.4: a refresh re-uses cached OpenGraph data for any post id already present; only genuinely new posts issue a request. |
+| A61 | already resolved | `04b` §9.2 already orders the failure row "dismiss the preparing modal, then alert". |
+| A62 | applied | `03` §7.6: the video-cache flag is cleared after the attempt **whether or not it succeeded**, so a failing clear cannot wedge every launch. |
+| A63 | applied | `04c` §14: a conditional row is **removed**, never disabled, with separators computed from the rendered collection; the one exception is a gated row, which stays badged. |
+| A64 | applied | `04c` §7.2 and §7.1: `clearOnSearch` and `searchOnBlur` named as flags on one shared `DesignSystem.SearchBar`. |
+| A65 | applied | `04c` §22.3 step 3: counter increments that fire before the database is open are buffered and flushed as one atomic upsert per key — never dropped, never double-counted. |
+| A66 | applied | `04b` §10.3 and `04c` §7.1 both gained the zero-result rule (empty list, spinner cleared, no message). |
+| A67 | applied | `04a` §16.1 item 7: the copy spelled out — `.alert("This post has been \(status)")` with the raw `"locked"` / `"archived"` string, checked **before** the sheet opens. |
+| A68 | applied | `04c` §12: the unlock/re-lock pair is owned by `02` §5.11; this row only names the two surfaces that use it. |
+| A69 | applied | `04c` §16.4 footnote: the original's two sources disagree; `false` is authoritative and why. |
+| A70 | applied | `06` area C item **60** added (hold ~1 s → move mode, 10 snap points, release persists to `ui.scrollToNextButtonPosition`), which is exactly inventory item 60. |
+| A71 | applied | `03` §9.8 closing lines: the table is the exhaustive host set, any host not listed is a bug, and no owner-operated host appears in it by decision. |
+| A72 | applied | `04a` §7.2 item 7 strengthened: `Share` is the permalink, and there is **no** media share/save anywhere in a post's long-press menu — see `04b` §9.3. |
+
+### B. Contradictions between normative documents
+
+| # | Verdict | What was done |
+|---|---|---|
+| B1 | applied | **Applied and made concrete.** The palette tables were already deleted by the consistency pass; `04c` §18.2 is now a full contract — **12** built-in themes (matching the original catalogue's slot count), at least 4 light and at least 4 dark, all 20 roles × 4 renditions, both per-theme flags, the 6-colour depth cycle in new colours, **five naming rules** (no third-party brand/character names, nothing from the original's catalogue, nothing evoking the original's name, one-or-two-word descriptive names, unique case-insensitively) and the WCAG/opacity/colour-vision authoring constraints. The count change 6–8 → 12 was propagated to `02` §8.5, `06` Phase 7 + item 234, `07` §A 13a and the assumed-decisions block, and `08` #36. |
+| B2 | applied | **Applied.** `04a` §14.2 still carried the original's six hex values; replaced with "the six `theme.commentDepthColors` values defined in `04c` §18.2", new colours, no hex anywhere in the set. `04a` §21.2 gained the `theme-count` row. |
+| B3 | already resolved | Already resolved — `04b` §10.1, `05` §4/§5.9, `06` item 26 and `02` §10.6 all say 100 items with an inline "Continue with Plus" footer. |
+| B4 | already resolved | Already resolved — 6 concurrent in `04b` §11, `03` §9.4/§11.1, `06` Phase 4 and item 191. |
+| B5 | already resolved | Already resolved — `04a` §14.5 renders "Continue this thread →" and pushes the permalink. |
+| B6 | applied | **Applied (residue).** `04a` §16.5.3 and `04c` §5.1/§5.2 were already on `03` §7.5's formats, but `06` Phase 6 still listed `newCommentDraft-<parentId>`; rewritten to cite §7.5's six formats verbatim. No `newPostDraft` / `newMessageDraft` / `replyToMessageDraft` spelling survives anywhere. |
+| B7 | applied | **Applied (residue).** `03` §7.5 and `04a` §16.5.3 agree on "separate field per kind", but `03` §14.1's summary row still said "clear the composer body"; rewritten to match. |
+| B8 | already resolved | Already resolved — `dest=https://www.reddit.com/` in `03` §5.3 and `04c` §2.1. |
+| B9 | already resolved | Already resolved — `04c` §2.1 injects nothing. |
+| B10 | already resolved | Already resolved — `04c` §3.4 is the disclosed-banner replacement; `06` item 114c is CUT. |
+| B11 | already resolved | Already resolved — `""` in `03` §8.1 and `04c` §16.5. |
+| B12 | already resolved | Already resolved — `04c` §20.2 carries `[GATE: gate.stats]` with the honest locked screen. |
+| B13 | already resolved | Already resolved — `04c` §15 row 7 is "APPNAME Plus" and is marked not-a-gate. |
+| B14 | applied | **Applied.** `04c` §15 rows 1/12/13 renamed **Help** / **What's New** / **Feedback**; row 13 now opens an owner-configured `feedbackDestinationURL` through the external-link opener, with **no default and no third-party subreddit** (row hidden when unset). `SettingsRoute.guide(GuideQuery)` → `.help(HelpQuery)`; §21.3 retitled "Help"; §21.2 and §21.1 re-pointed. `06` items 307/308/309 rewritten to the same order and names; `07`'s assumed-decisions block states them. |
+| B15 | already resolved | Already resolved — `04c` §21.3 is FTS5 + BM25, `k = 5`, no vectors, no answer card, 10–14 articles; the heading rename came with B14. **Sub-proposal rejected:** recording the embedding approach as "a future option" would contradict `02` §11.7, `03` §9.6 and `07`'s guardrail, which forbid vectors outright. |
+| B16 | already resolved | Already resolved — `04a` §7.4 patches the feed via `FeedMutationBus`; `06` item 164 agrees. |
+| B17 | applied | **Applied.** `04a` §4.9 still specified the fake Vote button. Rewritten to `03` §4.13 / `08` #20: no Vote button, no selection state; per-option bars, counts and the user's own selection when Reddit supplies `vote_count`, otherwise inert option rows plus the total; one line reading "Voting on polls isn't supported." and an optional ends-in line. |
+| B18 | already resolved | Already resolved — no restart alert in `04a` §7.7 or `04c` §16.3. |
+| B19 | already resolved | Already resolved — `04c` §20.3 reads the toggle reactively, no alert. |
+| B20 | already resolved | Already resolved — `04a` §14.2/§18 state the `raw_json=1` consequence and no decoding step. |
+| B21 | already resolved | Already resolved, **and verified**: 47 keys sampled across `04a` §19, `04b` §13 and `04c` §§16–20 against `03` §8.1; every one resolves to §8.1 as either the canonical namespaced key or its "Legacy key" column, and every namespaced key used in `04*` prose exists in §8.1. No stragglers found. Draft-key formats likewise (see B6). |
+| B22 | applied | **Applied.** `04c` §4.3 and §5 rendered "the reply's HTML" / "the message HTML" against `03` §4.11, which models markdown only. Changed to the body **markdown** rendered by the shared renderer, citing `03` §4.11. |
+| B23 | applied | **Applied.** `searchOnBlur` (and `clearOnSearch`) named in both `04c` §7.1 and §7.2 as flags on one shared primitive. |
+| B24 | already resolved | Already resolved — `04b` §9.2 reads "Allow APPNAME …" with a Settings deep link and no parenthetical. |
+
+### C. Checklist pointer problems in `06` §4
+
+| # | Verdict | What was done |
+|---|---|---|
+| C1 | already resolved | Already resolved — `04a` §§7.3, 7.6, 7.7, 7.8 and `04c` §16.3 all carry `[GATE: gate.filters]`. |
+| C2 | already resolved | Already resolved (B18). |
+| C3 | already resolved | Already resolved (B3). |
+| C4 | already resolved | Already resolved for `04a` §9; the `04b` half closed by **A10**. |
+| C5 | already resolved | Already resolved — per-kind fields and per-kind draft keys are specified in `04a` §16.5.3 and `03` §7.5; `06` item 40 already cites §7.5. |
+| C6 | already resolved | Already resolved (B5). |
+| C7 | already resolved | Already resolved; the item number is now **64** after the area-C renumbering (C30). |
+| C8 | already resolved | Already resolved; the item number is now **66** after the renumbering. |
+| C9 | already resolved | Already resolved (A7). |
+| C10 | already resolved | Already resolved — item 114c is CUT and `04c` §3.4 / `03` §5.7 agree. |
+| C11 | applied | **Applied.** Item 152 re-pointed at `04a` §7.2 item 4 / §7.8 and keeps its gate. |
+| C12 | already resolved | Already resolved (B16). |
+| C13 | applied | **Applied.** Area J's heading and items 169/172/173 re-pointed at `04c` §6.1 and `04a` §3.4. |
+| C14 | applied | **Applied.** Item 187 re-pointed at `03` §12.4 with `04c` §16.4 named as the informational row. |
+| C15 | applied | **Applied.** Area L's heading and items 190–192 re-pointed at `04b` §11 and `03` §9.4; item 191 gained the 6-concurrent cap. |
+| C16 | applied | **Applied.** Item 194 and the area heading now name `02` §5.11 as the owner of orientation. |
+| C17 | applied | **Applied** via B1. |
+| C18 | already resolved | Already resolved — no `[GATE: premium-themes]` survives; `05` §4.1 records why built-in themes are not a gate. |
+| C19 | applied | **Applied** via B2 — `04c` §18.2 is structural and `04a` §14.2 no longer carries the original's values. |
+| C20 | applied | **Applied** via A14. |
+| C21 | already resolved | Already resolved (B12); items 288 and 297a agree with `04c` §20.2. |
+| C22 | already resolved | Already resolved (B19). |
+| C23 | already resolved | Already resolved (B11). |
+| C24 | applied | **Applied** via B14 — one order, in `04c` §15 and `06` item 307. |
+| C25 | applied | **Applied** via B14. |
+| C26 | applied | **Applied** via A13 — item 311 now points at `05` §5.11. |
+| C27 | already resolved | Already resolved — `04c` §19 carries `[GATE: gate.appIcons]`; item 316 is correctly specified. |
+| C28 | applied | **Applied** — `04c` §21.3 was already FTS5 (B15); item 318's "reachable by deep link" now has a spec (A46) and the pointer, and item 317 names the Help label. |
+| C29 | already resolved | Already resolved — **all eleven** gate ids are now tagged in `04a`/`04b`/`04c` (the last, `gate.videoAutoplay` in `04b`, closed by A10). Verified programmatically. |
+| C30 | applied | **Applied.** Area C renumbered so item *N* is inventory item *N*: 59 = the floating button, 60 = repositioning it, 61–73 = the inventory's 61–73, and the net-new continue-thread item becomes **73a**. `06` §4's preamble now states the 1:1 rule and the lettered-suffix convention for net-new items, so the "items 1–327" claim is true. No other document cites a `06` item number by position. |
+| C31 | applied | **Applied** — item 60 added (see A70). |
+| C32 | applied | **Applied.** `06` §3 gained step 5, the StoreKit-configuration matrix, named as a Phase 8 gate step. |
+
+### D. Product-decision violations
+
+| # | Verdict | What was done |
+|---|---|---|
+| D1 | applied | **Applied.** `04c` §18.2 was already palette-free; `04a` §14.2's copied depth rainbow was not, and is now gone (B2). No hex value from the original survives anywhere in `02`–`08`. |
+| D2 | applied | **Applied.** The three trademarked theme names went with the palettes; `04c` §18.2 now carries explicit naming rules, and `06` §5 R3's mitigation gained "no third-party brand or character name on a built-in theme, an app icon or any other shipped asset". |
+| D3 | already resolved | Already resolved — the login `dest` is Reddit's home page. |
+| D4 | already resolved | Already resolved — `04b` §9.2 and `04c` §20.2 use `APPNAME` in the quoted strings, with no substitution instruction left. |
+| D5 | already resolved | Already resolved — the row is "APPNAME Plus"; `05` §6.4's position statement was additionally corrected to match `04c` §15 row 7. |
+
+### Beyond the audit: defects found while verifying, and fixed
+
+These were not in sections A–D. They are contradictions or errors the re-verification turned up, and
+they are listed so the record of this pass is complete.
+
+| # | Defect | Fix |
+|---|---|---|
+| X1 | **Feed-card counts.** `04a` §4.11 and `03` §4.16 both said the feed card prints **raw** integers, against `08` #33 (`number-format-parity`, "abbreviate the feed card's vote/comment counts") and `06` item 163 | Both rewritten to abbreviate through `prettyNum`. `08` wins per its own §4 rule 1 |
+| X2 | **Refresh alerts.** `04a` §15.1 and `04c` §17.2 still popped `"Existing pages may need to be refreshed for this change to take effect."` on the two comment toggles, against `06` items 57 and 271 and `07`'s "no restart alerts" guardrail | Deleted from both; both settings are read reactively and every row on `04c` §17.2 is now silent |
+| X3 | **Colour-role count.** Every document said "19 colour roles", but `spec/06` §3.3's own palette table, `02` §8.1's token list and `04c` §18.3's `CustomTheme` struct all enumerate **twenty** (3 + 3 + 3 + 2 + 9) | Corrected to **20** in `02` §3.1/§8.1/§8.4/§8.5a, `04c` §18.2/§18.3/§18.5, `06` Phase 0 + item 243, `07` §A 13a and `08` #36, with a one-line note in `02` §8.1 and `04c` §18.2 recording that the survey's "19" is an off-by-one against its own table |
+| X4 | **Plus row position.** `05` §6.4 placed the Settings → APPNAME Plus row "below Appearance, above App Icon"; `04c` §15 has it at row 7, below Account | `05` §6.4 corrected to row 7 of 13, matching `04c` §15 and `06` item 307 |
+| X5 | **Background modes.** `02` §14.7 declared the `audio` background mode "so a future PiP is possible", while `08` #52 and `04b` §7.4 tear every player down on background | `02` §14.7 rewritten: **no `UIBackgroundModes` at all**, with the reasoning and what adding PiP would cost. `06` §1.3's "deliberately absent" table says the same |
+| X6 | **Unnamed third-party destinations.** `04c` §18.1's "Explore Community Themes" button and §15's feedback row pointed at unspecified subreddits | Both are now single owner-configured constants (`themeCommunityURL`, `feedbackDestinationURL`) opened through the external-link opener, with **no default**; an unset constant means the control is not rendered. `07` §A gained item **13b** so the owner is asked for them (with `themeSharingSubreddits`, A2) |
+| X7 | **Stale markdown test expectations.** `04a` §20.11 still asserted `orderedListNumbersIgnoreStartAttribute`, `anchorWrappingImageSuppressed` and `whitespaceTextNodesStripped`, all of which contradict §18.1's AST-based rendering table | Rewritten to assert the specified behaviour (honour `start`, render the wrapped image, no whitespace-stripping pass needed) |
+| X8 | **Ambiguous survey references.** The `04*` traceability tables cite survey files as `` `02` §4.1 ``, `` `05-media.md` §7.1 `` and so on, which reads as a reference to `02-architecture.md` / `05-monetization.md` | All 35 rows in the three "Source spec → this document" tables now carry the `spec/` prefix, which is what let check (b) below run clean |
+
+### Owner instructions carried through this pass
+
+Two of the fixes above change a value the register previously fixed, on the owner's instruction, and
+were propagated everywhere rather than left as a local edit:
+
+1. **Twelve built-in themes, not 6–8** (`08` #36 rewritten; `02` §8.5, `04c` §18.2, `06` Phase 7 +
+   item 234, `07` §A 13a and `07`'s assumed-decisions block all updated). The kickoff item that makes
+   authoring them a Phase 0 blocker is **kept**, and now says explicitly that the migration bridge
+   does not remove it.
+2. **The theme migration bridge** (`08` #35 rewritten; new `02` §8.5a; `04c` §18.2 and §18.5; `07`'s
+   kickoff and assumed-decisions blocks). `APPNAME` **emits** only `::appname-theme::<base64url>`; its
+   **importer** additionally accepts the legacy `::hydra-theme-import::{…}` sentinel through a
+   brace-balanced scan and the same `CustomTheme` decoder, so the owner can move their own saved
+   themes across with the old app's own share feature. Import-only recognition is not code reuse, and
+   the legacy string appears in exactly one place in the codebase — the import scanner's alternation —
+   and in no `APPNAME` screen, no `APPNAME` output and no stored theme.
+
+### Programmatic checks
+
+All five were scripted and all five are green on the final text of `00`, `02`–`08`.
+
+| # | Check | Result |
+|---|---|---|
+| a | Every `[GATE: …]` names one of the **11** canonical ids in `05` §4, and every `[DECISION: …]` names a numbered entry in `08` §1, a bug id in §2 or a drift row in §3 | **PASS.** 64 gate tags, **11/11** distinct ids used — every gate is now tagged somewhere, which `06` item 337 and the Phase 8 sweep require. 236 decision tags over 93 distinct ids, all resolving; `08` §1 holds exactly 95 numbered entries, 1–95, no gaps or duplicates. Metalinguistic mentions (`` `[GATE: gate.*]` ``, `` `[DECISION: <id>]` ``) are excluded by payload, not by backticks |
+| b | Every `§` cross-reference from one of `02`–`08` to another resolves to a heading that exists | **PASS, 391 references checked, 0 dangling.** The checker parses every numbered heading per file and matches `04a §12.3`-style references, accepting a parent reference such as `§9` when only `§9.1`–`§9.4` exist. 14 apparent failures were traceability rows citing *survey* files by bare number; those rows were disambiguated with a `spec/` prefix (X8) rather than suppressed in the checker |
+| c | Exactly one H1 per file, and no skipped heading levels | **PASS.** 10/10 files have exactly one H1; no `###` follows a `#`. The new `04c` §11.3 and `05` §5.11 sit at the right level for their parents |
+| d | No `TODO` / `TBD` / `FIXME` and no `…]` placeholder tags in normative text | **PASS.** The only surviving `TODO` strings are the lint rule that bans them (`06` §1.5), the guardrail that repeats it (`07`), and `PROGRESS.md`'s own status vocabulary — all of which are *about* the token. Zero `[GATE: x]` / `[GATE:]` / `[DECISION: …]`-style placeholders |
+| e | The original app's name never used as the **new** app's identity | **PASS.** 22 occurrences remain across the set, every one of them referring to the original app (`08` §2/§3 evidence rows, `05` §1.4's "do not use Pro", `07`'s "must not evoke Hydra"), to a legacy key name the settings table records as removed (`useHydraServer`, `lastAskedToSubscribeToHydraClient-<userId>`), to the legacy import sentinel `::hydra-theme-import::`, or to the legacy `hydra://` scheme in a drift row. No shipped string, no theme name, no destination and no identifier in `APPNAME`'s own surface carries it |
+
+Two further checks were run because this pass touched a lot of tables and numbering:
+
+| # | Check | Result |
+|---|---|---|
+| f | Every markdown table has a consistent column count (pipes inside code spans and `\|` escapes excluded) | **PASS**, 0 mismatches across all ten files |
+| g | `06` §4 area C maps 1:1 onto `spec/08` §1's inventory numbers | **PASS.** Items 55–74 now line up item-for-item; the two genuinely new behaviours carry lettered suffixes (`73a`) so no base number shifts, and `06` §4's preamble states the convention |
+
+### Known residual work (not defects — deliverables)
+
+Unchanged in kind from `REVIEW-consistency.md` §4, restated with this pass's numbers:
+
+- **The 12 built-in palettes still have to be authored** — `04c` §18.2 is now a complete contract
+  (count, split, 20 roles × 4 renditions, two flags, naming rules, WCAG constraints) but contains no
+  colours, and cannot, per `[DECISION: theme-count]`. `07` §A item 13a is the kickoff blocker.
+- **The Help corpus still has to be written** — 10–14 articles under `04c` §21.3's eleven categories
+  (`guide-prose-rewrite`).
+- **Three owner-configured constants have no value yet** — `feedbackDestinationURL`,
+  `themeCommunityURL`, `themeSharingSubreddits` (`07` §A item 13b). Each is specified to hide its own
+  control when unset, so the build is not blocked on them.

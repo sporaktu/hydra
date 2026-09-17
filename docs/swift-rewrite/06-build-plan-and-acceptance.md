@@ -37,13 +37,14 @@ appname-ios/
 │   ├── RootView.swift                # TabView + 5 tab roots
 │   ├── AppEnvironment.swift          # AppGraph composition root: wires stores into @Environment
 │   ├── Info.plist                    # UILaunchScreen (required), URL types, usage strings
-│   ├── APPNAME.entitlements
+│   ├── APPNAME.entitlements          # App Group group.com.OWNER.appname (§1.3)
 │   └── Resources/
 │       ├── Assets.xcassets           # app icon sets, colors, symbols
 │       ├── AppIcon.icon              # Icon Composer document (default)
 │       └── AltIcon*.icon             # 3 alternates ([DECISION: app-icons-new-art])
 ├── ShareExtension/                   # NSExtensionActivationSupportsWebURLWithMaxCount = 1
 │   ├── ShareViewController.swift
+│   ├── ShareExtension.entitlements   # the SAME App Group as the app (§1.3)
 │   └── Info.plist
 ├── Packages/                         # the 18 packages of 02-architecture.md §2.2/§3.1, verbatim
 │   ├── AppCore/                      # domain values, RedditLink, formatters, Feature, filters
@@ -89,6 +90,10 @@ appname-ios/
 └── README.md
 ```
 
+Both `APPNAME.entitlements` and `ShareExtension.entitlements` must carry the App Group
+`group.com.OWNER.appname` (§1.3). The extension writes its hand-off file there and the app drains it;
+if only one target declares the group, the share extension silently does nothing.
+
 Rule the agent must hold: **the app target contains no feature code.** Everything lives in a
 package with its own tests. If a file in `APPNAME/` grows past ~200 lines it belongs in a package.
 
@@ -120,6 +125,34 @@ Build settings that are not optional:
 | `ITSAppUsesNonExemptEncryption` | `false` | `spec/08` §6 |
 | `UIDesignRequiresCompatibility` | **absent** | Ignored on the 27 SDK; `spec/10` §A2 |
 | `UISupportedInterfaceOrientations` | Portrait only at the app level; the media viewer and in-app browser opt into rotation per-scene | `spec/01` §1.5 |
+
+**Info.plist keys and entitlements (normative, and every one of them is a launch-day blocker).** The
+app crashes, fails a deep link, or cannot hand off from the share extension if any row is missing.
+The list is derived from the capability inventory in `spec/08` §6 and is mirrored in
+`02-architecture.md` §14.6/§14.7; `07-one-shot-prompt.md`'s guardrails point here.
+
+| Key / capability | Target | Value | Source |
+|---|---|---|---|
+| `NSPhotoLibraryAddUsageDescription` | app | "Allow APPNAME to save photos and videos to your library." | `spec/08` §6; `04b` §9.2 (add-only save) |
+| `NSPhotoLibraryUsageDescription` | app | "APPNAME accesses your photos to upload images." | `spec/08` §6; `04a` §16.5.4 (image-post picker) |
+| `CFBundleURLTypes` | app | one entry, `CFBundleURLName = com.OWNER.appname`, `CFBundleURLSchemes = ["appname"]` | `04c` §13; `03` §12.3; `[DECISION: bundle-id]` |
+| App Group `group.com.OWNER.appname` | **both** the app and `ShareExtension` | `com.apple.security.application-groups` | `03` §12.3; `[DECISION: share-extension]` |
+| `NSExtensionActivationSupportsWebURLWithMaxCount` | ShareExtension | `1` — and nothing else in the activation rule | `03` §12.3 |
+| `CFBundleIcons` / `CFBundleAlternateIcons` | app | Written by Xcode from the *Alternate App Icon Sets* build setting; three alternates (`[DECISION: app-icons-new-art]`) | `spec/08` §6; `04c` §19 |
+| `UIApplicationSupportsIndirectInputEvents` | app | `true` — pointer/trackpad correctness | `02` §14.6 |
+| `UILaunchScreen` | app | present (see the row above) | `spec/10` §A1 |
+| `ITSAppUsesNonExemptEncryption` | app | `false` (see the row above) | `spec/08` §6 |
+
+**Deliberately absent, and each absence is a decision, not an oversight:**
+
+| Not declared | Why |
+|---|---|
+| `UIBackgroundModes` — **no background modes at all** | v1 tears every `AVPlayer` down on `.background`: no Picture-in-Picture, no background audio (`[DECISION: background-audio-pip]`), no background fetch and no background inbox refresh (`[DECISION: background-inbox-refresh]`, `[DECISION: push-removed]`). Nothing in the app needs to run while backgrounded, so the `audio` mode is **not** declared; adding it later is a one-line change plus a new App Review answer |
+| `aps-environment` (Push Notifications) | No push, no APNs (`[DECISION: push-removed]`). `UNAuthorizationOptions.badge` alone needs no entitlement (`02` §14.2) |
+| `com.apple.developer.associated-domains` | We cannot serve an `apple-app-site-association` file for `reddit.com` (`[DECISION: universal-links-absent]`) |
+| `LSApplicationQueriesSchemes` | `canOpenURL` is deprecated on the 27 SDK and the app never probes: the external-browser handoff attempts `UIApplication.open(_:options:completionHandler:)` and handles the failure (`02` §5.7, `04c` §12). With no `canOpenURL` call there is nothing to declare |
+| `NSCameraUsageDescription`, location, microphone, contacts, Bluetooth, HealthKit | None of these APIs is used anywhere (`spec/08` §6 "Explicitly NOT used") |
+| `UIAppFonts` | The app ships no custom font; `.monospaced` covers code blocks (§1.8) |
 
 Every package's `Package.swift` uses `swift-tools-version: 6.4` (which turns on Swift Testing's
 Complete XCTest interop mode — `spec/10` §A3).
@@ -236,7 +269,7 @@ not depend on it.
 - **Inputs:** `02-architecture.md`; `spec/01` §§1–4, §16; `spec/10` §§A1–A3; this doc §1.
 - **Deliverables:** repo, `.xcodeproj`, all 18 package stubs with `Package.swift`, app target with
   scene lifecycle and launch screen; `AppCore` with the domain value types and the `Feature` enum;
-  `Theming` with the `Theme` model (19 colour roles × 4 renditions + mode/status-bar flags) and a
+  `Theming` with the `Theme` model (20 colour roles × 4 renditions + mode/status-bar flags) and a
   `ThemeStore` in `@Environment`, plus two of the new starter themes; `DesignSystem`'s token layer;
   `AppRouting`'s `Route` enum and per-tab `Router`; five `NavigationStack`s inside a `TabView` with
   the five tabs (Posts / Inbox / Account / Search / Settings) and the tab-retap and tab-long-press
@@ -388,9 +421,10 @@ not depend on it.
 - **Inputs:** `04a` (composers); `spec/04` §11; `spec/02` §2.4.
 - **Deliverables:** shared composer shell (cancel / title / submit, keyboard avoidance); markdown
   editor with the six toolbar actions and the exact quote-insertion semantics; live preview tab
-  (Parent / Preview, or Preview / Old Version when editing); drafts in GRDB keyed per context
-  (`newCommentDraft-<parentId>`, per-subreddit post title/body, per-recipient message subject/body,
-  per-thread reply) written on change; new post with the three kinds — **separate text fields per
+  (Parent / Preview, or Preview / Old Version when editing); drafts in GRDB keyed per context,
+  using the **`03` §7.5 key formats verbatim** (`comment.<parentFullname>`,
+  `post.title.<sub>`, `post.body.<sub>`, `message.subject.<recipient>`, `message.body.<recipient>`,
+  `messageReply.<author>`), written on change; new post with the three kinds — **separate text fields per
   kind** (`[DECISION: newpost-type-switch-keeps-text]`), flair picker filtering mod-only flairs,
   image pick + S3 upload + submit; edit post/comment; delete with confirmation; captcha web-view
   fallback; locked/archived guard before opening the editor.
@@ -411,8 +445,8 @@ not depend on it.
   defaults from its §11.2 table (minus removed rows per `08-decisions-and-drift.md`); theme list
   and Theme Maker with the five colour groups, the colour picker (hex + RGB sliders), live
   app-wide preview that excludes the editor itself, and save/overwrite/delete
-  (`[GATE: gate.customThemes]`); the **new 6–8 theme built-in catalogue**
-  (`[DECISION: theme-count]`); theme share/import with the **new** base64url sentinel format
+  (`[GATE: gate.customThemes]`); the **new 12-theme built-in catalogue**
+  (`[DECISION: theme-count]`, `04c` §18.2); theme share/import with the **new** base64url sentinel format
   (`[DECISION: theme-import-format-compat]`); the alternate-icons grid with no artist-credit pages
   (`[GATE: gate.appIcons]`, `[DECISION: app-icons-new-art]`); the Gestures screen
   (`[GATE: gate.gestures]`) and the Sorting screen (`[GATE: gate.sortMemory]`); Stats screen with all
@@ -495,7 +529,13 @@ not depend on it.
    type, error mapping). A parser change that silently drops a field fails here.
 4. **UI smoke.** One XCUITest target, kept deliberately small, launched with
    `-UITestFixtureMode 1` so `RedditAPI` serves fixtures instead of the network.
-5. **Manual smoke.** The per-phase lists above, consolidated in `PROGRESS.md`, run on a device
+5. **StoreKit-configuration matrix.** With `Fixtures/StoreKit/APPNAME.storekit` active, walk the
+   full matrix in `05-monetization.md` §9 — purchase monthly and annual, cancel, restore, intro-offer
+   eligibility on and off, and the Transaction Manager's simulated billing retry, grace period,
+   refund and revocation — and confirm all eleven gates lock and unlock correctly. This is a **gate
+   step of Phase 8**, not an optional extra; it is listed here so the acceptance path and the phase
+   DoD agree.
+6. **Manual smoke.** The per-phase lists above, consolidated in `PROGRESS.md`, run on a device
    before Phase 10.
 
 ---
@@ -503,7 +543,13 @@ not depend on it.
 ## 4. Acceptance checklist
 
 Transcribed from `spec/08-feature-inventory.md` §1 (items 1–327), grouped by its areas A–X, adjusted
-per `08-decisions-and-drift.md`, with a new area **Y** for the subscription. Pointers name the doc
+per `08-decisions-and-drift.md`, with a new area **Y** for the subscription.
+
+**Numbering is 1:1 with the inventory.** Item *N* here is inventory item *N* there, in every area, so
+a cross-reference by number always lands on the same feature. Behaviour the rewrite adds that the
+inventory has no number for is given a **lettered suffix** on the item it sits nearest
+(`73a`, `114a`–`114c`, `131a`, `208a`–`208c`, `214a`, `297a`, `312a`), which keeps the base numbering
+stable. Area **Y** (328–345) is net-new and has no inventory counterpart. Pointers name the doc
 section that specifies each item. **CUT** items are deliberately not built and must be recorded as
 such in `PROGRESS.md`. **CHANGED** items are built differently from the original by decision.
 
@@ -573,21 +619,22 @@ such in `PROGRESS.md`. **CHANGED** items are built differently from the original
 - [ ] 56. Each comment shows author (with mod/OP treatment), score, time, flair, edited state.
 - [ ] 57. Tap to collapse/expand (setting, default on) — takes effect without a refresh.
 - [ ] 58. Collapsed threads keep children's own collapsed state across cycles.
-- [ ] 59. "N more replies" loads 10 further children per tap.
-- [ ] 60. Pull to refresh reloads the whole thread.
-- [ ] 61. **CHANGED** Reddit's "continue this thread" stub is detected and navigates to the permalink (`[DECISION: more-stub-count-zero]`).
-- [ ] 62. Comment sorts: Best, New, Top (+ time), Controversial, Old, Q&A (six; `[DECISION: comment-sort-six]`).
-- [ ] 63. Default comment sort configurable; optional per-subreddit memory (`[GATE: gate.sortMemory]`).
-- [ ] 64. Vote on comments by tapping the score control or swiping; same direction again retracts.
-- [ ] 65. Comment swipe actions configurable per direction (`[GATE: gate.gestures]`).
-- [ ] 66. Stickied comments pinned with a pin icon.
-- [ ] 67. Moderator comments coloured distinctly.
-- [ ] 68. OP comments coloured distinctly.
-- [ ] 69. AutoModerator top-level comments auto-collapsed (setting, default on).
-- [ ] 70. Deleted/removed comments render as placeholders with structure intact.
-- [ ] 71. Right-side vote indicator option adds a coloured right edge on voted comments.
-- [ ] 72. Score-hidden comments show "–" until the user votes.
-- [ ] 73. Floating scroll-to-next-comment button; long-press for previous (`[DECISION: scroll-to-next-button]`).
+- [ ] 59. Floating scroll-to-next-comment button; long-press for previous (`04a` §15.4, `[DECISION: scroll-to-next-button]`).
+- [ ] 60. The floating comment button can be **repositioned**: a ~1 s hold enters move mode (dimmed overlay, 10 dashed snap circles), dragging moves it, and releasing on a snap point persists it to `ui.scrollToNextButtonPosition` (`04a` §15.4).
+- [ ] 61. "N more replies" loads 10 further children per tap (`04a` §14.5).
+- [ ] 62. Pull to refresh reloads the whole thread (`04a` §12.1).
+- [ ] 63. Comment sorts: Best, New, Top (+ time), Controversial, Old, Q&A (six; `04a` §16.3, `[DECISION: comment-sort-six]`).
+- [ ] 64. Default comment sort configurable; optional per-subreddit memory (`04c` §16.2, `[GATE: gate.sortMemory]`).
+- [ ] 65. Vote on comments by tapping the score control or swiping; same direction again retracts (`04a` §14.2).
+- [ ] 66. Comment swipe actions configurable per direction (`04c` §16.1, `[GATE: gate.gestures]`).
+- [ ] 67. Stickied comments pinned with a pin icon (`04a` §14.2).
+- [ ] 68. Moderator comments coloured distinctly (`04a` §14.2).
+- [ ] 69. OP comments coloured distinctly (`04a` §14.2).
+- [ ] 70. AutoModerator top-level comments auto-collapsed (setting, default on) (`04a` §14.3).
+- [ ] 71. Deleted/removed comments render as placeholders with structure intact (`04a` §14.2).
+- [ ] 72. Right-side vote indicator option adds a coloured right edge on voted comments (`04a` §14.2).
+- [ ] 73. Score-hidden comments show "–" until the user votes (`04a` §14.2).
+- [ ] 73a. **CHANGED** Reddit's "continue this thread" stub is detected and navigates to the permalink (`04a` §14.5, `[DECISION: more-stub-count-zero]`).
 - [ ] 74. **CUT** AI comment summaries (`[DECISION: ai-removed]`).
 
 ### D. Media → `04b`
@@ -685,7 +732,7 @@ such in `PROGRESS.md`. **CHANGED** items are built differently from the original
 - [ ] 149. Tapping a multireddit opens its combined feed; the chevron expands its members.
 - [ ] 150. Add a subreddit to a multireddit from the subreddit's "…" menu.
 - [ ] 151. Remove a subreddit by long-pressing it inside an expanded multireddit.
-- [ ] 152. "Filter Subreddit" from a post's long-press menu hides it from combined feeds only (`[GATE: gate.filters]`).
+- [ ] 152. "Filter Subreddit" from a post's long-press menu hides it from combined feeds only — the behaviour and its gate live in `04a` §7.2 item 4 and §7.8, not `04c` (`[GATE: gate.filters]`).
 - [ ] 153. Filter durations: a day, a week, forever.
 - [ ] 154. Filtered subreddits listed and removable in Filters settings.
 - [ ] 155. Sidebar view: subscriber count, expandable rules, description HTML.
@@ -702,17 +749,17 @@ such in `PROGRESS.md`. **CHANGED** items are built differently from the original
 - [ ] 163. **CHANGED** Score is upvotes minus downvotes, abbreviated on feed cards (`[DECISION: number-format-parity]`); hidden scores show "–"; Reddit fuzzes counts.
 - [ ] 164. **CHANGED (FIXED)** Voting in post detail is reflected in the feed behind it (`[DECISION: postdetail-vote-not-reflected]`).
 
-### J. Saving → `04a`
+### J. Saving → `04a`; the Saved sections themselves → `04c` §6.1 and `04a` §3.4
 
 - [ ] 165. Bookmark control in the post detail action bar.
 - [ ] 166. Save from a long-press menu in feeds and comment threads.
 - [ ] 167. Save via a configured swipe.
 - [ ] 168. Saved items show a bookmark notch in lists.
-- [ ] 169. Saved Posts and Saved Comments reachable from the profile, with refresh and paging.
+- [ ] 169. Saved Posts and Saved Comments reachable from the profile, with refresh and paging (`04c` §6.1 section buttons; `04a` §3.4 feed variants).
 - [ ] 170. Unsaving through the same affordances removes the item from the saved list.
 - [ ] 171. Saves sync through the Reddit account.
-- [ ] 172. No folders, tags, sort or search for saved items (Reddit limitation — **not** a defect).
-- [ ] 173. Saved-item search explicitly not implemented.
+- [ ] 172. No folders, tags, sort or search for saved items (Reddit limitation — **not** a defect; `04c` §6.1, `04a` §3.4, which give the saved sections no sort control).
+- [ ] 173. Saved-item search explicitly not implemented (`04c` §6.1).
 
 ### K. Sharing / downloading → `04b`
 
@@ -726,20 +773,20 @@ such in `PROGRESS.md`. **CHANGED** items are built differently from the original
 - [ ] 181. The app appears as a share destination for a single web URL (Share Extension).
 - [ ] 182. "Save post as image" explicitly not implemented.
 
-### L. External links / browser → `04c`
+### L. External links / browser → `04c`, except link previews (`04b` §11, `03` §9.4), the App Intent (`03` §12.4) and orientation (`02` §5.11)
 
 - [ ] 183. Reddit links open in-app; other links open in the chosen browser.
 - [ ] 184. Browser choice: in-app, default, Chrome, Brave, Firefox, Edge, Opera.
 - [ ] 185. Fallback alert with "Open in Default Browser" when the chosen browser is missing.
 - [ ] 186. Reader mode option for the in-app browser.
-- [ ] 187. **CHANGED** "Open in APPNAME" ships as an App Intent instead of an iCloud Shortcut (`[DECISION: shortcuts-intent]`).
+- [ ] 187. **CHANGED** "Open in APPNAME" ships as an App Intent instead of an iCloud Shortcut — specified in `03` §12.4, with the settings row rewritten as informational in `04c` §16.4 (`[DECISION: shortcuts-intent]`).
 - [ ] 188. **CHANGED** Clipboard Reddit-link detection, default **off** (`[DECISION: clipboard-read-default]`).
 - [ ] 189. In-app browser rotates to landscape.
-- [ ] 190. Link previews use Open Graph only; no favicon fallback.
-- [ ] 191. Link-metadata fetches time out at 1.75 s and are skipped on failure.
-- [ ] 192. Sites that previously failed to yield a preview image now show one.
+- [ ] 190. Link previews use Open Graph only; no favicon fallback (`04b` §11, `03` §9.4).
+- [ ] 191. Link-metadata fetches time out at 1.75 s, are capped at 6 concurrent, and are skipped on failure (`04b` §11, `03` §9.4, `[DECISION: og-concurrency-cap]`).
+- [ ] 192. Sites that previously failed to yield a preview image now show one (`04b` §11).
 - [ ] 193. Reddit links inside post/comment bodies render as in-app links.
-- [ ] 194. Landscape in the browser works (was a known defect).
+- [ ] 194. Landscape in the browser works (was a known defect). The unlock/re-lock pair is owned by `02` §5.11; `04c` §12 names the two surfaces that use it.
 
 ### M. Navigation (structural) → `02`, `04a`
 
@@ -798,7 +845,7 @@ such in `PROGRESS.md`. **CHANGED** items are built differently from the original
 
 ### Q. Themes and appearance → `04c`
 
-- [ ] 234. **CHANGED** New built-in theme set of 6–8 themes with new palettes, all free (`[DECISION: theme-count]`).
+- [ ] 234. **CHANGED** New built-in theme set of **12** themes with new palettes and new names, all free (`[DECISION: theme-count]`, `04c` §18.2).
 - [ ] 235. **CUT** Timed previews of locked themes (dark pattern).
 - [ ] 236. Tapping a theme applies it immediately and persists it.
 - [ ] 237. Separate light/dark theme pairing following the system appearance (`[GATE: gate.customThemes]`).
@@ -807,7 +854,7 @@ such in `PROGRESS.md`. **CHANGED** items are built differently from the original
 - [ ] 240. Theme name required and unique to save.
 - [ ] 241. Theme "UI mode" (light/dark) controls system chrome.
 - [ ] 242. Theme status-bar style setting.
-- [ ] 243. Five colour groups covering 19 roles.
+- [ ] 243. Five colour groups covering **20** roles (3 + 3 + 3 + 2 + 9; `04c` §18.2, §18.3).
 - [ ] 244. Unset colours show "(default)" and inherit the base theme.
 - [ ] 245. Comment depth colours are a fixed 6-colour cycle, shared across themes and not customisable — **with new colours**, not the original's (`[DECISION: theme-count]`).
 - [ ] 246. Theme edits preview live app-wide but not inside the editor; unsaved edits end when leaving.
@@ -839,7 +886,7 @@ such in `PROGRESS.md`. **CHANGED** items are built differently from the original
 - [ ] 272. Appearance — Collapse children only.
 - [ ] 273. Appearance — Show username in the tab bar.
 - [ ] 274. Appearance — Hide tab bar on scroll.
-- [ ] 275. **CHANGED** The Settings-root search bar is a shortcut into the Guide's own FTS5 search; there is no AI question box (`[DECISION: guide-included-or-not]`, `[DECISION: guide-ai-answer-drop]`).
+- [ ] 275. **CHANGED** The Settings-root search bar filters settings rows locally as you type and falls through to Help search on submit when nothing matches; there is no AI question box (`04c` §15, `[DECISION: guide-included-or-not]`, `[DECISION: guide-ai-answer-drop]`).
 
 ### R. AI summaries → **entire area CUT** (`[DECISION: ai-removed]`)
 
@@ -884,11 +931,11 @@ such in `PROGRESS.md`. **CHANGED** items are built differently from the original
 - [ ] 304. **CUT** Self-hosted server section (`[DECISION: self-hosted-server-row]`).
 - [ ] 305. Startup: start on a chosen tab.
 - [ ] 306. Startup: startup URL overriding the tab, with validation feedback.
-- [ ] 307. **CHANGED** Settings root lists, in order: Guide, General, Theme, Appearance, App Icon (device-conditional), Account, **APPNAME Plus**, Data Use, Stats, Privacy, Advanced, Patch Notes, Request A Feature (`04c` §15).
-- [ ] 308. "What's New" shows the current release notes.
-- [ ] 309. **CHANGED** Feedback links to the owner's chosen destination (no third-party subreddit by default).
+- [ ] 307. **CHANGED** Settings root lists, in order: **Help**, General, Theme, Appearance, App Icon (device-conditional), Account, **APPNAME Plus**, Data Use, Stats, Privacy, Advanced, **What's New**, **Feedback** (`04c` §15). The original's "Guide", "Patch Notes" and "Request A Feature" labels are renamed; "APPNAME Pro" is gone with the tier it named.
+- [ ] 308. "What's New" shows the current release notes (`04c` §15 row 12, §21.1).
+- [ ] 309. **CHANGED** Feedback opens the owner-configured `feedbackDestinationURL` constant through the external-link opener; there is **no** third-party subreddit destination and no default value the owner has not chosen (`04c` §15 row 13).
 - [ ] 310. All settings autosave and persist.
-- [ ] 311. **CHANGED** Gated settings stay visible with a Plus badge rather than being hidden (`05` §5.9).
+- [ ] 311. **CHANGED** Gated affordances stay visible with a trailing "Plus" capsule badge rather than being hidden, look disabled but remain tappable, and present the paywall on tap — the normative chrome contract is `05` §5.11, with the four presentation styles in `05` §5.9 and a pointer from `02` §13.3 and `04c` §14.
 - [ ] 312. **CHANGED** Device-conditional settings: App Icon only where alternates are supported. Split view no longer exists.
 - [ ] 312a. Clear Video Cache, deferred to the next launch, with an explanatory alert.
 
@@ -901,8 +948,8 @@ such in `PROGRESS.md`. **CHANGED** items are built differently from the original
 
 ### W. Help → `04c`
 
-- [ ] 317. **CHANGED** A small hand-written help section replaces the 38-topic guide (`[DECISION: guide-included-or-not]`).
-- [ ] 318. **CHANGED** Help topics are reachable by deep link from settings rows.
+- [ ] 317. **CHANGED** A small hand-written Help section (10–14 articles, labelled **Help** in the UI) replaces the 38-topic guide (`04c` §21.3, `[DECISION: guide-included-or-not]`).
+- [ ] 318. **CHANGED** Help topics are reachable by deep link from settings rows — `appname://` links written as markdown are rewritten into real anchors before rendering, and a settings row's "Learn more" resolves to `SettingsRoute.help(.article(key))` through that same one code path (`04c` §21.3).
 - [ ] 319. A "not found" state for unresolved help links.
 - [ ] 320. **CHANGED** Topics limited to what the rewrite actually does; nothing describes removed features (`[DECISION: guide-prose-rewrite]`).
 
@@ -945,7 +992,7 @@ such in `PROGRESS.md`. **CHANGED** items are built differently from the original
 |---|---|---|---|---|
 | R1 | **Reddit blocks the keyless model** — UA fingerprinting, mandatory OAuth, or blanket 403s on `www.reddit.com` JSON | Medium | Fatal | Isolate all of it behind the `RedditAPI` package's `RedditClient` actor so the transport can change in one place. Ship the randomized-UA strategy from day one. Build `[DECISION: no-429-handling]` so throttling degrades gracefully instead of looking like corruption. Keep the fixture suite so a protocol change is diagnosed in minutes. Have a contingency: a Reddit OAuth app with the installed-client flow is a two-day change if `RedditAPI` is clean |
 | R2 | **Cookie login fragility** — Reddit changes its login page, the success heuristics stop firing, or WebKit cookie behaviour shifts | High | High | Keep **both** success detectors (navigation allow-list **and** a cookie poll). Use `WebPage.Configuration` with an explicit `websiteDataStore` so each login attempt starts clean. Never parse Reddit's DOM for anything but cosmetics. Reproduce the expire-then-clear logout ordering exactly. Add an explicit "login timed out" state after 120 s with a retry, instead of hanging |
-| R3 | **App Store review of a third-party Reddit client** — 4.2 minimum functionality, 5.2.5 trademark, UGC/age-rating, or the login-in-a-web-view pattern | Medium | High | 17+ rating with the UGC questions answered; block and report paths present and named in review notes; no Reddit wordmark or Snoo anywhere; the app is a native client with web views only for login, wiki and report; review notes explain the access model and that no demo account is needed; the free tier is fully functional without login |
+| R3 | **App Store review of a third-party Reddit client** — 4.2 minimum functionality, 5.2.5 trademark, UGC/age-rating, or the login-in-a-web-view pattern | Medium | High | 17+ rating with the UGC questions answered; block and report paths present and named in review notes; no Reddit wordmark or Snoo anywhere, and **no third-party brand or character name on a built-in theme, an app icon or any other shipped asset** (the original's catalogue named themes after live trademarks; `04c` §18.2 forbids it); the app is a native client with web views only for login, wiki and report; review notes explain the access model and that no demo account is needed; the free tier is fully functional without login |
 | R4 | **Liquid Glass regressions** — themed backgrounds fight the material; custom colours fail Increase Contrast / Reduce Transparency | High | Medium | Phase 9 audit is a gate, not a nicety. Rule: no custom background on any bar, tab bar or toolbar. `glassEffect` only on the media viewer chrome and the paywall header. Every theme ships light and dark variants and is checked against the three accessibility settings. Theme roles that must meet contrast (text on background, text on tint) are validated at save time in the Theme Maker |
 | R5 | **AVPlayer memory and decoder exhaustion** — black tiles after a fast fling | High | High | The registry (cap 12, ref-counted, deferred release) plus focused-only playback plus the reload watchdog are all mandatory, not optional. Phase 4's DoD includes a 10-second fling on a 100%-video feed. Instruments memory-graph check in Phase 9 |
 | R6 | **Comment-tree performance** — a 2,000-comment thread janks or blows memory | Medium | High | Flatten to rows, render in `List` (recycling), never `LazyVStack`. Static subview count per row (`spec/10` §A3). Collapse is an array splice. Phase 3 DoD measures it |

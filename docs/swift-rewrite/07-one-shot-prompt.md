@@ -50,9 +50,21 @@ Do these first. The agent cannot do them and will stall or invent values without
       agent will ship placeholder icons and mark items 313–316 as deferred in `PROGRESS.md`.
 - [ ] **13. Privacy Policy URL** hosted somewhere the owner controls. Required by the paywall, by
       the Settings → Legal screen and by App Store Connect. The EULA may be Apple's standard one.
-- [ ] **13a. Decide the theme palettes.** The agent cannot invent 6–8 coherent accessible palettes
-      from nothing and must not copy the original's (`[DECISION: theme-count]`). Either supply them,
-      or accept two starter themes in Phase 0 and the rest deferred.
+- [ ] **13a. Author the 12 built-in theme palettes.** `04c` §18.2 is the contract: **12** themes, at
+      least 4 light and at least 4 dark, all 20 colour roles plus the UI-mode and status-bar flags per
+      theme, a new 6-colour comment-depth cycle, new names under §18.2's naming rules (no third-party
+      brand or character names), and WCAG AA on text-on-background and text-on-tint at both contrast
+      settings. The agent cannot invent these from nothing and must not copy the original's
+      (`[DECISION: theme-count]`). Either supply them, or accept two starter themes in Phase 0 and
+      the remaining ten deferred in `PROGRESS.md`.
+      **This item stands even though the theme migration bridge exists.** The bridge (`02` §8.5a)
+      only lets you import your own *custom* themes out of the app you are replacing, using its share
+      feature; the **built-ins ship inside the app** and have to be authored.
+- [ ] **13b. Decide three owner-configured destinations, or accept that their rows disappear.**
+      `feedbackDestinationURL` (Settings → Feedback, `04c` §15 row 13), `themeCommunityURL`
+      ("Explore Community Themes", `04c` §18.1) and `themeSharingSubreddits` (the composer's Attach
+      Theme button, `04c` §18.5). Each has **no default** and names no third-party community; an
+      unset value means the row or button is simply not rendered.
 - [ ] **14. Xcode 27** installed (Swift 6.4, iOS 27 SDK) on macOS Tahoe 26.6+.
 - [ ] **15. Capture the Reddit JSON fixtures** listed in `06-build-plan-and-acceptance.md` §1.7, or
       let the agent stub them and fill them in at the end of Phase 1. Capturing them by hand first
@@ -247,12 +259,20 @@ Restated here so you never have to guess:
 - The in-post comment sort menu offers exactly six options; the Settings picker adds the `default`
   sentinel, which is not a seventh sort. The inbox is a single list with no filter tabs. The profile
   page is minimal, but **does** show the user's avatar.
-- Themes: a new built-in set of 6–8 themes with new palettes and a new comment-depth cycle, all
-  free; the Theme Maker is gated; theme sharing uses a **new** `::appname-theme::` base64url sentinel
-  and the original's format is neither emitted nor imported; no timed previews of locked features,
-  ever. Do not copy a single hex value from the surveys' palette tables.
+- Themes: a new built-in set of **12** themes with new names and new palettes and a new
+  comment-depth cycle, all free (`04c` §18.2 is the contract); the Theme Maker is gated; theme sharing
+  **emits** only the new `::appname-theme::` base64url sentinel, while the **importer also accepts**
+  the original's `::hydra-theme-import::{…}` form so the owner can migrate their own saved themes in
+  (`02` §8.5a — read-only, one-way, and the legacy string appears nowhere but the import scanner); no
+  timed previews of locked features, ever. Do not copy a single hex value or a single theme name from
+  the surveys' palette tables.
 - App icons: all-new artwork, one default plus three alternates, no artist-credit pages.
-- The in-app guide shrinks to a 10–14 topic hand-written help section. Its search is **SQLite FTS5
+- The Settings root's first row is **Help**, and its last two are **What's New** and **Feedback**; the
+  original's "Guide", "Patch Notes" and "Request A Feature" labels are not carried over, and neither
+  is a paid tier called "Pro" — the row above Data Use is **APPNAME Plus** and it is not a gate.
+  The Settings search bar filters settings rows locally and falls through to Help search; there is no
+  "ask a question" box.
+- The in-app help section shrinks to a 10–14 topic hand-written corpus. Its search is **SQLite FTS5
   with BM25 ranking, entirely on-device** — no embeddings, no vectors, no cosine similarity, no AI
   answer card, and no self-hosted-server setting.
 - The right-edge swipe-forward gesture is dropped. The scroll-to-next-comment button stays, with
@@ -284,6 +304,14 @@ Violating any of these is a defect even if the code compiles and the tests pass.
   `Tests/UITests`.
 - **No `UIDesignRequiresCompatibility`**, and no attempt to opt out of Liquid Glass by any other
   means.
+- **Declare every Info.plist key and entitlement in `06-build-plan-and-acceptance.md` §1.3, and
+  declare nothing that is not on that list.** The four blockers are
+  `NSPhotoLibraryAddUsageDescription`, `NSPhotoLibraryUsageDescription`, `CFBundleURLTypes` for the
+  `appname://` scheme, and the App Group `group.com.OWNER.appname` on **both** the app and the share
+  extension. Alternate icons come from the *Alternate App Icon Sets* build setting, which is what
+  writes `CFBundleIcons` / `CFBundleAlternateIcons`. **No `UIBackgroundModes` at all** (no PiP, no
+  background audio, no background refresh), no `aps-environment`, no Associated Domains, and no
+  `LSApplicationQueriesSchemes` — `canOpenURL` is never called, so there is nothing to declare.
 - **No `TODO:` or `FIXME:` comments** in shipped code. Unfinished work goes in `PROGRESS.md` as a
   `DEFERRED` line with a reason; the lint config fails the build on `TODO`.
 - **No restart alerts.** Every setting takes effect immediately. The one deferred-to-next-launch

@@ -16,7 +16,7 @@ one pass from these documents alone, without consulting this codebase.
 | 03 | `03-data-and-networking.md` | Swift domain models with exact derivation rules from Reddit JSON, the complete endpoint catalog, auth/cookie sessions, persistence DDL, consolidated settings-key table | Phase 1 |
 | 04a | `04a-feeds-posts-comments.md` | Screen specs: feeds, post card, interactions, sorting, filters, inline video, post details, comment tree, markdown, compose/edit | Phases 2, 3, 6 |
 | 04b | `04b-media.md` | Screen specs: fullscreen viewer, video, galleries, gallery mode, caches, downloads, Live Text | Phase 4 |
-| 04c | `04c-accounts-inbox-search-subs-settings.md` | Screen specs: accounts/login, inbox, messages, user, search, sidebar, wiki, multireddits, web view, the full settings tree, themes, icons, stats, guide | Phases 5, 7 |
+| 04c | `04c-accounts-inbox-search-subs-settings.md` | Screen specs: accounts/login, inbox, messages, user, search, sidebar, wiki, multireddits, web view, the full settings tree, themes, icons, stats, help | Phases 5, 7 |
 | 05 | `05-monetization.md` | StoreKit 2 subscription design, free/paid feature matrix, entitlement seam, paywall, compliance | Phase 8 |
 | 06 | `06-build-plan-and-acceptance.md` | New-repo bootstrap, CI, phased build order with gates, the full acceptance checklist, risks | Throughout |
 | 07 | `07-one-shot-prompt.md` | The prompt to hand a coding agent in the new empty repo | Kickoff |

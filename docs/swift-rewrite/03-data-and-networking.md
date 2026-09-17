@@ -39,6 +39,17 @@ Every request passes through one method, in this order:
 | 8 | Classify the response (§10). Decode, or return raw text for the endpoints that ask for it |
 | 9 | If the call is `depaginate` → while `data.after != nil`, rewrite the `after` query parameter and recurse, concatenating `data.children` |
 
+Three transport facts the pipeline above assumes and that §10 does not repeat:
+
+- **`isOK` is `(200..<300).contains(statusCode)`** — a 3xx that `URLSession` has already followed
+  never reaches us, and 300 is not success.
+- **A cancelled request throws `CancellationError` and is never surfaced to the user.** Cancellation
+  is a normal part of scrolling (§7.3 of `02`); a cancelled feed page, preview fetch or Redgifs
+  resolution leaves the UI exactly as it was, sets no error state and writes no breadcrumb.
+- **A timeout and a connection failure are distinct.** A timeout maps to `.timedOut`, a connection
+  failure to `.offline` (decided against `NWPathMonitor`'s current path, §10.1). They are never
+  collapsed into one "network error", because the user-facing copy and the retry affordance differ.
+
 **HTTP status is not the primary error signal.** Reddit returns error envelopes with a 200, and returns a 403 body that is still a perfectly good JSON envelope. Classification is by body shape first (§10.1). Status code handling is a *secondary* signal that `APPNAME` adds and the original lacks: 429 and 5xx are recognised (§11).
 
 ### 1.3 Ubiquitous query parameters
@@ -640,7 +651,17 @@ Pluralisation is `n == 1 ? "" : "s"`. Post and comment timestamps append `" ago"
 | `n > 1_000` | `"{n/1e3, 1dp}K"` |
 | otherwise | the plain integer, unformatted |
 
-Exactly `1000` prints `1000`. Compact numbers are used for subreddit subscriber counts and the quick-search rows; the **feed card prints raw integers** for score and comment count.
+Exactly `1000` prints `1000`. Compact numbers are used for subreddit subscriber counts, the
+quick-search rows **and the feed card's score and comment count** — the original printed raw integers
+there, so a big thread rendered `128437` in a feed row, and `08` #33's default abbreviates it
+(`number-format-parity`, `04a` §4.11).
+
+**This is not the complete set of text helpers.** Two more live in the documents that own their
+surface, and are named here so this section is not read as exhaustive: the **Stats screen's own
+`statNum(_:precision:unit:)`** (locale-grouped, fixed precision, pluralised unit — deliberately *not*
+unified with `prettyNum`, `04c` §20.2), and the **composer's markdown handling** (`04a` §18.2), which
+parses and renders through the one AST pipeline and therefore needs no HTML round-trip and no
+inter-tag whitespace collapse.
 
 ---
 
@@ -963,7 +984,7 @@ Applied in this order on every loaded batch:
 |---|---|---|---|
 | Multireddit subreddit names | lowercased `user/<u>/m/<multi>` | process | Cleared on M4/M5; primed by M1; failures never cached |
 | Redgifs resolved URLs | redgifs video id | process — **deliberately not persisted** (signed URLs expire in hours) | Busted per-id when the player errors on that source |
-| OpenGraph | post id | process | Never |
+| OpenGraph | post id | process | Never — and a **refresh re-uses** whatever is already cached: only post ids not already present issue a preview request, so pulling to refresh a feed does not re-fetch previews for posts that are still in the list |
 | Redgifs auth token | `UserDefaults` `redgifsToken` | persisted | Refreshed on any non-OK Redgifs response |
 
 There is **no persistent response cache.** Feeds are refetched from scratch on every cold launch.
@@ -1056,7 +1077,7 @@ CREATE        INDEX subreddit_visits_updated_at_idx ON subreddit_visits(updated_
 
 | Table | Write semantics | Read semantics | Pruning |
 |---|---|---|---|
-| `seen_posts` | `INSERT … ON CONFLICT(post_id) DO NOTHING` — idempotent, and **`created_at` is not refreshed** on a repeat mark. Unmark is a hard `DELETE`. The DB write is **awaited before** the change notification is published | Existence is the flag; there is no boolean column. Batch check by `post_id IN (…)` | When the row count exceeds **5 000**, delete every row with an `id` smaller than the row `(count − 5000)` positions from the oldest. `id`-based deletion avoids `created_at` ties |
+| `seen_posts` | `INSERT … ON CONFLICT(post_id) DO NOTHING` — idempotent, and **`created_at` is not refreshed** on a repeat mark. Unmark is a hard `DELETE`. The DB write is **awaited before** the change notification is published — and **if the write throws, the event is not published at all**: the row stays visually unseen rather than showing a state the database does not hold. Consumers therefore never have to reconcile a phantom seen flag | Existence is the flag; there is no boolean column. Batch check by `post_id IN (…)` | When the row count exceeds **5 000**, delete every row with an `id` smaller than the row `(count − 5000)` positions from the oldest. `id`-based deletion avoids `created_at` ties |
 | `hidden_posts` | `INSERT … ON CONFLICT(post_id) DO UPDATE SET title, subreddit, expires_at`; `expires_at = now + 30 days`, fixed and not user-configurable. Unhide deletes the row outright | A row with `expires_at ≤ now` reads as **not hidden**, even before the sweep deletes it. `getHiddenPosts()` returns non-expired rows ordered by `created_at` descending. `title`/`subreddit` are denormalised so the management screen needs no API call | Delete all rows with `expires_at < now` |
 | `drafts` | `INSERT … ON CONFLICT(key) DO UPDATE SET text`. Debounced at 400 ms and flushed on disappear under a cancellation shield. **Cleared only on a successful submit**; a failed submit deliberately keeps the draft | One draft per opaque key. Key formats in §7.5 | Cap **100** rows, same oldest-first deletion pattern |
 | `custom_themes` | Upsert keyed on `name`. Renaming creates a new row unless the caller deletes the old name | A row whose JSON fails to decode is skipped and logged, never fatal | **Never pruned** |
@@ -1099,7 +1120,7 @@ One post draft exists per subreddit, so starting a second draft in the same subr
 |---|---|---|---|---|
 | Image disk cache | `Caches/com.OWNER.appname.images/` | **512 MB** | Pipeline LRU | Immediate, from Settings, with a live size readout recomputed whenever the settings screen appears |
 | Image memory cache | in-process | **256 MB** cost | LRU + purge on memory warning | Automatic on `didReceiveMemoryWarning` |
-| Video cache | `Caches/com.OWNER.appname.video/` | **1 GB** | LRU | **Deferred to next launch** behind the `videoCacheClearRequested` flag, because the cache cannot be cleared while any player exists. The alert says so |
+| Video cache | `Caches/com.OWNER.appname.video/` | **1 GB** | LRU | **Deferred to next launch** behind the `videoCacheClearRequested` flag, because the cache cannot be cleared while any player exists. The alert says so. The flag is cleared after the attempt **whether or not the clear succeeded**, so a permanently failing clear cannot wedge every subsequent launch into retrying it before first paint |
 | Video cache exclusions | — | — | — | A source is **not cached** when its path ends `.m3u8` (playlists are not single-file cacheable) or `.gif` (Reddit serves mp4 bytes behind a `.gif` path; caching under that extension makes the decoder fail and the tile stays black forever) |
 | Media scratch | `Caches/` | one file at a time | — | Deleted in a shielded `defer` after every share/save, win or lose. Named from the URL's last path component so the extension survives; **no transcoding, no HEIC conversion** |
 | Guide search index | `Application Support/APPNAME/guide.sqlite` (FTS5) | small | — | Rebuilt when the bundled corpus version changes |
@@ -1294,7 +1315,14 @@ sentry-cocoa, DSN in an `.xcconfig` (not source), enabled iff not a Debug build 
 | `*.ingest.sentry.io` | Crash reporting, opt-out |
 | arbitrary external hosts | OpenGraph previews, media downloads for share/save, the in-app browser |
 
-Removed relative to the original: the first-party API host, and `u.expo.dev`.
+`new.reddit.com` appears **only** inside a `WebView` (the captcha-fallback submit page); no
+first-party `URLSession` request is ever made to it. The S3 host is reached exactly once per image
+post, with the URL Reddit itself returns from `/api/image_upload_s3.json`.
+
+**This table is the exhaustive set of hosts `APPNAME` may contact.** Any host not listed here is a
+bug, and the table doubles as the ATS / allow-list source. Note in particular that **no host the owner
+operates appears in it**: the original's first-party API host is absent by decision (§9.6), not by
+omission, and so is `u.expo.dev`.
 
 ---
 
@@ -1509,7 +1537,7 @@ Every item below is resolved in `08-decisions-and-drift.md`. Items marked **(new
 | `no-429-handling` | Add minimal 429 recognition, a global cooldown and exactly one retry (§11.2) |
 | `self-hosted-server-row` | No first-party backend; the self-hosted-server settings section disappears (§9.6) |
 | `guide-included-or-not` / `guide-prose-rewrite` | Guide search becomes on-device FTS5 over bundled Markdown (§9.6) |
-| `newpost-type-switch-keeps-text` | Clear the composer body when switching to or from a link post (§7.5) |
+| `newpost-type-switch-keeps-text` | Give the composer a **separate text field per post kind**, with drafts keyed per kind, so switching the post-type pill never moves a URL into the body (§7.5, `04a` §16.5.3) |
 | `clipboard-read-default` | Resolve the original's contradictory defaults in favour of `false` (§8.1) |
 | `unpruned-tables` | Leave `custom_themes`, `counter_stats` and `subreddit_visits` unpruned (§7.3) |
 | `theme-import-format-compat` | A new `::appname-theme::` base64url sentinel; the legacy format is neither emitted nor imported (`02 §8.5`, `04c` §18.5) |

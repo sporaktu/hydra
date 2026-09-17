@@ -44,7 +44,7 @@ both collapses to its videos.
 |---|---|---|---|---|
 | 1 | `media.reddit_video.hls_url` present | the **HLS `.m3u8`** playlist | `reddit_video.fallback_url` (a DASH mp4) | Normal `v.redd.it` video with audio. The original entity-decoded ~30 string fields client-side and missed this one; `APPNAME` sends `raw_json=1` on every read, so **no field is ever entity-encoded and no decoding step exists**. `[DECISION: raw-json-param]` |
 | 2 | `fallback_url` present, no HLS | the DASH mp4 | same | Crossposts, older videos |
-| 3 | Gallery videos (`gallery_data.items` + `media_metadata[id].s.mp4`) | `s.mp4` per item, ordered by `gallery_data.items` | same | **Checked before rule 4** so a gallery that also has a preview isn't collapsed to one preview-resolution video. Items lacking a `p` array (unprocessed) are dropped. |
+| 3 | Gallery videos (`gallery_data.items` + `media_metadata[id].s.mp4`) | `s.mp4` per item, ordered by `gallery_data.items` | same | **Checked before rule 4** so a gallery that also has a preview isn't collapsed to one preview-resolution video. An entry is dropped when it lacks a `p` array (unprocessed) **or** when it lacks `s.mp4` — both drops, not just the first (`03` §4.4 rule 3). |
 | 4 | `preview.images[].variants.mp4` | `variants.mp4.source` if present, else the **last** (largest) entry of `variants.mp4.resolutions` | same | The "Reddit GIF as mp4" path (r/gifs etc.). Nulls dropped. |
 | 5a | non-Reddit URL containing `imgur.com` ending `.gifv` | the URL with `.gifv` → `.mp4` | same | Pure string rewrite, no API |
 | 5b | non-Reddit URL containing `gfycat.com` | `https://web.archive.org/web/0if_/thumbs.<host+path>-mobile.mp4` | same | Gfycat is dead; this is a Wayback mirror |
@@ -56,7 +56,10 @@ Redgifs is the **only** host requiring an async call to become playable.
 ### 1.2 Animated GIF *images* are not videos
 
 An actual animated `.gif` file is part of `images[]` and is rendered by the image pipeline. It
-animates unconditionally — it is **excluded from all focus/pause logic**: an animating GIF never
+animates unconditionally **except in the Gallery Mode grid**, where §10.3 renders animated content as
+a **still first frame**; tapping into the fullscreen viewer resumes animation. That one carve-out
+exists because a two-column grid of simultaneously animating GIFs is the same CPU problem the
+four-player cap solves for video. Everywhere else it is **excluded from all focus/pause logic**: an animating GIF never
 pauses when scrolled off-screen or when another video takes focus, and it zooms/pans in the
 fullscreen viewer exactly like a still image. Only rule 4/5a/5b sources ("GIFs that are really mp4s")
 go through the video pipeline, where they behave identically to any other muted, looping video. There
@@ -136,6 +139,12 @@ with `scrollPosition(id:)`.
 
 **Rotation.** Re-seed the position from the **current** row/column at the moment of rotation (not the
 open-time index), so the user lands back on the same item.
+
+**Prefetch budget.** On the **vertical (post) axis**, prefetch **one page ahead and one behind** — a
+single screen in each direction. On the **horizontal (gallery) axis**, prefetch **nothing**: paging
+within one post is a deliberate act and the next item is one cache-warm decode away. Wider budgets
+spend bandwidth on posts the user is flinging past, which is the same argument as
+`[DECISION: no-speculative-preload]` for video.
 
 **Item index indicator.** Shown only when the current row has **more than one** item. Bottom-right:
 two round pill buttons (chevron-left / chevron-right) plus a pill reading `"<col+1> / <total>"`. The
@@ -241,6 +250,11 @@ One `ImagePage` per gallery item, sized to the full safe-area frame, `.scaledToF
   it is exactly the resolution the feed card already displayed and cached — so opening the viewer
   shows an immediate (slightly soft) image rather than a black frame, then crossfades (150 ms) to
   full detail.
+- **The feed strip, the gallery grid and this viewer must share one `ImagePipeline` instance and one
+  cache**, constructed once in the composition root and injected. The placeholder guarantee above
+  depends on it entirely: two pipelines means two caches, the viewer's "placeholder" is a cache miss,
+  and every open shows a black frame before the image arrives. This is a structural requirement, not
+  an optimisation.
 - Key the page's identity on the largest source URL so state resets correctly when a page is reused.
 - When a page is reused for a different item, zoom/pan state resets **synchronously**:
   `scale = 1, offset = .zero, isZoomed = false`.
@@ -549,6 +563,14 @@ Two floating circular 44×44 buttons, bottom-right, stacked vertically, just abo
 Each press fires `hapticSelection()` (`.sensoryFeedback(.selection, trigger:)`). Both are mirrored as
 Settings → Appearance rows and persist across launches.
 
+`[GATE: gate.videoAutoplay]` — **OWNER row, default OFF (free).** The tag covers **both FABs** above
+and their two mirrored Appearance rows (`04c` §17.1, "Auto play videos" and "Focused video audio"),
+and it is the same seam `04a` §9 tags on inline feed playback. While the owner leaves the gate off,
+nothing here is badged and nothing behaves differently; if it is ever flipped on, the FABs render with
+a `Plus` badge and open the paywall (`05` §5.11), every feed video falls back to the poster + play
+glyph, and **tapping a poster to open the fullscreen viewer stays free**. The tag exists so that flip
+is one line in `Feature.isGated` rather than a code hunt (`05-monetization.md` §3.1 rows A/D, §4).
+
 ### 7.4 Other inline behaviors
 
 - **App backgrounding.** The entire video subtree is torn down — **unmounted**, not merely paused —
@@ -757,9 +779,14 @@ normal feed but renders it as a media grid. `[GATE: gate.galleryMode]`
   "NSFW" or "Spoiler" (NSFW wins when both apply) and the per-cell reveal keyed on the post id. The
   original rendered raw thumbnails here with no check at all; a grid of unblurred NSFW thumbnails is
   a safety problem and an App Store age-rating risk. `[DECISION: gallery-mode-no-blur]`
-- **Loading more:** the same 2-screen prefetch threshold. Footer: spinner while loading (unless the
+- **Loading more:** the same 2-screen prefetch threshold, and **two viewport heights of grid cells are
+  prefetched ahead** (a taller budget than the viewer's, because a masonry grid shows far more items
+  per screen and a miss is visible as an empty tile). Footer: spinner while loading (unless the
   filter limit was hit), `"Wow. You've reached the bottom."` once fully loaded with at least one post,
   or the filter-limit copy from `04a` §2.2.
+- **Zero results render nothing.** A grid whose filters leave no qualifying post renders an **empty
+  grid with the spinner cleared and no message**, exactly like an empty feed (`04a` §2.2) and empty
+  search results (`04c` §7.1). Do not invent an empty state for Gallery Mode either.
 
 ### 10.4 Handoff to the fullscreen viewer
 
@@ -1049,25 +1076,25 @@ All pure logic below is testable without a network, a player, or a screen.
 | Source (in `docs/swift-rewrite/spec/`) | Section | Covered here |
 |---|---|---|
 | `05-media.md` §1 (media model), §1.1 (source ladder), §1.2 (link previews) | model + OpenGraph | §1, §11 |
-| `05-media.md` §2.1–2.5 (open, paging, dismiss, taps, overlay) | fullscreen viewer | §2 |
-| `05-media.md` §3.1–3.4 (image resolution, zoom, Live Text, image menu) | image viewing | §3 |
-| `05-media.md` §4.1–4.4 (Redgifs, trim fallback, watchdog, overlay state) | shared video architecture | §4, §6 |
+| `spec/05-media.md` §2.1–2.5 (open, paging, dismiss, taps, overlay) | fullscreen viewer | §2 |
+| `spec/05-media.md` §3.1–3.4 (image resolution, zoom, Live Text, image menu) | image viewing | §3 |
+| `spec/05-media.md` §4.1–4.4 (Redgifs, trim fallback, watchdog, overlay state) | shared video architecture | §4, §6 |
 | `05-media.md` §5 (player registry) | registry | §5 |
 | `05-media.md` §6 (gif handling) | gif dual paths | §1.2 |
-| `05-media.md` §7.1–7.4 (focus, autoplay/mute, FABs, other inline) | feed video | §7 |
-| `05-media.md` §8.1–8.3 (fullscreen controls, audio activation, errors) | fullscreen video | §8 |
-| `05-media.md` §9.1–9.3 (download/share/save) | downloads | §9 |
-| `05-media.md` §10.1–10.4 (gallery mode) | gallery mode | §10 |
-| `05-media.md` §11 (low data) | low data | §13 |
-| `05-media.md` §12.1–12.2 (caches) | caches | §12 |
-| `05-media.md` §13 (settings keys) | settings cross-ref | §7.2, §13, §12 |
-| `02-api-contract.md` §2.14–2.15 (Redgifs G1/G2, other hosts), §5.3–5.4 (caches), §6.1–6.6 (third-party services), §8 (throttling table) | endpoints, concurrency, cooldowns | §6, §11, §12 |
-| `02-api-contract.md` §4.1.1–4.1.3 (image/video/link extraction) | media derivation | §1 |
+| `spec/05-media.md` §7.1–7.4 (focus, autoplay/mute, FABs, other inline) | feed video | §7 |
+| `spec/05-media.md` §8.1–8.3 (fullscreen controls, audio activation, errors) | fullscreen video | §8 |
+| `spec/05-media.md` §9.1–9.3 (download/share/save) | downloads | §9 |
+| `spec/05-media.md` §10.1–10.4 (gallery mode) | gallery mode | §10 |
+| `spec/05-media.md` §11 (low data) | low data | §13 |
+| `spec/05-media.md` §12.1–12.2 (caches) | caches | §12 |
+| `spec/05-media.md` §13 (settings keys) | settings cross-ref | §7.2, §13, §12 |
+| `spec/02-api-contract.md` §2.14–2.15 (Redgifs G1/G2, other hosts), §5.3–5.4 (caches), §6.1–6.6 (third-party services), §8 (throttling table) | endpoints, concurrency, cooldowns | §6, §11, §12 |
+| `spec/02-api-contract.md` §4.1.1–4.1.3 (image/video/link extraction) | media derivation | §1 |
 | `01-navigation-shell.md` §1 (orientation lock/unlock), §20 (backgrounding) | rotation + background teardown | §2.1, §7.4 |
 | `03-feed-and-posts.md` §4.5–4.6 (blur, feed image strip), §9 (focus algorithm), §20 (low data) | feed-side media | §3, §7, §13 |
 | `08-feature-inventory.md` D (media), K (sharing/downloading) | acceptance checklist | throughout |
 | `09-persistence-pro-utils.md` §2.3 (media caches), §5.2 (media sharing) | caches, share/save | §9, §12 |
-| `10-swiftui-2026-baseline.md` A3 (images, media/autoplay/PiP, gestures/zoom/Live Text, lazy stacks, sensory feedback, scene APIs) | component choices | §14 |
+| `spec/10-swiftui-2026-baseline.md` A3 (images, media/autoplay/PiP, gestures/zoom/Live Text, lazy stacks, sensory feedback, scene APIs) | component choices | §14 |
 
 ### 16.2 Decision tags used in this document
 
@@ -1099,7 +1126,7 @@ no aliases, and the register's "Default (assumed)" column is what this document 
 |---|---|
 | `gate.galleryMode` | Gallery Mode's 100-item limit and its inline "Continue with Plus" footer (§10.1) |
 | `gate.downloads` | "Save Image" in the image long-press menu (§3.4), "Save Video" in the new video long-press menu (§7.4), and the `save(_:_:)` flow itself (§9). **Sharing stays free** |
-| `gate.videoAutoplay` | Inline feed autoplay and feed audio (§7.2). **OWNER, default free** — see `04a` §9 |
+| `gate.videoAutoplay` | The two feed FABs and their mirrored Appearance rows (§7.3), covering inline feed autoplay and feed audio (§7.2). **OWNER, default free** — the same seam `04a` §9 tags |
 
 Gates declared in the companion documents and referenced from here: `gate.customThemes`,
 `gate.filters`, `gate.sortMemory`, `gate.compose` (`04a`), and `gate.multiAccount`, `gate.gestures`,
