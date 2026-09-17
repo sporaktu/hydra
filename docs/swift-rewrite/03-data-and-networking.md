@@ -1097,6 +1097,11 @@ Increment sites: `app_launches` +1 at cold start; `app_foregrounds` +1 at cold s
 
 No password is ever stored, because no password is ever seen.
 
+**No Keychain item is ever synchronised.** Every item is written with **no** `kSecAttrSynchronizable`
+and accessibility `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`, so a Reddit session stays on the
+device that created it and is invisible to the share and widget extensions
+(`[DECISION: icloud-keychain-sessions-no]`, §8.3, `09` §3.7.1).
+
 ### 7.5 Draft keys
 
 One draft per opaque key. Formats, chosen so drafts never collide across accounts or contexts:
@@ -1222,6 +1227,13 @@ Backed by `UserDefaults` through a typed `SettingsStore`. Every read is `stored 
 | `currentUsername` | String? | `nil` | `currentUser` | Absence means logged out |
 | `favoriteSubreddits.<userID>` | `[String]` | `[]` | `favoriteSubreddits:<userId>` | Per-account, local only, never synced |
 | `redgifsToken` | String? | `nil` | `redgifsToken` | Cached bearer token |
+| **Feedback (new — `09` §2.3, §3.12)** | | | | |
+| `feedback.haptics` | Bool | `true` | — | Master switch for every first-party haptic cue (`09` §2). System-control haptics are unaffected. `[DECISION: haptics-toggle]` |
+| `feedback.offerTranslate` | Bool | `false` | — | Adds a Translate item to the post-text and comment long-press menus via the Translation framework. `[DECISION: translation-optional]` |
+| **Sync (new — `09` §3.6, §3.7)** | | | | |
+| `sync.icloud` | Bool | `true` | — | Master switch for the iCloud key-value mirror (§8.3). `[DECISION: icloud-kvs-sync]` |
+| `sync.handoff` | Bool | `true` | — | Advertises the open route as an `NSUserActivity`. `[DECISION: handoff-continuity]` |
+| `sync.lastAppliedAt` | Double (epoch-ms) | `0` | — | **Device-local, never synced.** Timestamp of the last successfully applied incoming merge; drives the Advanced → iCloud footer |
 | **Removed** | | | | |
 | — | — | — | `showPostSummary`, `showCommentSummary` | Dead in the original (no consumer). Not carried over |
 | — | — | — | `useHydraServer`, `customHydraServerUrl` | No backend exists (§9) |
@@ -1233,6 +1245,68 @@ Backed by `UserDefaults` through a typed `SettingsStore`. Every read is `stored 
 `05-monetization.md` §4 owns the free/paid split. Architecturally it is a single compile-time table, `Feature.isGated` (`02-architecture.md` §13.2) — eleven entries, of which `videoAutoplay` and `compose` are `false` (free) by default. There is no `FeatureMatrix.json`, no server-tuned matrix and no free-allowance mechanism.
 
 One `UserDefaults` key exists for testing only: `entitlements.debugUnlockOverride` (`Bool?`), honoured **only** in Debug and TestFlight builds, so the paywall and the locked states can be exercised without a sandbox purchase. It is absent from Release builds and no feature code reads it — feature code asks `entitlements.isUnlocked(_:)` and nothing else.
+
+### 8.3 iCloud-synced keys (`SyncKit`)
+
+`[DECISION: icloud-kvs-sync]` · normative contract: `09` §3.7 · module: `SyncKit` (`02` §3.1 row 14,
+§14.10). **iCloud is Apple-hosted storage inside the user's own Apple Account, not a backend of
+ours**; `[DECISION: self-hosted-server-row]` and the "Data Not Collected" privacy label are unchanged.
+
+**Storage shape.** Every synced key `k` is written to `NSUbiquitousKeyValueStore` as a two-field
+property-list dictionary `{ "v": <value>, "t": <epoch-ms Double> }`. `t` is set to `now` on every
+local write.
+
+**Conflict rule — last-writer-wins by `t`.** On `didChangeExternallyNotification` (reason
+`ServerChange` or `InitialSyncChange`), for each changed key take the side with the larger `t`;
+**a tie keeps the local value**, so the merge is idempotent and cannot ping-pong. Reason
+`AccountChange` discards the entire remote snapshot and re-uploads local, because the new Apple
+Account's values belong to a different device set. Reason `QuotaViolationChange` stops syncing theme
+values (largest first), keeps syncing scalars, and surfaces on the Advanced → iCloud footer
+(`04c` §20.4).
+
+**What syncs:**
+
+| Class | Keys | Encoding |
+|---|---|---|
+| Theme selection | `theme.light`, `theme.dark`, `theme.useSeparateDark` | scalar |
+| Custom themes | one key per theme, `theme.custom.<uuid>` | the `02` §8.5 export codec's payload, as `Data`. A deleted theme writes a tombstone `{ "v": null, "t": now }` that `SyncKit` removes after 30 days |
+| Post & comment appearance | every `post.*` and `comment.*` scalar in §8.1 | scalar |
+| Gestures | `gestures.swipeAnywhereToNavigate`, `gestures.postSwipe`, `gestures.commentSwipe` | scalar / plist dictionary |
+| Sorting defaults and memory | `sorting.*` scalars and the three per-subreddit dictionaries | scalar / plist dictionary |
+| Filters | `filters.text`, `filters.subreddits`, `filters.hideSeenPosts`, `filters.hideSeenOverrides`, `filters.markSeenOnScroll` | scalar / plist |
+| Media and data use | `media.*` and `dataUse.*` scalars, including `media.liveText` | scalar |
+| Tabs and startup | `tabs.*`, `startup.*` | scalar |
+| Feedback | `feedback.haptics`, `feedback.offerTranslate` | scalar |
+
+**What never syncs:**
+
+| Class | Where it lives | Why |
+|---|---|---|
+| Reddit session cookies and modhashes | Keychain, **no `kSecAttrSynchronizable`**, `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly` (§7.4) | A bearer credential. Apple's own KVS warning forbids sensitive data there, and iCloud Keychain propagation is a posture the owner should choose, not inherit. `[DECISION: icloud-keychain-sessions-no]` |
+| Cached entitlement snapshot | Keychain, same attributes (§7.4) | StoreKit already syncs the subscription itself through the Apple Account |
+| `seen_posts`, `hidden_posts`, `drafts`, `counter_stats`, `subreddit_visits` | GRDB (§7.2) | Datasets, not settings; KVS's 1 MB budget is the wrong tool. `[DECISION: cloudkit-dataset-sync-deferred]` |
+| `sync.lastAppliedAt`, `flags.*` one-time-alert flags, `entitlements.debugUnlockOverride` | `UserDefaults` | Device-local by definition |
+| Image/video caches, scroll positions, in-memory caches | disk / memory | Ephemeral |
+
+**Budget.** Apple's documented limits are **1 024 keys**, **1 MB total**, **1 MB per value** and
+**128 UTF-16 characters per key**. The allow-list is ~70 scalars plus one value per custom theme; a
+unit test asserts the encoded allow-list plus 20 custom themes stays under 1 MB. Entitlement:
+`com.apple.developer.ubiquity-kvstore-identifier`, **app target only** — not the share or widget
+extensions.
+
+### 8.4 Spotlight index schema (`AppIntentsKit`)
+
+`[DECISION: spotlight-index]` · normative contract: `09` §3.5. Core Spotlight
+(`CSSearchableIndex.default()`), written from `Persistence`'s save/subscribe paths through a protocol.
+
+| Item | `uniqueIdentifier` | `domainIdentifier` | `CSSearchableItemAttributeSet` | Written when | Deleted when |
+|---|---|---|---|---|---|
+| Subreddit | `sub:<lowercased name>` | `com.OWNER.appname.subreddits` | `contentType = .content`, `title = "r/<name>"`, `contentDescription` = public description, `thumbnailURL` = icon URL, `keywords = [name, displayName]` | The subscription list is fetched | Unsubscribed; whole domain deleted on logout and on account removal |
+| Saved post | `saved:<fullname>` | `com.OWNER.appname.saved` | `contentType = .content`, `title` = post title, `contentDescription = "r/<sub> · u/<author>"`, `contentURL` = permalink | A post is saved | Unsaved; whole domain deleted on logout and on account removal |
+
+Nothing else is indexed — no feed content, no inbox item, no message, no browsing history. Both item
+types are also the `defaultAttributeSet` of the matching `IndexedEntity` (`09` §3.5), which is what
+makes them reachable from Siri and Shortcuts as well.
 
 ---
 
@@ -1459,6 +1533,24 @@ It then opens `appname://openurl?url=<percent-encoded>` and completes. The host 
 ### 12.4 App Intent
 
 `OpenRedditLinkIntent` (`AppIntents`) accepts a URL and performs the same intake, so "Open in APPNAME" appears in Shortcuts, the share sheet and Spotlight without the user installing anything. This replaces the original's "install this iCloud Shortcut" flow. `AppEntity` payloads stay well under the 10 MB cumulative cap (we vend none).
+### 12.5 Handoff payload
+
+`[DECISION: handoff-continuity]` · `09` §3.6. One activity type,
+`com.OWNER.appname.viewing`, declared in `Info.plist` under `NSUserActivityTypes`.
+
+| Field | Value |
+|---|---|
+| `activityType` | `com.OWNER.appname.viewing` |
+| `title` | The screen's navigation title |
+| `isEligibleForHandoff` | `true` while `sync.handoff` is on |
+| `isEligibleForSearch` / `isEligibleForPublicIndexing` | `false` — Spotlight is fed by §8.4, not by activities |
+| `userInfo["route"]` | The JSON-encoded `Route` (`02` §5.5) |
+| `userInfo["v"]` | Schema version `1`; a continuation with an unknown version falls back to `webpageURL` |
+| `webpageURL` | The canonical `reddit.com` permalink, so a device without the app continues in a browser |
+| Invalidated | On logout, on account switch, and when `sync.handoff` is turned off |
+
+Continuation decodes `userInfo["route"]` and hands it to the **same** `LinkIntake` the share
+extension, the URL scheme, the widgets and the controls use (`02` §5.7, `04c` §13).
 
 ---
 
@@ -1469,6 +1561,9 @@ It then opens `appname://openurl?url=<percent-encoded>` and completes. The host 
 | §1 Access model, pipeline, UA | `spec/02 §0`, `§1.1`, `§1.2`, `§1.3` |
 | §2 Link parsing / normalization / classification | `spec/02 §1.4`; `spec/01 §7`, `§7.1`–`§7.3`, `§7.5`, `§7.7` |
 | §2.6 Preferred sorts | `spec/01 §7.6`; `spec/02 §1.4`; `spec/03 §16.2` |
+| §8.3 iCloud-synced keys | **`09` §3.7 (normative)**; [`NSUbiquitousKeyValueStore`](https://developer.apple.com/documentation/foundation/nsubiquitouskeyvaluestore) (quotas and the "don't store sensitive information" warning); `02` §14.10 |
+| §8.4 Spotlight index | **`09` §3.5 (normative)**; [`CSSearchableItem`](https://developer.apple.com/documentation/corespotlight/cssearchableitem), [`IndexedEntity`](https://developer.apple.com/documentation/appintents/indexedentity); `02` §14.9 |
+| §12.5 Handoff payload | **`09` §3.6 (normative)**; [`NSUserActivity`](https://developer.apple.com/documentation/foundation/nsuseractivity), [`NSUserActivityTypes`](https://developer.apple.com/documentation/bundleresources/information-property-list/nsuseractivitytypes); `02` §5.7, §14.9 |
 | §3 Short links | `spec/01 §7.4`; `spec/02 §1.5` |
 | §4.0–§4.1 Post | `spec/02 §4.1` |
 | §4.1.1 Flag summary | `spec/02 §4.1`; `spec/03 §4.2`, `§4.11`, open question 6; `spec/04 §2` |

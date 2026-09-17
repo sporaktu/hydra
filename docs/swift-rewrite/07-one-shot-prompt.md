@@ -25,8 +25,19 @@ Do these first. The agent cannot do them and will stall or invent values without
 - [ ] **4. Have the spec repo available locally** — the agent copies `docs/swift-rewrite/` out of
       it in its very first step.
 - [ ] **5. Apple Developer Program** membership active. Create the App ID with the bundle id,
-      enable the capabilities the app needs (App Groups only if the share extension uses one;
-      **not** Push Notifications), and create the App Store Connect app record.
+      enable the capabilities the app needs and create the App Store Connect app record. Exactly
+      **two** capabilities: **App Groups** (`group.com.OWNER.appname`, on the app, the share
+      extension **and** the widgets extension) and **iCloud → Key-value storage** (app target only,
+      `09` §3.7). **Not** Push Notifications, **not** CloudKit containers, **not** Associated
+      Domains, and **not** Siri — App Intents and App Shortcuts need no capability at all; the Siri
+      capability belongs to SiriKit Intents extensions, which this app does not ship (`09` §3.4).
+- [ ] **5a. Decide about the `audio` background mode.** The app declares
+      `UIBackgroundModes = ["audio"]` for **Picture in Picture in the fullscreen video viewer and
+      nothing else** (`[DECISION: pip-fullscreen-video]`, `[DECISION: background-mode-audio-pip-only]`,
+      `09` §3.8.1). It is the only entitlement the native-polish work costs and the only App Review
+      question it creates (`06` risk R16). If you would rather not have that conversation, say so
+      now: rejecting PiP is four edits, listed in `09` §3.8.1, and is much cheaper before the build
+      than after.
 - [ ] **6. Agreements, Tax and Banking** — Paid Apps agreement signed and active, or IAP products
       will sit in "Missing Metadata" forever.
 - [ ] **7. Enroll in the App Store Small Business Program** (15% commission).
@@ -82,6 +93,20 @@ Do these first. The agent cannot do them and will stall or invent values without
 - [ ] **15. Capture the Reddit JSON fixtures** listed in `06-build-plan-and-acceptance.md` §1.7, or
       let the agent stub them and fill them in at the end of Phase 1. Capturing them by hand first
       is strongly recommended — every unit test in the build depends on them.
+- [ ] **17. Two devices on one Apple Account, for the sync and Handoff pass.** Handoff
+      (`09` §3.6) and iCloud settings sync (`09` §3.7) cannot be verified on one device or in a
+      simulator pair that is not signed in. The Phase 9 smoke opens a post on the iPhone and
+      continues it on the iPad, and changes a theme on one and watches it arrive on the other. If
+      that is not possible, accept that both land in `PROGRESS.md` as "could not verify without two
+      signed-in devices".
+- [ ] **18. Read `09-native-polish-and-platform-features.md` §3's summary table (§3.1) once, top to
+      bottom.** Nineteen features ship, one ships off by default, four are deferred and eight are
+      rejected, each with a decision id in `08` §1.5 (#101–#127). Every one is **free**
+      (`[DECISION: native-polish-free]`). Veto anything you do not want now — each row is
+      independent, and the two worth a moment's thought are Picture in Picture (step 5a) and
+      Spotlight indexing (`09` §3.5 notes that `IndexedEntity` is described by Apple as making
+      entities discoverable by Apple Intelligence; dropping that conformance keeps the feature and
+      removes the association, in two lines).
 - [ ] **16. Run the prompt below** in the new repo.
 
 ---
@@ -121,6 +146,10 @@ Before anything else:
      ~350-item acceptance checklist you must satisfy
    - `08-decisions-and-drift.md` — the resolved decisions behind every `[DECISION: <id>]` tag, plus
      the list of original-app bugs you must **not** reproduce
+   - `09-native-polish-and-platform-features.md` — **normative** for haptics (§2), the modern
+     platform surfaces (§3), the accessibility baseline (§4) and motion (§5). Read it before Phase 2,
+     because the haptics facade is a Phase 0 deliverable and every later phase attaches cues through
+     it, and read it again in full at the start of Phase 9
    - `docs/spec/01` through `docs/spec/10` — the raw behavioural surveys. These are reference
      material: when a `04*` document is ambiguous, the corresponding `spec/` file has the exact
      thresholds, constants, orderings and edge cases. `spec/10-swiftui-2026-baseline.md` is the
@@ -131,13 +160,16 @@ Before anything else:
 
 Tag spellings: **there are no aliases.** Every `[GATE: gate.*]` tag names one of the eleven gate ids
 defined in `05-monetization.md` §4, and every `[DECISION: <id>]` tag names a numbered entry in
-`08-decisions-and-drift.md` §1 (#1–#100), a bug id in its §2, or a drift row `D1`–`D20` in its §3. A
+`08-decisions-and-drift.md` §1 (#1–#127, where #101–#127 are the native-polish decisions in §1.5), a
+bug id in its §2, or a drift row `D1`–`D20` in its §3. A
 gate not defined in `05` §4 does not exist — treat that feature as free. A decision id you cannot find
 is an error: record it in `PROGRESS.md` under "Open questions" and match the code as `spec/` describes
 it. Do not invent register entries.
 
 Precedence, when documents disagree: `08-decisions-and-drift.md` > `05-monetization.md` >
-`04a`/`04b`/`04c` > `02`/`03` > `spec/01`–`spec/10`. The set has been reconciled, so a material
+`09-native-polish-and-platform-features.md` > `04a`/`04b`/`04c` > `02`/`03` > `spec/01`–`spec/10`.
+`09` sits above the `04*` documents **only** for haptics, the platform surfaces, accessibility and
+motion; for everything else the `04*` documents win as before. The set has been reconciled, so a material
 conflict is a defect rather than a choice: record it in `PROGRESS.md` under "Open questions", pick the
 option that best matches `spec/`'s description of the current code, and continue. Do not stop to ask.
 
@@ -183,6 +215,30 @@ option that best matches `spec/`'s description of the current code, and continue
     server, no receipt upload.
 11. **No backend of any kind.** The app talks to `www.reddit.com`, `old.reddit.com`, Reddit's media
     hosts, `api.redgifs.com`, arbitrary hosts for Open Graph link previews, and Apple. Nothing else.
+    iCloud key-value storage and Handoff are Apple-operated services inside the user's own Apple
+    Account — **not** a server we run, not a service we can read, and not a change to the privacy
+    label.
+12. **Native quality of life is not optional.** Implement the complete haptic map and the platform
+    features in `09-native-polish-and-platform-features.md`.
+    - **No gesture ships without its haptic.** Every interaction in `04a`/`04b`/`04c` appears in
+      `09` §2's Maps A–F with either a cue or an explicit "none, and why". A gesture that changes
+      state and fires nothing, with no row saying it should, is a defect.
+    - **Never more than one haptic per user action**, and **never a haptic the user did not cause**.
+      An in-gesture cue suppresses the commit cue; a failure always fires `.error`. `09` §2.10's
+      ten-item do-not list is a review checklist, not advice.
+    - **One facade, in `DesignSystem`, built in Phase 0.** `sensoryFeedback`,
+      `UIImpactFeedbackGenerator`, `UISelectionFeedbackGenerator`, `UINotificationFeedbackGenerator`
+      and `CHHapticEngine` are lint errors everywhere else. `.start`, `.stop`, `.increase`,
+      `.decrease` and `.levelChange` are lint errors **everywhere** — Apple documents all five as
+      silent on iOS.
+    - **Never add a haptic to a system `Toggle`, `Picker`, `Slider`, alert, sheet or
+      `.contextMenu`.** iOS already plays one; the second is audible as a bug.
+    - Ship the platform surfaces of `09` §3: widgets, Control Center and Action-button controls, App
+      Intents with App Shortcuts, Spotlight indexing, Handoff, iCloud settings sync, Picture in
+      Picture, zoom transitions, symbol effects and `Tab(role: .search)`. All free, none gated.
+    - **The accessibility audit is a gate**, not a nicety: `09` §4.2's eight parts, written up in
+      `PROGRESS.md` as an accessibility audit report before Phase 10 begins. So is the haptics audit
+      (`09` §2.11).
 
 ## Working method
 
@@ -323,11 +379,36 @@ Restated here so you never have to guess:
   answer card, and no self-hosted-server setting.
 - The right-edge swipe-forward gesture is reproduced (`02` §5.8). The scroll-to-next-comment
   button is reproduced with strict parity: tap = next, 300 ms hold = previous, ~1 s hold =
-  reposition, 10 snap positions (`04a` §15.4).
+  reposition, 10 snap positions (`04a` §15.4) — with the four haptic cues of `09` §2.5 rows
+  H2.08–H2.13, including `.alignment` on slot entry and an explicit `.impact` (**not** `.start`) on
+  entering reposition mode.
 - Universal links are not configured (we cannot host an AASA file for `reddit.com`); the entry
   points are the Share Extension, an "Open in APPNAME" App Intent, the custom URL scheme, and
   clipboard detection (default **off**).
-- No Picture-in-Picture and no background audio: video is torn down on backgrounding.
+- **Picture in Picture ships**, in the fullscreen video viewer only, and it is the reason
+  `UIBackgroundModes = ["audio"]` is declared — the app's one background mode, for PiP and nothing
+  else. **Background audio still does not ship**: inline feed and gallery players are unmounted on
+  `.background`, the audio session is activated only while a viewer video plays or PiP is active, and
+  the player is torn down when PiP stops while backgrounded. `09` §3.8.1 has the five guardrails.
+- **The haptic map in `09` §2 is the contract** — 153 rows across feeds, comments, media,
+  accounts, settings, purchase and iPad, each with a trigger moment, a cue and an intensity, plus an
+  explicit "none, and why" for every interaction that gets no cue. One facade in `DesignSystem`,
+  built in Phase 0; two tiers (`sensoryFeedback` by default, `prepare()`-backed generators for twelve
+  latency-critical rows); no Core Haptics; a `feedback.haptics` kill switch, default on; and five
+  `SensoryFeedback` cases banned outright because Apple documents them as silent on iOS.
+- **The app ships the modern platform surfaces**, all free: three widgets and two Control Center /
+  Action-button controls in a new `WidgetsExtension` that **must not link `RedditAPI`**; four App
+  Intents plus an `AppShortcutsProvider` in a new `AppIntentsKit`; Core Spotlight indexing of saved
+  posts and subscribed subreddits only; Handoff of the open route between the owner's devices; and
+  iCloud **key-value** sync of settings, filters and custom themes in a new `SyncKit`, with
+  last-writer-wins on an explicit `{v, t}` timestamp envelope.
+- **Reddit sessions never sync.** No Keychain item carries `kSecAttrSynchronizable`; everything is
+  `…AfterFirstUnlockThisDeviceOnly`. Nothing sensitive is ever written to the iCloud key-value store,
+  which Apple documents as unencrypted on disk.
+- **Live Activities, Writing Tools adoption, an in-app Face ID lock and CloudKit dataset sync are
+  not built**, each for a written reason in `09` §3.14–§3.15. Writing Tools is neither adopted **nor
+  suppressed** — it is a system affordance in every text view and we leave the default alone.
+- **Nothing in `09` is gated.** No twelfth gate id exists or may be created.
 - The full list of original-app bugs to fix rather than reproduce is `08-decisions-and-drift.md`
   §2. Read it before Phase 2 and again before Phase 9.
 
@@ -352,20 +433,29 @@ Violating any of these is a defect even if the code compiles and the tests pass.
 - **No `UIDesignRequiresCompatibility`**, and no attempt to opt out of Liquid Glass by any other
   means.
 - **Declare every Info.plist key and entitlement in `06-build-plan-and-acceptance.md` §1.3, and
-  declare nothing that is not on that list.** The four blockers are
-  `NSPhotoLibraryAddUsageDescription`, `NSPhotoLibraryUsageDescription`, `CFBundleURLTypes` for the
-  `appname://` scheme, and the App Group `group.com.OWNER.appname` on **both** the app and the share
-  extension. Alternate icons come from the *Alternate App Icon Sets* build setting, which is what
-  writes `CFBundleIcons` / `CFBundleAlternateIcons`. **No `UIBackgroundModes` at all** (no PiP, no
-  background audio, no background refresh), no `aps-environment`, no Associated Domains, and no
-  `LSApplicationQueriesSchemes` — `canOpenURL` is never called, so there is nothing to declare.
+  declare nothing that is not on that list.** The blockers are `NSPhotoLibraryAddUsageDescription`,
+  `NSPhotoLibraryUsageDescription`, `CFBundleURLTypes` for the `appname://` scheme, the App Group
+  `group.com.OWNER.appname` on **all three** targets (app, share extension, widgets extension),
+  `NSUserActivityTypes` for Handoff, and the iCloud key-value entitlement on the **app target only**.
+  Alternate icons come from the *Alternate App Icon Sets* build setting, which is what writes
+  `CFBundleIcons` / `CFBundleAlternateIcons`. **`UIBackgroundModes` is exactly `["audio"]`, for
+  Picture in Picture and nothing else** — no other value, no background refresh, no
+  `BGAppRefreshTask`. No `aps-environment`, no `NSSupportsLiveActivities`, no CloudKit container, no
+  Associated Domains, no Siri capability, and no `LSApplicationQueriesSchemes` — `canOpenURL` is
+  never called, so there is nothing to declare.
 - **No `TODO:` or `FIXME:` comments** in shipped code. Unfinished work goes in `PROGRESS.md` as a
   `DEFERRED` line with a reason; the lint config fails the build on `TODO`.
 - **No restart alerts.** Every setting takes effect immediately. The one deferred-to-next-launch
   operation is clearing the video cache, and that is an action, not a setting.
-- **No feature code in the app target.** It holds `@main`, the scene, the tab shell and the
-  `AppGraph` composition root. Everything else lives in one of the **18** packages named in
-  `02-architecture.md` §2.2/§3.1 — use those names verbatim; do not invent a package layout.
+- **No feature code in the app target.** It holds `@main`, the scene, the tab shell, the Handoff
+  activity modifiers and the `AppGraph` composition root. Everything else lives in one of the **20**
+  packages named in `02-architecture.md` §2.2/§3.1 — use those names verbatim; do not invent a
+  package layout — or in one of the two extension targets, `ShareExtension` and `WidgetsExtension`.
+- **`WidgetsExtension` must never link `RedditAPI`, and `AppIntentsKit` must never link
+  `FoundationModels`.** Both are CI-enforced hard edges. The first is what guarantees a widget can
+  never make a network request; the second is what keeps the intent surface inside the no-AI rule.
+- **Never add a `[GATE:]` tag to anything specified in `09`**, and never add a twelfth case to
+  `Feature`. All of `09` is free.
 - **No hard-coded prices, currencies or subscription periods.** Every price string comes from
   `Product.displayPrice` and friends.
 - **No paywall on launch, on a timer, after N sessions, or on backgrounding.** The paywall appears
@@ -400,15 +490,24 @@ At the end of the run, this repository contains:
 1. **A buildable Xcode project** — `xcodebuild build -scheme APPNAME` succeeds with zero first-party
    warnings on **both** an iPhone and an iPad simulator destination, and the app runs on both.
    `TARGETED_DEVICE_FAMILY = 1,2`; no `UIRequiresFullScreen`; `UISupportedInterfaceOrientations~ipad`
-   lists all four orientations.
+   lists all four orientations. The **`ShareExtension` and `WidgetsExtension` schemes also build**
+   with zero first-party warnings, and `Scripts/check-package-graph.sh` is green, including the two
+   hard edges (`WidgetsExtension → RedditAPI`, `AppIntentsKit → FoundationModels`).
 2. **Passing tests** — `swift test` green in every package; `xcodebuild test` green; the fixture
    replay green; the UI smoke test green **on both the iPhone and the iPad destination**, with the
    iPad run covering tap-to-pane, Close and Fullscreen.
 3. **`PROGRESS.md`** — every acceptance-checklist item marked `DONE`, `CUT` (with the
-   `[DECISION: <id>]` that cuts it), or `DEFERRED` (with a reason and a suggested follow-up). Plus a
-   "Blocked", an "Open questions", a "Could not verify without a device/account" section, and a
-   **"iPad smoke results"** section recording each phase's iPad manual list and its outcome.
-4. **`README.md`** — what the app is (an iPhone **and iPad** client); the iOS/Xcode/Swift versions;
+   `[DECISION: <id>]` that cuts it), or `DEFERRED` (with a reason and a suggested follow-up),
+   **including all 41 items of area Z**. Plus a "Blocked", an "Open questions", a "Could not verify
+   without a device/account" section, a **"iPad smoke results"** section recording each phase's iPad
+   manual list and its outcome, a **"Haptics audit"** section with the per-map results of the three
+   Phase 9 passes (`09` §2.11), and an **"Accessibility audit report"** section with the eight parts
+   of `09` §4.2 written out — Inspector results per screen on both device classes, the six VoiceOver
+   flows, the Dynamic Type `.accessibility5` screenshot set, the Reduce Motion run against `09` §5.2,
+   Reduce Transparency / Increase Contrast on the four glass sites, Smart Invert, Voice Control
+   naming, and the Assistive Access non-support statement.
+4. **`README.md`** — what the app is (an iPhone **and iPad** client, with widgets, Control Center
+   controls, Shortcuts/Siri actions, Handoff and iCloud settings sync); the iOS/Xcode/Swift versions;
    the two simulator destinations the gate uses; how to build, test and run;
    the package layout and what each package owns; how fixtures work and how to record new ones;
    how to run the StoreKit configuration file; the dependency allow-list and why each one is there;
@@ -465,6 +564,7 @@ did not cover.
 | §B "Mission" and "Step 0" | `06-build-plan-and-acceptance.md` §1.1 (clean-room boundary), §2 (phases) | `PROGRESS.md` |
 | §B non-negotiables 2–8 | `spec/10` §§A1–A3 and Part C; `02` §5.15; `08-decisions-and-drift.md` items 6, 14, 39, 93–100 | Build settings in `06` §1.3 |
 | §B non-negotiables 9–11 | `08-decisions-and-drift.md` items 2, 3, 10; `05-monetization.md` §5.4 | Phases 5, 7, 8 |
+| §A steps 5, 5a, 17, 18; §B non-negotiable 12, the native-polish assumed decisions, the guardrails and output artifacts 1, 3, 4 | **`09-native-polish-and-platform-features.md`** §§2–5; `08` §1.5 (#101–#127); `06` §1.3, §1.6, Phase 0, Phase 9, §4 area Z, risks R16–R19 | Phase 0 (the haptics facade and the full entitlement set), Phase 9 (the native-polish block and both audits) |
 | §B working method and gate | `06-build-plan-and-acceptance.md` §2 (per-phase DoD), §3 (verification method) | CI workflows |
 | §B assumed decisions | `08-decisions-and-drift.md` §§1–3 in condensed form — **that file remains authoritative** | Every `[DECISION: <id>]` tag in `02`–`06` |
 | §B guardrails | `06-build-plan-and-acceptance.md` §1.4 (dependency allow-list), §1.5 (lint rules encoding these guardrails), §5 (risk R9 agent drift); `05-monetization.md` §§3.3, 5.10; `spec/10` Part C | `.swiftlint.yml`, `.swift-format` |

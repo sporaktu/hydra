@@ -146,6 +146,10 @@ A `loginFinished` latch guards against both firing.
 With `WebPage`, implement (1) by observing the `navigations` async sequence and (2) with a `Task` that
 polls `WKHTTPCookieStore`.
 
+**Haptics: see `09` §2.7 rows H4.01–H4.05.** A successful login fires `.success`; a failure or a
+timeout fires `.error`; a completed account switch fires `.success`; a confirmed account removal
+fires `.warning`.
+
 #### 2.4 Completion
 
 On "finished": dismiss immediately, then run the login procedure with no username argument (it uses
@@ -206,7 +210,8 @@ Driven purely by `currentUser` changing:
 #### 2.7 Quick Account Swap
 
 Triggered by **long-pressing the Account tab**, but only when at least one account is saved (with zero
-accounts the long press does nothing). Fires `hapticSelection()`.
+accounts the long press does nothing). Fires `.selection` at the moment the long press is
+**recognised**, not when the overlay presents (`09` §2.4 row H1.28).
 
 Presentation: a full-screen overlay — a 0.7-opacity black scrim that dismisses on tap, plus a
 **centered card** (max height 400, rounded, bordered, `theme.tint`) containing the **same** account
@@ -343,6 +348,10 @@ settings changes nothing here. Consequently `[GATE: gate.gestures]` never applie
 | Tap | Marks read, navigates to `Route.messageThread(id)` (§5) |
 | Swipe | Short-right = **mark-as-read toggle only**. No vote actions — messages are not votable. |
 | Long press | A **single** item whose label **flips with state**: `Mark as Read` when unread, `Mark as Unread` when read. The original hard-coded "Mark as Read" in both states; that is a copy bug, not a design. `[DECISION: message-modal-copy-bugs]` |
+
+**Haptics: see `09` §2.7 rows H4.07–H4.09.** "Mark all read" fires `.success`; a per-row read/unread
+toggle fires `.selection`; **a new item arriving on the 60-second poll fires nothing at all** — the
+badge is the channel, and a buzz from a background poll is a push notification wearing a disguise.
 
 #### 4.4 Mark all read
 
@@ -509,6 +518,17 @@ a clock glyph + the account-age string.
 
 #### 7.1 Search tab
 
+**The tab is declared `Tab(role: .search)`** (iOS 18+, below the floor —
+`[DECISION: search-tab-role]`, `09` §3.11). Without the role a `.searchable` inside the tab view
+applies to **every** tab and resets its state on each tab change. The `.searchable` modifier therefore
+lives on **this tab's root**, never inside a pushed screen, and on iOS 26 the system places the field
+in the tab bar's own search affordance. Consequence to re-verify in Phase 9: the role changes the
+tab's hit geometry, so the long-press quick-search overlay (§7.4,
+`[DECISION: tab-longpress-mechanism]`) must be retested against it.
+
+**Haptics: see `09` §2.7 rows H4.16–H4.19.** Submitting a search fires nothing; changing the scope
+segment fires `.selection`.
+
 Route: the Search tab's root. Title **`"Search"`**.
 
 ```
@@ -583,7 +603,8 @@ blur). Both are flags on the shared primitive named in §7.1 — `clearOnSearch 
 #### 7.4 Quick Subreddit Search
 
 Triggered by **long-pressing the Search tab** (no login guard) and by tapping the **switcher title**
-on any Home/subreddit/multireddit feed (`04a` §8). Fires `hapticSelection()`.
+on any Home/subreddit/multireddit feed (`04a` §8). Fires `.selection` at the moment the long press is
+**recognised** (`09` §2.4 rows H1.27–H1.28).
 
 Additionally, the **first** ordinary tap on the Search tab presents a one-shot alert (key
 `flags.quickSearchTip`): title **`"Did you know?"`**, message
@@ -781,6 +802,13 @@ Reddit URLs are never routed through this path; they always open natively inside
 navigation.
 
 ### 13. Incoming URLs and "Open in APPNAME"
+
+**Five entry points, one intake path.** The share extension, the `appname://openurl` scheme, the
+clipboard detector, the **widgets and Control Center controls** (`09` §3.2, §3.3), and **Handoff**
+(`09` §3.6) all funnel through the same `LinkIntake` described below — no second parser, no second
+route resolver. Spotlight results for a saved post or a subscribed subreddit (`09` §3.5) resolve
+through the same path via their `AppEntity`'s identifier. None of them fires a haptic
+(`09` §2.7 row H4.21, §2.9 rows H6.10–H6.12).
 
 All four sources funnel into one handler.
 
@@ -1189,6 +1217,18 @@ On iOS 26+, implement "hide on infinite scroll" with `tabBarMinimizeBehavior(.on
 than a hand-rolled translate/fade. If parity with the original's exact 50 pt / 5 pt-delta / 200 ms
 animation is required, note the divergence. `[DECISION: tab-hide-on-scroll]`
 
+#### 17.4 Feedback
+
+A new section, free and ungated, holding the two system-behaviour switches introduced by
+`09-native-polish-and-platform-features.md`.
+
+| Row | Control | Key | Default | Notes |
+|---|---|---|---|---|
+| **Haptic feedback** — *"Play a small tap when you vote, save, swipe and drag."* | Toggle | `feedback.haptics` | **`true`** | Off makes every first-party haptic in the app a no-op. **System haptics are untouched** — a toggle still ticks and a context menu still thumps, because those are the OS's and suppressing them makes standard controls feel broken. Independent of Reduce Motion. Syncs via iCloud (§20.4). `09` §2.3. `[DECISION: haptics-toggle]` |
+| **Offer Translate** — *"Adds a Translate item to the long-press menu on post and comment text, using the system translator."* | Toggle | `feedback.offerTranslate` | **`false`** | Adds one item to the post-text and comment long-press menus, presenting `.translationPresentation(isPresented:text:)` (Translation framework, iOS 17.4+). On-device machine translation; **not** Apple Intelligence and not generative. Off by default so the owner can veto it by leaving it off. Live Text's own translate action (`04b` §3.3) is system-provided and is unaffected. `09` §3.12. `[DECISION: translation-optional]` |
+
+Both rows are silent (no alert, immediate effect), like every other setting in the app.
+
 ### 18. Theme
 
 #### 18.1 Theme screen
@@ -1437,6 +1477,14 @@ Renaming a theme creates a **new** row (upsert is by name); the old name persist
 
 #### 18.4 Color picker and slider
 
+**Haptics: see `09` §2.8 rows H5.04–H5.06.** These are **custom** sliders, so they get nothing from
+the system: fire `.selection(.minimum)` when the value clamps at 0 and `.selection(.maximum)` when it
+clamps at 255, each once per drag, and **nothing at all** in between — a cue per integer over a 0–255
+range is 255 cues per drag. Do **not** use `.increase` / `.decrease`; Apple documents both as silent
+on iOS (`09` §2.1). The sliders also expose `accessibilityAdjustableAction` and an
+`accessibilityValue` of the form "Red, 128" (`09` §4.1).
+
+
 A bottom-sheet modal, tap-outside-to-dismiss, whose overlay collapses to zero height while the
 keyboard is visible so it cannot block the hex field.
 
@@ -1531,6 +1579,10 @@ sentinel text is still stripped from the display if the pattern matched.
 `[GATE: gate.customThemes]` — the Theme Maker, saving or editing a custom theme, importing a shared
 theme (both **Import** and **Import & Apply**), and the separate light/dark theme pairing. Previously
 saved custom themes stay listed, stay selectable and stay applied when a subscription lapses.
+
+**Haptics for this screen: see `09` §2.8 rows H5.07–H5.11.** Applying a theme fires `.selection`;
+saving a custom theme fires `.success`; deleting one fires `.warning`; a successful import fires
+`.success` and a malformed payload fires `.error`.
 
 ### 19. App Icon
 
@@ -1754,6 +1806,18 @@ scroll-hitch metric type is gone; use the new hitch-time metric or the app crash
 | **Clear Video Cache (N MB)** | live native cache size | **Deferred.** Sets the persisted `media.videoCacheClearRequested` flag and presents `.alert("The video cache will be cleared next time you restart APPNAME.")`. The actual clear runs at the next cold start, before anything that could mount a player, and resets the flag regardless of outcome. |
 
 Caps and per-source cacheability rules: `04b` §12.
+
+**Section "iCloud":**
+
+| Row | Control | Key | Default | Behaviour |
+|---|---|---|---|---|
+| **Sync settings and themes** | Toggle | `sync.icloud` | **`true`** | Mirrors the allow-listed preference keys, the text and subreddit filter lists, per-subreddit sort memory and custom themes through `NSUbiquitousKeyValueStore`. Off stops all reads and writes immediately; values already in iCloud are left untouched. **Reddit sessions never sync** (`09` §3.7.1). `[DECISION: icloud-kvs-sync]`, `[DECISION: icloud-keychain-sessions-no]` |
+| **Handoff** | Toggle | `sync.handoff` | **`true`** | Advertises the currently-open post or feed to the user's other devices via `NSUserActivity`. Off stops advertising immediately. `[DECISION: handoff-continuity]` |
+
+Footer text, one line, showing exactly one of: `"Last synced <relative time>"`, `"Sign in to iCloud to
+sync"` (no Apple Account), or the quota message `"iCloud storage for this app is full. Custom themes
+are no longer syncing."` (`09` §3.7). Neither row is gated (`[DECISION: native-polish-free]`), and
+both are silent — no alert, immediate effect.
 
 **Section "Self Hosted Server" — not built.**
 
@@ -2102,6 +2166,12 @@ launch, and it **must** ship a launch screen or be rejected.
 
 ### 24.1 Source spec → this document
 
+`09-native-polish-and-platform-features.md` is **normative** for every haptic on these screens
+(§2.7 Map D, §2.8 Map E), for the two new settings sections (§17.4 Feedback from `09` §2.3 and §3.12;
+§20.4's iCloud section from `09` §3.6 and §3.7), for the Search tab's role (`09` §3.11) and for the
+accessibility requirements on the settings tree, the colour picker and the paywall (`09` §4.1).
+
+
 | Source (in `docs/swift-rewrite/spec/`) | Section | Covered here |
 |---|---|---|
 | `spec/01-navigation-shell.md` §3.2 (tab long-press), §3.3 (initial tab), §4.3 (inbox header button), §6 (incoming URLs), §11 (settings routing), §12.2–12.3 (startup modals, community nudge), §17 (error page), §18 (external links), §19 (web views), §21 (app icons) | accounts entry points, settings routing, URL handling, web views, modals | §1, §13, §14, §16.7, §11, §19, §21.1 |
@@ -2166,6 +2236,18 @@ row of its §3 drift table). There are no aliases.
 | `ai-removed` | No AI features anywhere |
 | `comment-sort-six` | Six real comment sorts; the settings picker adds the `default` sentinel |
 | `D17` | Google sign-in presence is Reddit's own page's business |
+| `native-haptic-map` | Every haptic on these screens is `09` §2.7 (Map D) and §2.8 (Map E) |
+| `haptics-toggle` | The **Haptic feedback** row in Appearance → Feedback (§17.4) |
+| `translation-optional` | The **Offer Translate** row in Appearance → Feedback (§17.4) |
+| `icloud-kvs-sync` | The **Sync settings and themes** row in Advanced → iCloud (§20.4) |
+| `icloud-keychain-sessions-no` | Reddit sessions stay in the device-local Keychain and never sync (§2.5, §20.4) |
+| `handoff-continuity` | The **Handoff** row in Advanced → iCloud (§20.4) and the intake path (§13) |
+| `widgets-homescreen` | Widgets are configured on the Home Screen, not in Settings; they open through §13's intake |
+| `control-center-controls` | Controls are configured in Control Center / Settings → Action Button, not in the app |
+| `spotlight-index` | Saved posts and subscribed subreddits are indexed; the whole domain is deleted on logout (§2.6, §13) |
+| `search-tab-role` | The Search tab is declared `Tab(role: .search)`; the tab long-press overlay is re-verified against it (§7.1, §7.4) |
+| `accessibility-baseline-normative` | Per-surface accessibility for the settings tree, the colour picker and the paywall is `09` §4.1 |
+| `native-polish-free` | None of the rows added by `09` is gated |
 
 ### 24.3 Gate tags used in this document
 

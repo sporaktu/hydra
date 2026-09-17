@@ -316,3 +316,135 @@ A checker over `00`–`08` (10 files) asserts, and passes on, all of:
 
 The checker was verified against deliberately injected faults (a dangling `§99.9` reference, a second
 H1, a ragged table row) before being run for real.
+
+---
+
+## 6. Native polish integration (2026-09-17, after §5)
+
+The owner added a requirement: *"enable quality-of-life features like the high-quality touch
+vibration you get on native iPhone apps for ALL gestures, and make sure we're using the latest modern
+iPhone capabilities and software features."* This pass researched what is GA on iOS 26/27 today,
+wrote a new normative document, and threaded it through the set.
+
+### 6.1 The new document
+
+`09-native-polish-and-platform-features.md` — §1 principles, §2 the haptic map (153 enumerated
+interactions across six maps, plus the implementation pattern, the global toggle, a ten-item do-not
+list and a test method), §3 the modern platform features (nineteen shipped, one optional-off, four
+deferred, eight rejected), §4 the per-surface accessibility baseline and its eight-part verification,
+§5 motion polish with a per-animation Reduce Motion fallback table, §6 traceability and citations.
+
+**Three research findings changed the design rather than confirming it.**
+
+1. **Five `SensoryFeedback` cases are documented no-ops on iOS.** `.start`/`.stop` play only on
+   watchOS; `.increase`/`.decrease` only on watchOS and visionOS; `.levelChange` only on macOS. A
+   naive map would have used `.start` for entering the floating button's reposition mode and
+   `.increase`/`.decrease` for the Theme Maker's sliders, and both would have shipped as silence.
+   They are banned outright and the lint rule enforces it.
+2. **iOS 26 added a control-semantic haptic family** — `.press(_:)`, `.release(_:)` and
+   `.selection(_:)` with `PressFeedback` / `ReleaseFeedback` / `SelectionFeedback` — which is at the
+   deployment floor. It is used for the two **custom** RGB sliders' end stops and nowhere else,
+   because every other control in the app is a system control and the HIG states that switches,
+   sliders and pickers already play Apple's haptics.
+3. **Picture in Picture requires the `audio` background mode**, which contradicted the plan's "no
+   `UIBackgroundModes` at all". Resolved in favour of shipping PiP with the mode narrowed to it
+   alone, under five testable guardrails; `08` #52 was split accordingly and every document that
+   repeated the old statement was updated.
+
+### 6.2 Contradictions found and resolved
+
+| # | Contradiction | Resolution |
+|---|---|---|
+| N1 | `02` §14.7, `06` §1.3 and `07`'s guardrails all said **no** `UIBackgroundModes`; PiP cannot exist without `audio` | Ship PiP; declare `audio` and only `audio`; narrow it with five guardrails (`09` §3.8.1). `08` #52's PiP half superseded by #114, its background-audio half kept. `02` §14.7, §19, `04b` §7.4, §8.1, `06` §1.3, `07` guardrails and assumed decisions all rewritten |
+| N2 | `02` §5.13's three-call haptic vocabulary vs a map that needs twelve cues | `02` §5.13 rewritten to carry only the structural facts and to name `09` §2 as normative |
+| N3 | `02` §5.13 and `04a` §2.4 fired the pull-to-refresh haptic on **commit**; the crossing is the commitment and firing on both breaks the one-per-action rule | Cue moved to the threshold crossing, once per drag; commit is silent. Both documents updated |
+| N4 | The brief suggested "band exit: none", but `04a` §20.2's `oneHapticPerTransition` test asserts four haptics for 0→80→140→80→0 | Inward transitions keep a cue, at a lighter intensity. The test is unchanged |
+| N5 | "No backend of any kind" vs shipping iCloud sync | iCloud KVS and Handoff are Apple-operated services inside the user's own Apple Account. Stated explicitly in `09` §1.1 rule 6, `02` §14.10, `03` §8.3 and `07` non-negotiable 11; `[DECISION: self-hosted-server-row]` and the "Data Not Collected" label are unchanged |
+| N6 | "No AI features" vs `IndexedEntity`, whose documentation says it makes entities "discoverable by Apple Intelligence" | Ship it, with the plain `CSSearchableItem` path as the canonical write so the feature is identical without Apple Intelligence, and a documented two-line fallback if the owner vetoes the association (`09` §3.5) |
+| N7 | "No AI features" vs Writing Tools, which Apple documents as using LLMs and Apple Intelligence | Not adopted — and **not suppressed** either, because it is a system affordance in every text view and disabling it in one app is hostile (`09` §3.15, `[DECISION: writing-tools-not-adopted]`) |
+| N8 | "No push notifications" vs WidgetKit and ControlWidget, both of which *can* refresh over APNs | Widgets use `TimelineReloadPolicy.never` and in-app reloads; controls refresh when used. No APNs entitlement, no `NSSupportsLiveActivities` (`09` §3.2, §3.3, §3.15) |
+| N9 | The package count "exactly 18" appeared in `02` §2.2/§3.1, `06` §1.2 and `07` | Now **20** packages (11 infrastructure + 9 feature) and **three** non-package targets. Every occurrence updated |
+
+### 6.3 Files and sections changed
+
+| File | Sections |
+|---|---|
+| `09-native-polish-and-platform-features.md` | **New.** §§1–6 |
+| `00-README.md` | Reading order (new `09` row; `08` count 100 → 127); principle 6 (AI/push survival note); **new principle 8** "Native quality of life", old 8 renumbered to 9 (#1–#127); owner-decisions table (new "Native polish" row) |
+| `02-architecture.md` | §0.4 (four new non-goals); §2.2 (layout, 18 → 20 packages, `WidgetsExtension`); §3.1 (new rows 13 `AppIntentsKit`, 14 `SyncKit`, 15 `WidgetsExtension`); §3.3 (diagram nodes and edges); §5.12 (band-haptic pointer); **§5.13 rewritten**; §11.5 (no Keychain sync); §13.4 (new rule 0: nothing in `09` is gated); §14.6 (plist and entitlement additions); **§14.7 rewritten**; **new §14.8–§14.11**; §15.1 (points at `09` §4); §19 (door-open rows rewritten); §20 (three traceability rows); §21.1 (`background-audio-pip` row); **new §21.3** |
+| `03-data-and-networking.md` | §7.4 (no Keychain sync); §8.1 (five new keys: `feedback.haptics`, `feedback.offerTranslate`, `sync.icloud`, `sync.handoff`, `sync.lastAppliedAt`); **new §8.3** iCloud-synced keys with the last-writer-wins rule; **new §8.4** Spotlight index schema; **new §12.5** Handoff payload; §13 (three traceability rows) |
+| `04a-feeds-posts-comments.md` | §2.4, §2.5, §6, §7.1, §7.2, §7.4, §7.5, §7.6, §9, §11, §3.5.5, §15.1, §15.4, §16.1, §16.2, §16.5 (haptic/transition pointers); §21.1 and §21.2 (traceability and seven new decision ids) |
+| `04b-media.md` | §2.3, §2.4, §3.2, §3.4, §7.3, §7.4, §8.1 (PiP row rewritten, background-audio row rewritten), §10.4, §14 (component table), §16.2 (five new decision ids) |
+| `04c-accounts-inbox-search-subs-settings.md` | §2.4, §2.7, §4.4, §7.1 (`Tab(role: .search)`), §7.4, §13 (five entry points, one intake path), **new §17.4 Feedback** (Haptic feedback, Offer Translate), §18.4, §19, **new "iCloud" section in §20.4** (Sync settings and themes, Handoff), §24.1, §24.2 (twelve new decision ids) |
+| `05-monetization.md` | §3.1 row X (rewritten as an OWNER row, default free); §3.2 (free-tier statement); §4.1 (nothing in `09` is a gate; no twelfth id). **The eleven gate ids are unchanged** |
+| `06-build-plan-and-acceptance.md` | §1.2 (layout, `WidgetsExtension`, two new packages, three entitlements files); §1.3 (five plist/entitlement rows added, "deliberately absent" table rewritten); §1.6 (three new CI jobs: `build-extensions`, `graph`, `haptics-lint`); §2 Phase 0 (20 packages, both extensions, the haptics facade, the full entitlement set); §2 **Phase 9 rewritten** with the eight-part native-polish deliverable, the haptics audit, the accessibility audit and a native-polish device smoke; §3 (verification steps 1, 7, 8); §4 intro and **new area Z (41 items)**; §5 (new risks R16–R19); §6 (two new packages, one new target, revised totals and calibration); Traceability |
+| `07-one-shot-prompt.md` | §A step 5 (capabilities), **new step 5a** (the PiP/background-mode decision), **new steps 17–18**; Step 0 reading order and tag/precedence paragraphs; **new non-negotiable 12**; non-negotiable 11 (iCloud is not a backend); the assumed-decisions block (six new bullets, the PiP bullet rewritten); Guardrails (entitlements, 20 packages, two hard graph edges, no `[GATE:]` in `09`); Output artifacts 1, 3, 4; Traceability |
+| `08-decisions-and-drift.md` | Header counts (100 → 127); #16 and #68 extended; **#52 split**; **new §1.5 with #101–#127**; §4 (#1–#127, `09` included in the tag namespace); Traceability |
+| `spec/REVIEW-consistency.md` | This section |
+
+**Not touched:** `spec/01`–`spec/10` (the surveys and the platform baseline are inputs, not outputs),
+and the eleven gate ids in `05` §4.
+
+### 6.4 New decision ids (`08` §1.5, #101–#127)
+
+`native-haptic-map` (101) · `haptics-toggle` (102) · `haptics-implementation-split` (103) ·
+`core-haptics-not-used` (104) · `widgets-homescreen` (105) · `widget-write-actions-deferred` (106) ·
+`control-center-controls` (107) · `app-intents-shortcuts` (108) · `spotlight-index` (109) ·
+`handoff-continuity` (110) · `icloud-kvs-sync` (111) · `icloud-keychain-sessions-no` (112) ·
+`cloudkit-dataset-sync-deferred` (113) · `pip-fullscreen-video` (114) ·
+`background-mode-audio-pip-only` (115) · `zoom-transitions-everywhere` (116) · `symbol-effects` (117) ·
+`search-tab-role` (118) · `translation-optional` (119) · `writing-tools-not-adopted` (120) ·
+`accessibility-baseline-normative` (121) · `motion-reduce-parity` (122) · `mac-designed-for-ipad` (123) ·
+`visionos-compat-app-store` (124) · `live-activities-rejected` (125) · `no-in-app-app-lock` (126) ·
+`native-polish-free` (127)
+
+### 6.5 Platform facts verified for this pass
+
+All read **2026-09-17** through the `developer.apple.com/tutorials/data/...json` DocC endpoints (the
+same data the rendered docs site serves, so the availability annotations are authoritative) except
+the two Apple Support pages, which were read as rendered HTML. The complete list also appears in
+`09` §6.3.
+
+**Haptics — the API surface and, critically, the per-case platform notes**
+
+- [`SensoryFeedback`](https://developer.apple.com/documentation/swiftui/sensoryfeedback) (iOS 17.0) and its three modifier forms: [`sensoryFeedback(_:trigger:)`](https://developer.apple.com/documentation/swiftui/view/sensoryfeedback(_:trigger:)), [`sensoryFeedback(_:trigger:condition:)`](https://developer.apple.com/documentation/swiftui/view/sensoryfeedback(_:trigger:condition:)), [`sensoryFeedback(trigger:_:)`](https://developer.apple.com/documentation/swiftui/view/sensoryfeedback(trigger:_:))
+- Plays on iOS: [`.impact(weight:intensity:)`](https://developer.apple.com/documentation/swiftui/sensoryfeedback/impact(weight:intensity:)) · [`.impact(flexibility:intensity:)`](https://developer.apple.com/documentation/swiftui/sensoryfeedback/impact(flexibility:intensity:)) · [`.selection`](https://developer.apple.com/documentation/swiftui/sensoryfeedback/selection) · [`.success`](https://developer.apple.com/documentation/swiftui/sensoryfeedback/success) · [`.warning`](https://developer.apple.com/documentation/swiftui/sensoryfeedback/warning) · [`.error`](https://developer.apple.com/documentation/swiftui/sensoryfeedback/error) · [`.alignment`](https://developer.apple.com/documentation/swiftui/sensoryfeedback/alignment) · [`.pathComplete`](https://developer.apple.com/documentation/swiftui/sensoryfeedback/pathcomplete) (iOS 17.5)
+- **Does not play on iOS:** [`.levelChange`](https://developer.apple.com/documentation/swiftui/sensoryfeedback/levelchange) (macOS only) · [`.increase`](https://developer.apple.com/documentation/swiftui/sensoryfeedback/increase) and [`.decrease`](https://developer.apple.com/documentation/swiftui/sensoryfeedback/decrease) (watchOS, visionOS) · [`.start`](https://developer.apple.com/documentation/swiftui/sensoryfeedback/start) and [`.stop`](https://developer.apple.com/documentation/swiftui/sensoryfeedback/stop) (watchOS)
+- iOS 26 control family: [`.press(_:)`](https://developer.apple.com/documentation/swiftui/sensoryfeedback/press(_:)) · [`PressFeedback`](https://developer.apple.com/documentation/swiftui/sensoryfeedback/pressfeedback) · [`ReleaseFeedback`](https://developer.apple.com/documentation/swiftui/sensoryfeedback/releasefeedback) · [`SelectionFeedback`](https://developer.apple.com/documentation/swiftui/sensoryfeedback/selectionfeedback)
+- Weights and flexibilities: [`SensoryFeedback.Weight`](https://developer.apple.com/documentation/swiftui/sensoryfeedback/weight) · [`SensoryFeedback.Flexibility`](https://developer.apple.com/documentation/swiftui/sensoryfeedback/flexibility)
+- UIKit tier: [`UIFeedbackGenerator`](https://developer.apple.com/documentation/uikit/uifeedbackgenerator) · [`prepare()`](https://developer.apple.com/documentation/uikit/uifeedbackgenerator/prepare()) · [`init(view:)`](https://developer.apple.com/documentation/uikit/uifeedbackgenerator/init(view:)) (iOS 17.5; `init()` and `init(style:)` are deprecated) · [`UIImpactFeedbackGenerator`](https://developer.apple.com/documentation/uikit/uiimpactfeedbackgenerator) · [`impactOccurred(at:)`](https://developer.apple.com/documentation/uikit/uiimpactfeedbackgenerator/impactoccurred(at:)) (iOS 17.5) · [`UISelectionFeedbackGenerator`](https://developer.apple.com/documentation/uikit/uiselectionfeedbackgenerator) · [`UINotificationFeedbackGenerator`](https://developer.apple.com/documentation/uikit/uinotificationfeedbackgenerator)
+- Custom: [`CHHapticEngine`](https://developer.apple.com/documentation/corehaptics/chhapticengine) — considered and rejected for v1
+- Guidance: [HIG — Playing haptics](https://developer.apple.com/design/human-interface-guidelines/playing-haptics) ("Make haptics optional", "Avoid overusing haptics", and the note that switches, sliders and pickers already play system haptics)
+
+**Platform surfaces**
+
+- [WidgetKit](https://developer.apple.com/documentation/widgetkit) · [`ControlWidget`](https://developer.apple.com/documentation/swiftui/controlwidget) (iOS 18.0) · [ActivityKit](https://developer.apple.com/documentation/activitykit) (rejected) · [Run shortcuts with the Action button](https://support.apple.com/guide/shortcuts/run-shortcuts-with-the-action-button-apdfea15680b/ios)
+- [App Intents](https://developer.apple.com/documentation/appintents) · [`AppIntent`](https://developer.apple.com/documentation/appintents/appintent) · [`AppShortcutsProvider`](https://developer.apple.com/documentation/appintents/appshortcutsprovider) (iOS 16.0) · [App Shortcuts](https://developer.apple.com/documentation/appintents/app-shortcuts) · [`IndexedEntity`](https://developer.apple.com/documentation/appintents/indexedentity) (iOS 18.0) · [`CSSearchableItem`](https://developer.apple.com/documentation/corespotlight/cssearchableitem) · [Configuring Siri support](https://developer.apple.com/documentation/xcode/configuring-siri-support) (the capability belongs to SiriKit Intents extensions, which we do not ship)
+- [`NSUserActivity`](https://developer.apple.com/documentation/foundation/nsuseractivity) · [`NSUserActivityTypes`](https://developer.apple.com/documentation/bundleresources/information-property-list/nsuseractivitytypes) · [`userActivity(_:isActive:_:)`](https://developer.apple.com/documentation/swiftui/view/useractivity(_:isactive:_:)) · [`onContinueUserActivity(_:perform:)`](https://developer.apple.com/documentation/swiftui/view/oncontinueuseractivity(_:perform:))
+- [`NSUbiquitousKeyValueStore`](https://developer.apple.com/documentation/foundation/nsubiquitouskeyvaluestore) — 1 024 keys, 1 MB total, 1 MB per value, 128-character keys, and the explicit warning not to store sensitive information · [iCloud Key-Value Store Entitlement](https://developer.apple.com/documentation/bundleresources/entitlements/com.apple.developer.ubiquity-kvstore-identifier)
+- [`AVPictureInPictureController`](https://developer.apple.com/documentation/avkit/avpictureinpicturecontroller) · [Adopting Picture in Picture in a standard player](https://developer.apple.com/documentation/avkit/adopting-picture-in-picture-in-a-standard-player) · [Configuring your app for media playback](https://developer.apple.com/documentation/avfoundation/configuring-your-app-for-media-playback) — the source of the "PiP needs the Audio, AirPlay, and Picture in Picture background mode" requirement
+
+**SwiftUI polish, translation, distribution**
+
+- [`navigationTransition(_:)`](https://developer.apple.com/documentation/swiftui/view/navigationtransition(_:)) (iOS 18.0) · [`SymbolEffect`](https://developer.apple.com/documentation/symbols/symboleffect) · [`.drawOn`](https://developer.apple.com/documentation/symbols/symboleffect/drawon) (iOS 26.0) · [`ContentTransition.symbolEffect`](https://developer.apple.com/documentation/swiftui/contenttransition/symboleffect) · [`TabRole.search`](https://developer.apple.com/documentation/swiftui/tabrole/search) (iOS 18.0) · [`scrollEdgeEffectStyle(_:for:)`](https://developer.apple.com/documentation/swiftui/view/scrolledgeeffectstyle(_:for:)) (iOS 26.0) · [`accessibilityAction(named:_:)`](https://developer.apple.com/documentation/swiftui/view/accessibilityaction(named:_:)) · [`RequestReviewAction`](https://developer.apple.com/documentation/storekit/requestreviewaction)
+- [Translation framework](https://developer.apple.com/documentation/translation) (iOS 17.4) · [Writing Tools (UIKit)](https://developer.apple.com/documentation/uikit/writing-tools) — the source of the "system-provided large language models (LLMs) and Apple Intelligence" wording · [`writingToolsBehavior(_:)`](https://developer.apple.com/documentation/swiftui/view/writingtoolsbehavior(_:))
+- [Lock or hide an app on iPhone](https://support.apple.com/guide/iphone/lock-or-hide-an-app-iph00f208d05/ios) — the system app lock is user-controlled, per-device and needs no developer work
+- [Manage availability of iPhone and iPad apps on Macs with Apple silicon](https://developer.apple.com/help/app-store-connect/manage-your-apps-availability/manage-availability-of-iphone-and-ipad-apps-on-macs-with-apple-silicon/) · [Manage availability of iPhone and iPad apps on Apple Vision Pro](https://developer.apple.com/help/app-store-connect/manage-your-apps-availability/manage-availability-of-iphone-and-ipad-apps-on-apple-vision-pro/)
+
+**One advisory finding, recorded without changing anything.**
+[`RequestReviewAction`](https://developer.apple.com/documentation/storekit/requestreviewaction) says
+"don't call it in response to a button tap or other user action", while `04c` §21.1's pre-prompt card
+calls it from a "Rate now" button (`08` #87). The design is deliberate and every exit path sets the
+asked-flag regardless, so #87 is unchanged; the tension is noted in `09` §6.3 so it is not discovered
+in review.
+
+### 6.6 Programmatic checks after this pass
+
+The checker of §5.4 was extended to cover `09` and area Z and re-run over all eleven `0*.md` files.
+Additions: the decision-register range is now #1–#127; `09`'s `§` cross-references into `02`–`06`
+resolve; area Z's 41 items are present and each names either a decision id or a `09` §; the
+"no `UIBackgroundModes`" statement no longer appears anywhere except as the superseded history in
+`08` #52; no `TODO`/`TBD`/`FIXME` placeholder text; and a scan for AI, push and backend terms
+("Foundation Models", "Apple Intelligence", "Writing Tools", `UNUserNotificationCenter`
+registration, "APNs", `SystemLanguageModel`) confirms every occurrence sits in a rejected,
+not-used or explicitly-bounded context.

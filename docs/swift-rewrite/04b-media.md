@@ -186,6 +186,9 @@ paging.
 
 ### 2.3 Dismissal
 
+**Haptics: see `09` §2.6 rows H3.07–H3.09.** The threshold crossing fires `.impact(.medium, 0.8)`
+once per drag on the outward crossing; the commit itself is silent.
+
 Three independent paths, each animating out via a dismiss offset driven to −150 over 200 ms before
 closing:
 
@@ -235,8 +238,12 @@ double-tapping pages several items smoothly.
 
 Middle double-tap play/pause: look up the shared player for the focused item via the registry's
 read-only `peek(key:)` (do **not** acquire — some other view owns it), toggle play/pause, fire
-`hapticSelection()`, and force the overlay **visible when pausing** / **hidden when resuming**, so a
+`.selection`, and force the overlay **visible when pausing** / **hidden when resuming**, so a
 paused state is always legible.
+
+**Haptics: see `09` §2.6 rows H3.02–H3.10.** A single tap that only toggles chrome fires nothing; the
+side double-tap that pages fires nothing (the page animation is the feedback); only the middle
+double-tap and the explicit Close button speak.
 
 In a single-item post, `canPageSides` is false and the middle zone effectively covers the whole
 screen — there are no dead edge zones.
@@ -300,6 +307,10 @@ version before moving Xcode versions.
 
 ### 3.2 Zoom / pan / pinch
 
+**Haptics: see `09` §2.6 rows H3.10–H3.14.** Reaching either scale limit fires
+`.impact(flexibility: .rigid, 0.5)` **once per gesture** (a latch is mandatory); an edge clamp during
+a pan fires **nothing**.
+
 Compose `MagnifyGesture`, a `DragGesture`, and a double-tap gesture simultaneously. Use the new
 `GestureInputKinds` initializers to restrict recognition to direct touch, so a trackpad/pointer scroll
 is not read as a pan.
@@ -340,6 +351,10 @@ The feature is documented but not wired.
 
 Attached to the **inline** image view in feed cards and in rendered comment/post bodies — **not** to
 the fullscreen viewer. A native `.contextMenu` with exactly three items:
+
+**Haptics: see `09` §2.6 rows H3.22–H3.25.** A successful save fires `.success`, a failure or a
+permission denial fires `.error`, and a link copy fires `.success` — the app shows no toast, so the
+haptic is the only confirmation.
 
 | Item | Effect |
 |---|---|
@@ -592,8 +607,9 @@ Two floating circular 44×44 buttons, bottom-right, stacked vertically, just abo
    **Only rendered while autoplay is on** — with autoplay off no feed video ever plays, so there is
    nothing to unmute; the button is hidden entirely, not disabled.
 
-Each press fires `hapticSelection()` (`.sensoryFeedback(.selection, trigger:)`). Both are mirrored as
-Settings → Appearance rows and persist across launches.
+Each press fires `.selection` through the `DesignSystem` facade. Both are mirrored as
+Settings → Appearance rows and persist across launches. **Haptics: see `09` §2.4 rows
+H1.30–H1.31.**
 
 `[GATE: gate.videoAutoplay]` — **OWNER row, default OFF (free).** The tag covers **both FABs** above
 and their two mirrored Appearance rows (`04c` §17.1, "Auto play videos" and "Focused video audio"),
@@ -607,8 +623,10 @@ is one line in `Feature.isGated` rather than a code hunt (`05-monetization.md` �
 
 - **App backgrounding.** The entire video subtree is torn down — **unmounted**, not merely paused —
   the instant the scene phase reports `.background`, replaced by a same-size placeholder, and rebuilt
-  on foreground. Consequence: **no background audio and no Picture-in-Picture.** Playback simply stops
-  when the app is backgrounded.
+  on foreground. Consequence: **no background audio and no Picture-in-Picture from the feed.**
+  Playback simply stops when the app is backgrounded. The **fullscreen viewer** is the one exception
+  and it is PiP only, never background audio — §8.1 and `09` §3.8.
+  Haptics: see `09` §2.6 rows H3.01–H3.32.
 - On teardown (focus lost / scrolled away / backgrounded) remember the position, then explicitly mute
   and pause the player unless the fullscreen viewer currently owns it, so a ref-count-zero-but-not-
   yet-reaped player doesn't keep playing.
@@ -650,8 +668,10 @@ initially focused column/row, starts playback.
 | **Playback speed** | beside the mute pill | Cycles **`[0.5, 1, 1.5, 2]`**, wrapping back to 0.5 after 2×. Label shows the current multiplier, e.g. `"1.5x"`. Sets `preservesPitch = true` on **every** change (defensively, even though creation already does). |
 | **Loop** | — | Always on, same as the feed |
 | **Rotation** | — | Rotation is unlocked while the viewer is open (§2.1); the video surface reflows with `.scaledToFit()` and the shared player survives rotation with no reload. Container height is `min(screenHeight, screenWidth / aspectRatio)` where the aspect ratio comes from the video track's natural size. |
-| **Picture-in-Picture** | — | **Not enabled.** No PiP button, no `AVPictureInPictureController`. Adding it would be a deliberate behavior change, not a parity port. `[DECISION: background-audio-pip]` |
-| **Background audio** | — | **None** — the same background teardown as §7.4 applies. |
+| **Picture in Picture** | top-left pill cluster, beside mute and speed | **Enabled, in this viewer only.** `AVPictureInPictureController`; the pill is rendered only when `isPictureInPictureSupported()` and enabled only when `isPictureInPicturePossible`. `canStartPictureInPictureAutomaticallyFromInline = true` **for this player only**, so leaving the app mid-video floats it. Starting PiP fires `.impact(flexibility: .soft, 0.7)`, stopping fires `.selection` (`09` §2.6 rows H3.20–H3.21). The delegate's restore callback re-presents this viewer. This is net-new versus the original and it is why `UIBackgroundModes = ["audio"]` is declared — `09` §3.8 and §3.8.1 carry the five guardrails, `02` §14.7 the entitlement. `[DECISION: pip-fullscreen-video]`, `[DECISION: background-mode-audio-pip-only]` |
+| **Background audio** | — | **Still none.** The `audio` background mode exists for PiP alone; when PiP stops while the app is backgrounded the player is torn down, so there is no path to audio with nothing on screen. `[DECISION: background-audio-pip]` |
+
+**Haptics: see `09` §2.6 rows H3.15–H3.19.**
 
 **Scrub ("swipe to scrub"):**
 
@@ -836,7 +856,9 @@ normal feed but renders it as a media grid. `[GATE: gate.galleryMode]`
 
 ### 10.4 Handoff to the fullscreen viewer
 
-Tapping a cell presents the viewer with:
+Tapping a cell presents the viewer with a `.navigationTransition(.zoom(sourceID:in:))` anchored on the
+tapped cell's flat index (`09` §3.9, `[DECISION: zoom-transitions-everywhere]`), suppressed under
+Reduce Motion, and with:
 
 - `rows` = the **per-post** grouping (one row per post), so vertical paging still moves post-to-post
   and horizontal paging moves within one post's gallery — distinct from the flat cell array the grid
@@ -934,7 +956,9 @@ Before the first path update arrives, the effective mode is conservatively `.low
 | Inline feed video | `AVPlayer` behind a thin `UIViewRepresentable` over `AVPlayerLayer` | `VideoPlayer` is the wrong tool for a feed; you need pooling and explicit attach/detach |
 | Fullscreen video surface | Same representable (shared player from the registry) | Required so the player is literally the same instance as the feed's |
 | Pinch / zoom | `MagnifyGesture` + `DragGesture` + double-tap, `.simultaneously(with:)`, with `GestureInputKinds` restricted to direct touch | Prevents a pointer scroll being read as a pan |
-| Haptics | `.sensoryFeedback(_:trigger:)` | Preferred over `UIImpactFeedbackGenerator` |
+| Haptics | `DesignSystem`'s `.haptic(_:trigger:)` facade | `09` §2.2. Tier 1 wraps `.sensoryFeedback`; the viewer's drag-dismiss, zoom limits and scrub engage are tier 2 (`prepare()`-backed generators) |
+| Picture in Picture | `AVPictureInPictureController` | §8.1, `09` §3.8. Requires `UIBackgroundModes = ["audio"]` |
+| Zoom transition into the viewer | `.navigationTransition(.zoom(sourceID:in:))` | iOS 18+, suppressed under Reduce Motion (`09` §3.9, §5.2) |
 | Live Text | `UIViewRepresentable` wrapping `UIImageView` + VisionKit `ImageAnalysisInteraction` | No SwiftUI-native equivalent exists |
 | Share sheet | `ShareLink` where the payload is a plain URL; `UIActivityViewController` bridge where a temporary file URL and completion cleanup are needed | `ShareLink` cannot easily express the "delete the temp file after the sheet finishes" contract |
 | Photo library | `PHPhotoLibrary.requestAuthorization(for: .addOnly)` + `PHAssetCreationRequest` | Add-only keeps the app out of full-library access |
@@ -1156,7 +1180,11 @@ no aliases, and the register's "Default (assumed)" column is what this document 
 | `live-text-dead-setting` | The Live Text toggle is inert in the original; implemented for real here |
 | `no-speculative-preload` | No next-video preloading |
 | `no-video-longpress-menu` | Video tiles gain a Share / Save / Copy Link long-press menu |
-| `background-audio-pip` | No Picture-in-Picture and no background audio; players unmount on background |
+| `background-audio-pip` | Background audio stays out of scope; players unmount on background. Its PiP half is superseded by `pip-fullscreen-video` |
+| `pip-fullscreen-video` | Picture in Picture ships in the fullscreen video viewer (§8.1) |
+| `background-mode-audio-pip-only` | `UIBackgroundModes = ["audio"]` is declared, for PiP and nothing else |
+| `native-haptic-map` | Every media gesture's haptic cue is `09` §2.6 |
+| `zoom-transitions-everywhere` | The gallery cell → viewer zoom transition (§10.4) |
 | `fullscreen-player-retry` | A hard player error in the viewer is tappable to retry |
 | `gate-matrix` | Gallery Mode's 100-item limit is reinstated as a gate, as an inline footer |
 | `gallery-mode-no-blur` | Gallery grid cells apply NSFW/spoiler blur |

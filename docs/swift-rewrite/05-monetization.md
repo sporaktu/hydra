@@ -211,7 +211,7 @@ confirm or flip before the build starts; every other row is a default the plan a
 | U | Privacy / general settings | Error-reporting toggle, data-use (low data) settings, cache clearing, startup tab, startup URL, legal links, settings search | — | Never gate privacy controls or data-saving controls. Gating low-data mode would actively cost users money on cellular. |
 | V | App icons | Default icon | All alternates (`gate.appIcons`) | Cosmetic, discrete, classic paid perk, trivially implemented as a gate. |
 | W | Guide / in-app help | Whatever ships (`[DECISION: guide-prose-rewrite]`) | — | Help must never be paywalled. |
-| X | Misc / cross-cutting | Drafts across all composers, haptics, one-time tips, patch notes, review prompt | — | Plumbing. |
+| X | Misc / cross-cutting | Drafts across all composers, one-time tips, patch notes, review prompt, **and everything in `09-native-polish-and-platform-features.md`**: the complete haptic map and its toggle, home-screen and Lock-Screen widgets, Control Center / Action-button controls, App Intents + App Shortcuts + Siri, Spotlight indexing, Handoff, iCloud sync of settings, themes and filters, Picture in Picture, zoom transitions, SF Symbols effects, the accessibility baseline, and the optional Translate item | — (**OWNER row, default free — no gate exists**) | Plumbing, plus the native-polish surface. `[DECISION: native-polish-free]`. The two items an owner might reasonably want to sell are **widgets** and **iCloud sync**, and the answer is still no: both are table stakes for a 2026 native app, both cost us nothing per user (widgets read the local database; iCloud is the user's own storage), and putting a paywall on the parts of the app that make it feel finished is exactly the crippleware read that §3.3 forbids. Flipping either would need a **twelfth** gate id, which §4 does not have and which `07` forbids inventing — so this row is a deliberate OWNER decision recorded before the build, not a gap. |
 
 ### 3.2 The resulting free tier, stated plainly
 
@@ -225,6 +225,11 @@ toys.
 A user who pays additionally gets: unlimited accounts, the theme editor, custom gestures, all
 filters, unlimited Gallery Mode, media downloads, stats, alternate icons, and (pending owner
 decision) sort memory and feed autoplay.
+
+**Everything in `09` is on the free side of that line** — the whole haptic map, widgets, Control
+Center controls, App Intents and Siri, Spotlight, Handoff, iCloud sync, Picture in Picture, zoom
+transitions, symbol effects and the accessibility baseline. The eleven gate ids in §4 are unchanged
+and no twelfth is created. `[DECISION: native-polish-free]`
 
 ### 3.3 Anti-patterns explicitly forbidden
 
@@ -260,6 +265,11 @@ exact cases of the `Feature` enum in code. Nothing else is a gate.
 | `gate.compose` | `.compose` | Creating posts, comments and messages | **OWNER.** Default assumed **OFF (free)**. Strongly recommended to leave off. |
 
 ### 4.1 There are no aliases, and three things that are not gates
+
+**Nothing in `09-native-polish-and-platform-features.md` is a gate.** Its twenty-seven decisions
+(`08` §1.5, #101–#127) add no `Feature` case and no `[GATE:]` tag anywhere. A `[GATE:]` tag must never
+appear in `09`, and `Feature.isGated` must never grow a twelfth entry for a widget, a synced key, a
+haptic cue or a Picture-in-Picture button (`02` §13.4 rule 0).
 
 **The eleven ids in §4 are the only gate ids that exist.** Every `[GATE: gate.*]` tag in `04a`, `04b` and
 `04c` is spelled as one of them; the earlier-draft spellings those documents once carried

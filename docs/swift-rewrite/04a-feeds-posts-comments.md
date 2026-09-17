@@ -199,11 +199,18 @@ never subject to the subreddit filter.
 
 ### 2.4 Pull-to-refresh
 
-`.refreshable { await store.refresh() }` on the enclosing `List`/`ScrollView`. Fire
-`hapticAction()` (a `.sensoryFeedback(.impact(weight: .medium), trigger:)` on the refresh trigger)
-when the refresh actually commits.
+`.refreshable { await store.refresh() }` on the enclosing `List`/`ScrollView`.
+
+**Haptics: see `09` §2.4 rows H1.01–H1.03.** The cue fires **once per drag, when the drag crosses the
+refresh threshold**, as `.impact(weight: .light, intensity: 0.6)` — not on commit. Crossing the
+threshold is the commitment (releasing past it always refreshes), so that is where the feedback
+belongs, and firing again on commit would break the one-haptic-per-action rule. A refresh that fails
+fires `.error`.
 
 ### 2.5 Scroll-to-top
+
+**Haptics: see `09` §2.4 rows H1.04, H1.29.** The system status-bar scroll-to-top fires nothing; a
+tab re-tap that pops a level fires `.selection`.
 
 Tapping the **currently active** tab pops one level off that tab's `NavigationStack` (see
 `02-architecture.md` §tab re-tap). There is no separate scroll-to-top gesture beyond the system
@@ -392,6 +399,10 @@ stack from the feed column).
   seen dimming, which is not enough once the pane is persistent. `APPNAME` adds a 3 pt leading accent
   bar in `theme.tint` on the row whose post is in the pane, plus
   `.accessibilityAddTraits(.isSelected)`. Seen tracking and the 0.75 seen opacity are unchanged.
+
+**Haptics: see `09` §2.9 rows H6.01–H6.05.** Loading a post into the pane fires `.selection`; Close
+fires `.selection`; Fullscreen fires `.impact(flexibility: .soft, 0.6)`. A window resize that
+suppresses or restores the pane fires **nothing** — the user dragged a window, not the app.
 
 #### 3.5.5 Pane controls
 
@@ -713,6 +724,11 @@ Exactly 1000 prints `"1000"`.
 Upvote, Downvote and Save do **not** mark a post seen. Only "Mark as Read", the card tap, and media
 taps do.
 
+**Transition.** The card-body tap uses `.navigationTransition(.zoom(sourceID: post.fullname, in:))`
+from the card, and an inline-media tap uses the media item's own source id, both suppressed under
+Reduce Motion (`09` §3.9, §5.2, `[DECISION: zoom-transitions-everywhere]`). Neither fires a haptic
+(`09` §2.4 rows H1.24–H1.25).
+
 **In split view** (§3.5.3) the card-body row of this table changes — and only that row: the tap loads
 the post into the detail pane instead of pushing. Seen-marking still fires synchronously first. Every
 other row is unchanged.
@@ -771,9 +787,13 @@ Hide-Post action. Its label in the menu reads "Mark as Read" / "Mark as Unread".
 | Collapse | chevron expand/collapse (reflects `collapsed`) | `theme.collapse` |
 | Collapse Thread | collapse-all glyph | `theme.collapse` |
 
-**Feedback and commit.** Fire `hapticEngage()` (`.sensoryFeedback(.impact(weight: .light), trigger:
-band)`) exactly once per band **transition**, including the transition back to band 0 — never
-continuously. On release, if the final band is non-zero, run that band's action **immediately** (no
+**Feedback and commit. Haptics: see `09` §2.4 rows H1.05–H1.09 (normative).** Exactly one cue per
+band **transition**, including the transition back to band 0, never continuously, fired from a
+`prepare()`-backed generator (`09` §2.2 tier 2) so it lands on the pixel: `.impact(.light, 0.6)`
+entering band ±1, `.impact(.medium, 0.8)` entering band ±2, `.impact(.light, 0.4)` on either inward
+transition. **The commit on release is silent** — the band cue already spoke — except that a
+committed action which fails and rolls back fires `.error`.
+On release, if the final band is non-zero, run that band's action **immediately** (no
 confirmation, not after the animation). Then spring the row back to 0 with damping 100 / stiffness
 300 / overshoot clamped, and clear the revealed icon only once the spring settles. Lock the enclosing
 list's scrolling for the duration of an active swipe and unlock on finalize — but only if *this* row
@@ -793,6 +813,10 @@ two slots. `Disabled` is exempt and may occupy several slots. Post and comment m
 
 On iOS, use `.contextMenu` on the card so the user gets the native press-and-hold menu with a blurred
 preview of the card. Do **not** also attach a `.onLongPressGesture` — the two fight.
+
+**Haptics: see `09` §2.4 rows H1.21–H1.22.** The menu's own press feedback is the system's; attaching
+ours on top is a double tap and is banned (`09` §2.10 rule 1). Each chosen item fires its own action's
+cue, after the menu dismisses.
 
 Ordered items, each with a gate; items failing their gate are **omitted**, never shown disabled:
 
@@ -844,6 +868,10 @@ no separate on/off toggle. `[GATE: gate.filters]`
 
 ### 7.4 Voting
 
+**Haptics and symbol effects: see `09` §2.4 rows H1.10–H1.13 and `09` §3.10.** An upvote fires
+`.impact(flexibility: .rigid, 0.7)` with a `.symbolEffect(.bounce)` on the arrow; a downvote fires
+`.impact(.rigid, 0.6)`; a retraction fires `.selection`; a rollback fires `.error`.
+
 One shared call for posts and comments (endpoint V1).
 
 - If the requested direction equals the item's current vote, send direction `0` (retract). Tapping or
@@ -869,12 +897,18 @@ behind it** with no refetch. The original failed to do this and tracked it as an
 
 ### 7.5 Save
 
+**Haptics: see `09` §2.4 rows H1.14–H1.16.** Save fires `.success` with a
+`.contentTransition(.symbolEffect(.replace))` on the bookmark glyph; unsave fires `.selection`; a
+rollback fires `.error`.
+
 Endpoint V2 with the item's fullname. **Fix forward, same shape as voting:** flip `saved`
 optimistically, issue the call, and **roll back with a transient error** on failure. There is no
 offline queue. The original leaked the rejection entirely.
 `[DECISION: unhandled-save-failure]`
 
 ### 7.6 Hiding posts (local only)
+
+**Haptics: see `09` §2.4 rows H1.17–H1.20.**
 
 Hiding never calls Reddit's own hide endpoint. `hidePost(_:)` upserts a row keyed by post id with
 `expiresAt = now + 30 days`, denormalizing `title` and `subreddit` so the management screen can list
@@ -1014,8 +1048,10 @@ bottom-right, positioned just above the tab bar:
 | Autoplay | top | always on feed screens | play-circle (on) / pause-circle (off) | `Settings.autoPlayVideos` (default `true`) |
 | Audio | bottom | **only while autoplay is on** | `speaker.wave.2` (on) / `speaker.slash` (off) | `Settings.feedVideoAudio` (default `false`) |
 
-Each press fires `hapticSelection()`. Both expose `accessibilityRole` switch semantics with a
-`checked` state. Both are mirrored as rows in Settings → Appearance.
+Each press fires `.selection` (`09` §2.4 rows H1.30–H1.31). Both expose switch semantics
+(`accessibilityAddTraits(.isToggle)` plus an on/off `accessibilityValue` — `09` §4.1). Both are
+mirrored as rows in Settings → Appearance. A change of Focused Post while scrolling fires **no**
+haptic (`09` §2.4 row H1.32).
 
 ---
 
@@ -1043,6 +1079,10 @@ mode. Would you like to try it out?"` and buttons `Cancel` / `Open`.
 ---
 
 ## 11. Subreddits page
+
+**Haptics: see `09` §2.4 rows H1.36, H1.38.** Dragging the A–Z rail fires `.selection` once per
+resolved-letter change (tier 2, `prepare()`-backed) and never per pixel; subscribe / favourite /
+add-to-multireddit fire `.success` on a successful write and `.error` on a failure.
 
 `SubredditsScreen` is the root of the Posts tab. One `List` of heterogeneous rows in this fixed order:
 
@@ -1378,6 +1418,10 @@ rendered `"0 more replies"` and fetched nothing when tapped, which is simply bro
 
 ### 15.1 Tap to collapse
 
+**Haptics: see `09` §2.5 rows H2.01–H2.05.** Collapse and expand each fire `.selection`, after the
+scroll-repair scroll is issued so the tactile and visual land together; a `loadMore` tap fires
+nothing.
+
 `Settings.tapToCollapseComment` (default `true`): tapping anywhere on a comment row (outside
 `displayInList`) toggles `collapsed`.
 
@@ -1419,6 +1463,12 @@ array forward (or backward) to the next row where `kind == .comment && depth == 
 - Forward with nothing found: do nothing (no wraparound).
 - Backward with nothing found above: scroll to offset 0 (back to the post header).
 
+**Haptics: see `09` §2.5 rows H2.08–H2.13 (normative).** Quick tap → `.selection`; the 300 ms mark
+firing "previous" → `.selection`, **at the mark, not on release**; entering reposition mode →
+`.impact(weight: .medium, 0.9)` (**not** `.start`, which is silent on iOS); snapping into one of the
+ten slots → `.alignment`, once per entry, nothing on exit; released on a slot → `.success`; released
+off every slot → `.impact(.light, 0.4)`.
+
 **Touch model** (one button, no separate prev/next):
 
 | Gesture | Timing | Result |
@@ -1451,6 +1501,10 @@ to the last confirmed position. The overlay fades back out on release.
 
 ### 16.1 Long-press menu
 
+**Haptics: see `09` §2.5 rows H2.14, H2.17–H2.21** and `09` §2.4 row H1.21 (the menu's own press
+feedback is the system's — never add one). `Copy Text` fires `.success`: the app shows no toast, so
+the haptic is the only confirmation.
+
 `.contextMenu` on the row (no press-preview image for comments). Ordered items:
 
 | # | Label | Shown when | Effect |
@@ -1475,7 +1529,8 @@ code's list — nine items. `[DECISION: comment-menu-copy-text]`
 
 ### 16.2 Comment swipes
 
-Identical mechanics to §7.1 with the comment action set and a 15 pt horizontal engage threshold.
+Identical mechanics to §7.1 with the comment action set and a 15 pt horizontal engage threshold, and
+identical haptics (`09` §2.5 row H2.06 defers to rows H1.05–H1.09).
 
 ### 16.3 Comment sorting
 
@@ -1551,6 +1606,11 @@ ComposerShell
   stays tappable throughout; tapping it mid-submit abandons the UI wait without cancelling the
   network call. On failure: `.alert("Failed to <action>")` and the button re-enables. On success:
   dismiss and fire the caller's `contentSent`.
+
+**Haptics: see `09` §2.5 rows H2.16–H2.23.** Opening a composer fires nothing; a successful
+submission fires `.success`; a failure fires `.error`; a confirmed discard fires
+`.impact(flexibility: .rigid, 0.6)`; **markdown toolbar buttons fire nothing at all** — the text
+visibly changes and eight cues per sentence is haptic fatigue.
 
 #### 16.5.1 Markdown toolbar
 
@@ -1999,6 +2059,7 @@ Write these as `@Test` functions in Swift Testing (new tests; XCTest reserved fo
 | `spec/08-feature-inventory.md` A, B, C, I, J, N, O, P | acceptance checklist coverage | throughout |
 | `spec/09-persistence-pro-utils.md` §1.2 (seen/hidden/drafts tables), §1.3 (maintenance), §6.1 (Slideable), §6.4 (action catalog), §7.1–7.2 (formatters) | persistence + interaction primitives | §7.1, §7.6–7.7, §16.5.3, §5 |
 | `spec/10-swiftui-2026-baseline.md` A3 (List vs LazyVStack, `onScrollTargetVisibilityChange`, `contextMenu` icons, selectable `Text` on iOS 27, `sensoryFeedback`, `swipeActions` outside `List`, markdown limits) | API choices | §2.1, §7.1, §7.2, §9, §12.1, §17, §18 |
+| `09-native-polish-and-platform-features.md` §2.4 (Map A), §2.5 (Map B), §3.9 (zoom transitions), §3.10 (symbol effects), §4 (accessibility), §5 (motion) | **normative** for every haptic, symbol effect and transition on these screens | §2.4, §2.5, §7.1, §7.2, §7.4–7.6, §9, §15.1, §15.4, §16.1, §16.2, §16.5 |
 
 ### 21.2 Decision tags used in this document
 
@@ -2026,6 +2087,12 @@ no aliases, and the register's "Default (assumed)" column is what this document 
 | `gallery-offer-cancel` | The one-time gallery offer is suppressed on **either** answer |
 | `report-webview` | Report opens a generic reddit.com/report page, not item-specific |
 | `context-no-highlight` | Comment permalinks get no highlight/scroll-to affordance |
+| `native-haptic-map` | Every haptic on these screens is `09` §2.4 (Map A) and §2.5 (Map B); the pointers in §2.4, §7.1, §7.4–7.6, §15.1, §15.4, §16.1–16.2 and §16.5 are summaries of it |
+| `haptics-implementation-split` | Swipe bands, the A–Z rail and the floating button's reposition drag use `prepare()`-backed generators; everything else is `.sensoryFeedback` (§7.1, §11, §15.4) |
+| `haptics-toggle` | `feedback.haptics` (default on) silences every first-party cue on these screens (`04c` §17.4) |
+| `zoom-transitions-everywhere` | Feed card → post detail, and feed media → viewer, use `.navigationTransition(.zoom(sourceID:in:))`, suppressed under Reduce Motion (§6, §7.2) |
+| `symbol-effects` | `.bounce` on a vote, `.replace` on save and on the collapse chevron (§7.4, §7.5, §15.1) |
+| `accessibility-baseline-normative` | The post card's and comment row's composed labels and complete named-action sets are `09` §4.1 |
 | `comment-menu-copy-text` | The comment menu has nine items, including the undocumented Copy Text |
 | `comment-sort-six` | Six real comment sorts in the in-post menu |
 | `comment-tree-renderer` | Flatten to rows and render in a recycling `List` |

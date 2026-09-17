@@ -20,7 +20,8 @@ one pass from these documents alone, without consulting this codebase.
 | 05 | `05-monetization.md` | StoreKit 2 subscription design, free/paid feature matrix, entitlement seam, paywall, compliance | Phase 8 |
 | 06 | `06-build-plan-and-acceptance.md` | New-repo bootstrap, CI, phased build order with gates, the full acceptance checklist, risks | Throughout |
 | 07 | `07-one-shot-prompt.md` | The prompt to hand a coding agent in the new empty repo | Kickoff |
-| 08 | `08-decisions-and-drift.md` | The decision register: 100 numbered decisions with the default the plan assumes, 16 original-app bugs fixed forward, 20 doc-vs-code drift rows | Before kickoff |
+| 08 | `08-decisions-and-drift.md` | The decision register: 127 numbered decisions with the default the plan assumes, 16 original-app bugs fixed forward, 20 doc-vs-code drift rows | Before kickoff |
+| 09 | `09-native-polish-and-platform-features.md` | **Native quality of life:** the complete haptic map over every gesture in 04a/04b/04c, the modern platform surfaces (widgets, Control Center controls, App Intents/Siri/Spotlight, Handoff, iCloud sync, Picture in Picture, zoom transitions, SF Symbols effects), the normative accessibility baseline, and the motion policy | Before Phase 2, and again in Phase 9 |
 | spec/01–09 | `spec/*.md` | The raw behavioral surveys of the current app, area by area (~88k words). Normative where 02–05 are silent. | As reference |
 | spec/10 | `spec/10-swiftui-2026-baseline.md` | Verified platform baseline as of 2026-09-17 with citations | Before 02 |
 
@@ -59,12 +60,24 @@ one pass from these documents alone, without consulting this codebase.
    `[GATE: gate.*]` in the 04 docs, so the matrix can change without touching
    feature code.
 6. **No AI features, no push notifications in v1.** Inbox uses the same
-   60-second foreground poll and app badge as the current app.
+   60-second foreground poll and app badge as the current app. This survives everything in
+   principle 8: the widgets read only the local database, the intents are declarative and never
+   generative, Writing Tools is neither adopted nor suppressed, and no APNs entitlement is added.
 7. **Fix-forward on known bugs.** Bugs the surveys found in the current app
    (listed in `08` §2) are not reproduced unless the owner says otherwise.
-8. **One vocabulary.** Every `[GATE: gate.*]` tag names one of the eleven gate ids in
+8. **Native quality of life.** The app must feel like Apple wrote it. Every gesture that
+   changes something carries an appropriate haptic, never more than one per action, never one
+   the user did not cause; and the app ships the modern platform surfaces a 2026 native client
+   is expected to have — widgets, Control Center and Action-button controls, App Intents with
+   Siri and Spotlight, Handoff, iCloud sync of settings and themes, Picture in Picture, zoom
+   transitions and SF Symbols effects — plus a normative accessibility floor.
+   `09-native-polish-and-platform-features.md` is the contract: §2 for haptics, §3 for the
+   platform features, §4 for accessibility, §5 for motion. **None of it is gated, and none of it
+   introduces AI, push or a backend** — iCloud is Apple-hosted storage in the user's own account,
+   not a server we run.
+9. **One vocabulary.** Every `[GATE: gate.*]` tag names one of the eleven gate ids in
    `05` §4, and every `[DECISION: <id>]` tag names a numbered entry in `08` §1
-   (#1–#100), a bug id in `08` §2, or a drift row `D1`–`D20` in `08` §3. There are
+   (#1–#127), a bug id in `08` §2, or a drift row `D1`–`D20` in `08` §3. There are
    no aliases and no placeholder tags anywhere in the set.
 
 ## Owner decisions already made
@@ -75,6 +88,7 @@ one pass from these documents alone, without consulting this codebase.
 | iPad split view | **In scope for v1**, at full parity with the original (`02` §5.15, `04a` §3.5, `04c` §17.1). Not `NavigationSplitView` — see `02` §5.15 |
 | Code reuse | None |
 | Pro / AI / push from the original | Not carried over |
+| Native polish | **In scope for v1** and free: the full haptic map, widgets, controls, App Intents/Siri/Spotlight, Handoff, iCloud settings sync, Picture in Picture (`09`). The one entitlement it costs is `UIBackgroundModes = ["audio"]`, for PiP only (`09` §3.8.1) |
 | Monetization | Subscription, about $1/month, most features paid |
 | App name, bundle id | Placeholders `APPNAME`, `com.OWNER.appname` until chosen |
 

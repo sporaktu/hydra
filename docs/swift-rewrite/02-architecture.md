@@ -31,6 +31,10 @@ No source code, artwork, icon art, font files or documentation prose from the or
 | Android | Out of scope | — |
 | Over-the-air bundle updates | Not a concept in a native app | — |
 | Multireddit create/rename/delete | Reddit web-only in the original; parity | `04c` |
+| Live Activities / Dynamic Island | No hours-long event exists in a Reddit reader | `[DECISION: live-activities-rejected]`, `09 §3.15` |
+| Writing Tools adoption | Apple Intelligence / LLM; `[DECISION: ai-removed]`. Neither adopted **nor suppressed** | `09 §3.15` |
+| CloudKit sync of datasets (seen, hidden, drafts, stats) | Settings sync ships via iCloud KVS; datasets stay local in v1 | `[DECISION: cloudkit-dataset-sync-deferred]`, §14.10, `09 §3.14` |
+| An in-app Face ID / passcode lock | iOS 18 locks any app system-wide, better | `[DECISION: no-in-app-app-lock]`, `09 §3.15` |
 
 ---
 
@@ -113,7 +117,7 @@ TARGETED_DEVICE_FAMILY                 = 1,2      // iPhone and iPad
 
 | Option | Verdict | Reasoning |
 |---|---|---|
-| Plain `.xcodeproj` | **Chosen** | The merge-conflict pain that motivates generators is proportional to how much lives in the project file. With the **18** local SPM packages of §2.2/§3.1 and an app target containing under 20 files, the `.pbxproj` barely changes. No extra toolchain, no generation step in CI, no risk of a generator lagging Xcode 27. |
+| Plain `.xcodeproj` | **Chosen** | The merge-conflict pain that motivates generators is proportional to how much lives in the project file. With the **20** local SPM packages of §2.2/§3.1 and an app target containing under 20 files, the `.pbxproj` barely changes. No extra toolchain, no generation step in CI, no risk of a generator lagging Xcode 27. |
 | XcodeGen | Rejected | Buys merge-friendliness we get for free by pushing code into packages, and adds a generation step every contributor and every CI job must run. |
 | Tuist | Rejected for v1 | Genuinely good at this scale and above, but it is a second build system to learn and to keep current with Xcode 27, and its caching pays off with large teams. Revisit if the app target grows past ~5 targets or the team past ~4 engineers. |
 | JSON `.xcproj` (Xcode 27.2 beta) | **Watch, do not adopt** | It is exactly what we want — readable, merge-friendly, agent-editable — but it is beta in a beta Xcode, and 27.1 has not shipped. Migration is a file-format conversion in the file inspector, so adopting later is cheap. Recorded as `xcproj-format` in `08`. |
@@ -126,6 +130,7 @@ APPNAME/
 ├─ App/                        app target: APPNAMEApp.swift, composition root, Info.plist,
 │                              Assets.xcassets (icons only), launch screen, entitlements
 ├─ ShareExtension/             share extension target (§14.3)
+├─ WidgetsExtension/           widgets + Control Center controls target (§14.8, §14.9)
 ├─ Packages/
 │  ├─ AppCore/
 │  ├─ RedditAPI/
@@ -136,6 +141,8 @@ APPNAME/
 │  ├─ MediaKit/
 │  ├─ AppRouting/
 │  ├─ DesignSystem/
+│  ├─ AppIntentsKit/
+│  ├─ SyncKit/
 │  └─ Features/
 │     ├─ FeedFeature/
 │     ├─ PostDetailFeature/
@@ -153,7 +160,7 @@ APPNAME/
 
 Each directory under `Packages/` is its own `Package.swift` with `swift-tools-version: 6.4` (which enables Swift Testing's Complete XCTest interop mode). The app target links the feature packages; feature packages link the infrastructure packages.
 
-**This layout is the canonical package list.** There are exactly **18** local Swift packages — 9 infrastructure (`AppCore`, `RedditAPI`, `Persistence`, `RedditMarkdown`, `Theming`, `Entitlements`, `MediaKit`, `AppRouting`, `DesignSystem`) and 9 feature packages under `Packages/Features/` (`FeedFeature`, `PostDetailFeature`, `ComposerFeature`, `MediaFeature`, `AccountsFeature`, `InboxFeature`, `SearchFeature`, `SubredditsFeature`, `SettingsFeature`) — plus two non-package targets, the app shell and `ShareExtension`. `06-build-plan-and-acceptance.md` §1.2 and §6 use these names; nothing else does.
+**This layout is the canonical package list.** There are exactly **20** local Swift packages — 11 infrastructure (`AppCore`, `RedditAPI`, `Persistence`, `RedditMarkdown`, `Theming`, `Entitlements`, `MediaKit`, `AppRouting`, `DesignSystem`, `AppIntentsKit`, `SyncKit`) and 9 feature packages under `Packages/Features/` (`FeedFeature`, `PostDetailFeature`, `ComposerFeature`, `MediaFeature`, `AccountsFeature`, `InboxFeature`, `SearchFeature`, `SubredditsFeature`, `SettingsFeature`) — plus **three** non-package targets: the app shell, `ShareExtension` and `WidgetsExtension`. `AppIntentsKit`, `SyncKit` and `WidgetsExtension` are the native-polish additions and are specified in `09-native-polish-and-platform-features.md` §3. `06-build-plan-and-acceptance.md` §1.2 and §6 use these names; nothing else does.
 
 ---
 
@@ -175,6 +182,9 @@ Each directory under `Packages/` is its own `Package.swift` with `swift-tools-ve
 | 10 | **Features/**\* | One package per screen family. Owns its views, its `@Observable` view models, and its navigation intents. Talks to the world exclusively through protocols vended by AppCore. | AppCore, RedditAPI, Persistence, RedditMarkdown, Theming, MediaKit, AppRouting, DesignSystem, Entitlements | **any other Feature package** |
 | 11 | **App target** | Composition root: constructs the concrete `RedditClient`, `Database`, `SettingsStore`, `ThemeStore`, `Entitlements`, `PlayerRegistry`, `InboxPoller`; injects them into the environment; owns the `App`/`Scene`, the `TabView`, startup sequencing, URL intake, Sentry/MetricKit init, alternate icons. | everything | — |
 | 12 | **ShareExtension** | Receives one web URL, validates it with `RedditLink`, writes it to the App Group, and opens `appname://openurl?url=…`. | AppCore only | everything else |
+| 13 | **AppIntentsKit** | The four `AppIntent`s (open link, open subreddit, open saved, search), the two `AppEntity`/`IndexedEntity` types and their `EntityQuery`s, the `AppShortcutsProvider`, the two `ControlWidget` configurations' intents, and the Core Spotlight indexer. Declarative only: no generated text, and `FoundationModels` may never be imported (`09` §3.4, §3.5). | AppCore, AppRouting, Persistence | RedditAPI, SwiftUI feature views, any Feature package |
+| 14 | **SyncKit** | The iCloud key-value mirror: the synced-key allow-list (`03` §8.3), the `{v, t}` envelope codec, the last-writer-wins merge, the `didChangeExternallyNotification` observer, theme tombstones and the quota-violation handler (`09` §3.7). Never touches the Keychain. | AppCore, Persistence | RedditAPI, SwiftUI feature views, any Feature package |
+| 15 | **WidgetsExtension** | Three widgets (Saved, Subreddit, Inbox count) and two Control Center / Lock Screen / Action-button controls, rendered from the App Group's GRDB file **read-only**. **Must not link `RedditAPI`** — CI-enforced — so a widget can never make a network request (`09` §3.2, §3.3). | AppCore, Persistence, Theming, DesignSystem, AppIntentsKit | **RedditAPI**, any Feature package |
 
 ### 3.2 Rules that make the graph hold
 
@@ -191,6 +201,7 @@ graph TD
   subgraph Shell
     APP["App target<br/>APPNAME"]
     SHX["ShareExtension"]
+    WGX["WidgetsExtension"]
   end
 
   subgraph FeaturePackages["Features (no lateral edges)"]
@@ -206,6 +217,8 @@ graph TD
   end
 
   subgraph Infrastructure
+    AIK["AppIntentsKit"]
+    SYNC["SyncKit"]
     ROUTE["AppRouting"]
     DS["DesignSystem"]
     MK["MediaKit"]
@@ -227,7 +240,11 @@ graph TD
 
   APP --> FEED & DETAIL & COMPOSE & MEDIAF & ACCT & INBOX & SEARCH & SUBS & SET
   APP --> ROUTE & API & DB & TH & ENT & MK & SENTRY
+  APP --> AIK & SYNC
   SHX --> CORE
+  WGX --> CORE & DB & TH & DS & AIK
+  AIK --> CORE & ROUTE & DB
+  SYNC --> CORE & DB
 
   FEED & DETAIL & COMPOSE & MEDIAF & ACCT & INBOX & SEARCH & SUBS & SET --> ROUTE
   FEED & DETAIL & COMPOSE & MEDIAF & ACCT & INBOX & SEARCH & SUBS & SET --> DS
@@ -563,18 +580,36 @@ Four independently configurable bands per row (short-right, long-right, short-le
 - Activates only on predominantly horizontal movement; fails past 10 pt of vertical travel so the list keeps scrolling.
 - When *swipe anywhere to navigate* is on, rightward translation is clamped to 0, so only the two left bands remain reachable and the system back gesture wins (`spec/03 §7`, `spec/09 §6.1`).
 - Scroll is disabled for the duration of an engaged swipe, through a `ScrollLock` environment value, and the lock is released on `onEnded` **only if this row started the gesture** (guards the virtualized-recycling race the original hit).
-- `sensoryFeedback(.impact(weight: .light), trigger: band)` fires once per band change, including the return to band 0.
+- One haptic per band change, including the return to band 0, fired from a `prepare()`-backed generator so it lands on the pixel rather than on the animation. The exact cues, intensities and the rule that the **commit is silent** are `09-native-polish-and-platform-features.md` §2.4 rows H1.05–H1.09.
 - On iOS 27 we additionally adopt `onPresentationChanged` on the `swipeActionsContainer` when present, to pause a playing video while a swipe is open.
 
 ### 5.13 Haptics
 
-One facade, three semantic calls, all expressed as `sensoryFeedback` modifiers driven by trigger values (never `UIImpactFeedbackGenerator`):
+**`09-native-polish-and-platform-features.md` §2 is normative for haptics.** It carries the complete
+map — all 153 interactions in `04a`/`04b`/`04c`, each with its trigger moment, its cue and its
+intensity, plus an explicit "none, and why" for everything that gets no cue — and this section carries only the
+structural facts the rest of `02` depends on. Where an earlier draft of this section defined three
+semantic calls (`.engage` / `.action` / `.selection`), that vocabulary is **superseded**; the original's
+three helpers are the floor the new app exceeds, not the target. `[DECISION: native-haptic-map]`
 
-| Call | Feedback | Used for |
-|---|---|---|
-| `.engage` | `.impact(weight: .light)` | Swipe band transitions |
-| `.action` | `.impact(weight: .medium)` | Pull-to-refresh firing, a committed destructive action |
-| `.selection` | `.selection` | Tab long-press menus, toggles, picker choices, media viewer play/pause |
+1. **One facade, in `DesignSystem`** (§3.1 row 9): a `Haptic` enum of twelve cues and a
+   `.haptic(_:trigger:)` view modifier. A SwiftLint rule bans `sensoryFeedback`,
+   `UIImpactFeedbackGenerator`, `UISelectionFeedbackGenerator`, `UINotificationFeedbackGenerator` and
+   `CHHapticEngine` in every other file, so the map cannot be bypassed.
+2. **Two implementation tiers** (`09` §2.2, `[DECISION: haptics-implementation-split]`). Tier 1, the
+   default, is `.sensoryFeedback(_:trigger:)` and its `condition:` / closure overloads driven by
+   observable state. Tier 2, for twelve named latency-critical rows inside continuous gestures, is a
+   `prepare()`-backed `UIFeedbackGenerator` built with the non-deprecated `init(view:)` /
+   `init(style:view:)` and fired with the `at:` location variants.
+3. **Core Haptics is not used in v1** (`[DECISION: core-haptics-not-used]`).
+4. **Three `SensoryFeedback` cases are banned** because Apple documents them as silent on iOS:
+   `.start`/`.stop` (watchOS only), `.increase`/`.decrease` (watchOS and visionOS only) and
+   `.levelChange` (macOS only). `09` §2.1 has the citations.
+5. **System controls keep their own haptics.** Never add a cue to a `Toggle`, `Picker`, `Slider`,
+   alert, sheet or `.contextMenu` — iOS already plays one, and the second is audible as a defect.
+6. **A global kill switch**, `feedback.haptics` (default `true`), lives in Settings → Appearance →
+   Feedback (`04c` §17.4) and makes every first-party cue a no-op without touching the system's
+   (`[DECISION: haptics-toggle]`). Haptics are **not** coupled to Reduce Motion.
 
 ### 5.14 One-time alerts
 
@@ -1275,6 +1310,11 @@ One `MaintenanceJob`, run once per cold launch after first paint, in this order:
 
 One item per account: service `com.OWNER.appname.session`, account `<username>`, value = JSON of the stored session cookie (`03 §5.4`). Accessibility `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly` — the session must survive a locked-device relaunch (the inbox poller starts before first unlock is irrelevant, but a scheduled wake could) and must never sync to iCloud or restore to a different device. No password is ever stored, because login happens in Reddit's own web page.
 
+**Nothing in the Keychain syncs.** Items are written with **no** `kSecAttrSynchronizable` and
+accessibility `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`, so a Reddit session never leaves the
+device it was created on and is never visible to the share or widget extensions
+(`[DECISION: icloud-keychain-sessions-no]`, §14.10, `09` §3.7.1).
+
 ### 11.6 In-memory only
 
 | Data | Why not persisted |
@@ -1397,6 +1437,12 @@ own lock chrome.
 
 ### 13.4 Rules
 
+**Rule 0: nothing in `09` is gated.** No haptic cue, widget, control, intent, Spotlight entry,
+Handoff activity, synced key, Picture-in-Picture button, navigation transition or accessibility
+affordance may be added to `Feature.isGated`, and no twelfth gate id may be created for them
+(`[DECISION: native-polish-free]`, `05` §4).
+
+
 1. **The app is fully functional with `FreeEverythingProvider`.** Until `05` lands, the provider returns `.active(.distantFuture)`, so nothing is gated and nothing is blocked in development.
 2. **No feature package imports StoreKit.** Only the `Entitlements` package's `StoreKitProvider` does, and only the app target constructs it.
 3. **Gating is never security.** Nothing behind a gate is a secret; it is a product boundary.
@@ -1439,7 +1485,7 @@ The host app drains the queue at launch and on every `.active`. Using the App Gr
 
 ### 14.4 URL scheme and Shortcuts
 
-`CFBundleURLTypes` registers `appname`. Only `appname://openurl?url=` is accepted from outside; `appname://settings/...`, `appname://accounts` and `appname://webview` are internal constructions. We additionally ship an **App Intent** (`OpenRedditLinkIntent`) so the "open in APPNAME" action appears in Shortcuts and the share sheet natively, replacing the original's "install this iCloud Shortcut" flow. `AppEntity` payloads stay far below the 10 MB cumulative cap.
+`CFBundleURLTypes` registers `appname`. Only `appname://openurl?url=` is accepted from outside; `appname://settings/...`, `appname://accounts` and `appname://webview` are internal constructions. We additionally ship an **App Intent** (`OpenRedditLinkIntent`) so the "open in APPNAME" action appears in Shortcuts and the share sheet natively, replacing the original's "install this iCloud Shortcut" flow. `AppEntity` payloads stay far below the 10 MB cumulative cap. §14.9 expands this into the full `AppIntentsKit` surface.
 
 ### 14.5 Alternate app icons
 
@@ -1456,8 +1502,14 @@ Each alternate is its own Icon Composer file added to the project; Xcode writes 
 | `UILaunchScreen` | Required under the 27 SDK |
 | `CFBundleURLTypes` | `appname` scheme (one entry, `CFBundleURLSchemes = ["appname"]`) |
 | `CFBundleIcons` / `CFBundleAlternateIcons` | Written by Xcode from the *Alternate App Icon Sets* build setting (§14.5) |
+| `NSUserActivityTypes` | One entry, `com.OWNER.appname.viewing`, for Handoff (§14.9) |
+| `UIBackgroundModes = ["audio"]` | **Picture in Picture only** (§14.7, §14.11) |
 
 No camera, location, microphone, contacts, Bluetooth or HealthKit strings.
+
+**Entitlements**, in full: the App Group `group.com.OWNER.appname` on the app, `ShareExtension` and
+`WidgetsExtension`; and `com.apple.developer.ubiquity-kvstore-identifier` on the **app target only**
+(§14.10). No `aps-environment`, no Associated Domains, no Siri capability (§14.9).
 
 **The complete, normative list** — these keys, the App Group entitlement the share extension needs on
 **both** targets, and the list of capabilities we deliberately do *not* declare — lives in
@@ -1468,13 +1520,82 @@ deep link fails, and without the App Group the share extension cannot hand anyth
 
 ### 14.7 Background modes
 
-**None are declared.** `UIBackgroundModes` is absent from `Info.plist`. v1 unmounts every player the
-moment the scene reports `.background` (§10.3, `04b` §7.4), so there is no background audio and no
-Picture-in-Picture; there is no background fetch and no background inbox refresh either
-(`background-inbox-refresh`, `push-removed` in `08`). Declaring `audio` "just in case" would be an
-unused capability the App Review team is entitled to ask about, so we do not. Adding PiP later is one
-property on the player view **plus** adding the `audio` mode and answering for it; recorded as
-`background-audio-pip` in `08`.
+**Exactly one is declared: `UIBackgroundModes = ["audio"]`, and it exists for Picture in Picture and
+nothing else.** `[DECISION: background-mode-audio-pip-only]`
+
+Apple's requirement is unambiguous — Picture in Picture requires the *Audio, AirPlay, and Picture in
+Picture* background mode — so the earlier "no background modes at all" position and shipping PiP
+(§14.11, `09` §3.8) are mutually exclusive. The plan ships PiP and narrows the mode instead. The five
+guardrails that make the declaration honest are normative and each is tested (`09` §3.8.1):
+
+1. Only the **fullscreen viewer's** player may set `canStartPictureInPictureAutomaticallyFromInline`.
+2. Inline feed and Gallery Mode players are still **unmounted** on `.background` (§10.3, `04b` §7.4).
+3. The audio session is activated only while a viewer video is playing or PiP is active.
+4. When PiP stops while the app is backgrounded, the player is torn down — there is no
+   "audio playing, nothing on screen" path.
+5. **No background audio, no background fetch, no background inbox refresh, no
+   `BGAppRefreshTask`, no `BGProcessingTask`, no `BGContinuedProcessingTask`** in v1
+   (`background-inbox-refresh`, `push-removed` in `08`).
+
+App Review notes state the mode is declared for PiP and that the app offers no background audio
+(`06` §5 risk R16). `08` #52 (`background-audio-pip`) is amended accordingly: its PiP half is
+superseded by #114, its background-audio half stands.
+
+### 14.8 Widgets and Control Center controls
+
+`WidgetsExtension` (§2.2, §3.1 row 15) ships three widgets — Saved, a configurable Subreddit, and an
+Inbox-count accessory — and two `ControlWidget`s ("Open APPNAME", "Open a subreddit") for Control
+Center, the Lock Screen and the Action button. `[DECISION: widgets-homescreen]`,
+`[DECISION: control-center-controls]`
+
+The two structural rules: the extension opens the App Group's GRDB file **read-only**, and it **must
+not link `RedditAPI`** — a CI script asserts the absence of that edge, which is what guarantees a
+widget can never make a network request and keeps the whole surface inside `push-removed`. Timeline
+policy is `.never`; the app calls `WidgetCenter.shared.reloadTimelines(ofKind:)` on save/unsave, on
+an unread-count change and on backgrounding. Interactive *writes* from a widget are deferred
+(`[DECISION: widget-write-actions-deferred]`) because every one needs the device-local session
+(§11.5). Full contract: `09` §3.2, §3.3.
+
+### 14.9 App Intents, Spotlight and Handoff
+
+`AppIntentsKit` (§3.1 row 13) owns four foreground intents, two `AppEntity`/`IndexedEntity` types and
+an `AppShortcutsProvider`, which together put the app in Siri, Spotlight, Shortcuts and the Action
+button. `[DECISION: app-intents-shortcuts]` This is the expansion of §14.4's single
+`OpenRedditLinkIntent`. **No entitlement and no capability**: the Siri capability belongs to SiriKit
+Intents extensions, which this app does not ship.
+
+Core Spotlight indexes **only** subscribed subreddits and saved posts, deleted wholesale on logout and
+on account removal. `[DECISION: spotlight-index]`
+
+**Handoff** advertises one activity type, `com.OWNER.appname.viewing`, carrying the `Codable` `Route`
+plus the canonical Reddit `webpageURL`; continuation decodes it and hands it to the **same**
+`LinkIntake` the share extension, URL scheme and widgets use, so §5.7 remains the one intake path.
+Activities are invalidated on logout and on account switch. `[DECISION: handoff-continuity]` Full
+contract: `09` §3.4–§3.6.
+
+### 14.10 iCloud sync
+
+`SyncKit` (§3.1 row 14) mirrors a named allow-list of preference keys, the filter lists, per-subreddit
+sort memory and custom themes to `NSUbiquitousKeyValueStore`. Conflicts resolve **last-writer-wins**
+on an explicit `{v, t}` epoch-ms envelope, ties keeping local. `[DECISION: icloud-kvs-sync]`
+
+**This is not a backend.** iCloud is Apple-operated storage inside the user's own Apple Account; we
+run no server, hold no credentials and read nothing. `[DECISION: self-hosted-server-row]` and the
+"Data Not Collected" privacy label are unaffected, and the "no backend of any kind" invariant stands.
+
+**The Keychain never syncs.** Reddit session cookies, modhashes and the cached entitlement snapshot
+use no `kSecAttrSynchronizable` and `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`
+(`[DECISION: icloud-keychain-sessions-no]`, §11.5). Datasets (`seen_posts`, `hidden_posts`, `drafts`,
+`counter_stats`, `subreddit_visits`) stay device-local in v1
+(`[DECISION: cloudkit-dataset-sync-deferred]`). Entitlement:
+`com.apple.developer.ubiquity-kvstore-identifier`, app target only. Key/value budget and the quota
+handler: `09` §3.7.
+
+### 14.11 Picture in Picture
+
+`AVPictureInPictureController` in the fullscreen video viewer only (`04b` §8.1), owned by `MediaKit`
+alongside the player registry (§10.3). `[DECISION: pip-fullscreen-video]` It is the reason §14.7
+declares one background mode, and the five guardrails there are what bound it.
 
 ---
 
@@ -1482,7 +1603,10 @@ property on the player view **plus** adding the `audio` mode and answering for i
 
 ### 15.1 Accessibility baseline (v1 requirements, not aspirations)
 
-The original lists accessibility as an unimplemented backlog item while nonetheless shipping accessibility custom actions on post cards. We set a floor:
+**`09-native-polish-and-platform-features.md` §4 is normative** for the per-surface requirements and
+the eight-part Phase 9 verification method (`[DECISION: accessibility-baseline-normative]`). The seven
+rules below are the structural floor it expands; where the two documents differ in detail, `09` §4
+wins because it is the tested one. The original lists accessibility as an unimplemented backlog item while nonetheless shipping accessibility custom actions on post cards. We set a floor:
 
 1. **Dynamic Type through `.xxxLarge` on every screen**, with no clipped text. All font sizes are semantic (`.body`, `.subheadline`, `.caption`) scaled by a theme-level size multiplier; the "post title max lines" and "post text max lines" settings interact with Dynamic Type by clamping lines, never by clamping point size.
 2. **VoiceOver:** every post card exposes a composed label (title, subreddit, author, score, comment count, age) and the full action set as `accessibilityCustomAction`s — upvote, downvote, mark read/unread, save, hide, filter subreddit, share, read contents, open external link. Every swipe action is reachable without a swipe.
@@ -1625,8 +1749,10 @@ sentry-cocoa, initialised before anything renders, `enabled` iff not a debug bui
 | **Foldable / `ArrangementView`** | Same argument as the split view, which already proves it: layout is driven by container width and size class, never by screen width, and there are no hard-coded portrait-width assumptions outside the media viewer |
 | **Push notifications** | `InboxPoller.pollOnce()` is already isolated from the timer that drives it |
 | **Background inbox refresh** | Same |
-| **Picture-in-Picture** | `audio` background mode is already declared; the registry already owns player lifetime |
-| **Now Playing (iOS 27 framework)** | Player ownership is centralised, so a `MediaSessionRepresentable` has exactly one place to live |
+| **Now Playing framework (iOS 27)** | Player ownership is centralised and the `audio` background mode is declared for PiP (§14.7), so a `MediaSessionRepresentable` has one place to live. It only becomes useful alongside background audio, which we do not ship |
+| **Background audio** | The `audio` mode exists for PiP; enabling background playback is an audio-session policy change plus a new App Review answer (`[DECISION: background-mode-audio-pip-only]`) |
+| **CloudKit dataset sync** | `SyncKit` owns the merge vocabulary and `Persistence`'s six stores are already behind protocols (`[DECISION: cloudkit-dataset-sync-deferred]`) |
+| **Interactive widget writes** | The intents exist in `AppIntentsKit`; only the session-sharing question is open (`[DECISION: widget-write-actions-deferred]`) |
 | **Navigation state persistence** | `Route` is `Codable` |
 | **Localization** | String Catalog from day one |
 | **Server-tuned gate configuration** | `Feature.isGated` is a single table (§13.2); sourcing it from data instead of a literal is a one-file change |
@@ -1652,7 +1778,7 @@ sentry-cocoa, initialised before anything renders, `enabled` iff not a debug bui
 | §5.11 Orientation/status bar | `spec/01 §1.5`, `§18`; `spec/05 §2.1`; `spec/06 §3.1`; [WWDC25 282](https://developer.apple.com/videos/play/wwdc2025/282/) |
 | §5.15 iPad shell and split view | `spec/01 §10`; `spec/03 §5`, `§9.2`, `§9.5`; `spec/04 §1`, `§14`; `spec/05 §2.1`; `spec/06 §4.1`; `spec/08` items 204–208, 253, 312; [TN3192](https://developer.apple.com/documentation/technotes/tn3192-migrating-your-app-from-the-deprecated-uirequiresfullscreen-key), [WWDC25 282](https://developer.apple.com/videos/play/wwdc2025/282/), [WWDC25 256](https://developer.apple.com/videos/play/wwdc2025/256/), [WWDC24 10147](https://developer.apple.com/videos/play/wwdc2024/10147/), [Adopting Liquid Glass](https://developer.apple.com/documentation/TechnologyOverviews/adopting-liquid-glass), [`onGeometryChange`](https://developer.apple.com/documentation/swiftui/view/ongeometrychange(for:of:action:)), [`horizontalSizeClass`](https://developer.apple.com/documentation/swiftui/environmentvalues/horizontalsizeclass), [`containerRelativeFrame`](https://developer.apple.com/documentation/swiftui/view/containerrelativeframe(_:alignment:_:)), [`NavigationSplitView`](https://developer.apple.com/documentation/swiftui/navigationsplitview), [`sidebarAdaptable`](https://developer.apple.com/documentation/SwiftUI/TabViewStyle/sidebarAdaptable), [Menu bar with SwiftUI](https://developer.apple.com/documentation/SwiftUI/Building-and-customizing-the-menu-bar-with-SwiftUI), [`keyboardShortcut`](https://developer.apple.com/documentation/swiftui/keyboardshortcut), [What's new in iPadOS 27](https://developer.apple.com/ipados/whats-new/) |
 | §5.12 Swipe actions | `spec/03 §7`; `spec/04 §8`; `spec/09 §6.1` |
-| §5.13 Haptics | `spec/01 §14`; `spec/09 §7.4` |
+| §5.13 Haptics | **`09` §2 (normative)**; `spec/01 §14`; `spec/09 §7.4`; [`SensoryFeedback`](https://developer.apple.com/documentation/swiftui/sensoryfeedback), [HIG — Playing haptics](https://developer.apple.com/design/human-interface-guidelines/playing-haptics) |
 | §5.14 One-time alerts | `spec/01 §15`; `spec/09 §7.6` |
 | §6 State management | `spec/01 §1.7` (provider ordering), `§4.2` (`freezeOnBlur`); `spec/03 §2`, `§9.2`; `spec/04 §1.1` |
 | §6.4 Scroll restoration | `spec/04 §4`, `§5`; `spec/05 §10.4`; `spec/10 §A3` |
@@ -1666,7 +1792,8 @@ sentry-cocoa, initialised before anything renders, `enabled` iff not a debug bui
 | §12 Networking overview | `spec/02 §0`–`§3`, detail deferred to `03` |
 | §13 Entitlements | Owner directive; seam consumed by `05` |
 | §14 Background/system | `spec/07 §2.2`; `spec/09 §4.2`, `§5.3`; `spec/08 §6`; `spec/06 §5` |
-| §15 Accessibility/localization | `spec/03 §6`; `spec/08 §5` (accessibility listed as unimplemented); `spec/09 §6.4` |
+| §14.7–§14.11 Native platform surfaces | **`09` §3 (normative)**; [WidgetKit](https://developer.apple.com/documentation/widgetkit), [`ControlWidget`](https://developer.apple.com/documentation/swiftui/controlwidget), [App Intents](https://developer.apple.com/documentation/appintents), [`IndexedEntity`](https://developer.apple.com/documentation/appintents/indexedentity), [`NSUserActivity`](https://developer.apple.com/documentation/foundation/nsuseractivity), [`NSUbiquitousKeyValueStore`](https://developer.apple.com/documentation/foundation/nsubiquitouskeyvaluestore), [`AVPictureInPictureController`](https://developer.apple.com/documentation/avkit/avpictureinpicturecontroller), [Configuring your app for media playback](https://developer.apple.com/documentation/avfoundation/configuring-your-app-for-media-playback) |
+| §15 Accessibility/localization | **`09` §4 (normative)**; `spec/03 §6`; `spec/08 §5` (accessibility listed as unimplemented); `spec/09 §6.4` |
 | §16 Testing | `spec/09 §9`; `spec/04 §3` (flatten test suite); `spec/10 §A3` (Swift Testing) |
 | §17 Observability | `spec/02 §6.7`; `spec/06 §9`; `spec/10 §A3` (MetricManager) |
 | §18 Performance | `spec/04 §12`; `spec/10 §A3` (lazy stacks, List vs LazyVStack, `@State` macro) |
@@ -1701,7 +1828,7 @@ Every item below is resolved in `08-decisions-and-drift.md`. Short names are the
 | `prefs-force-over18-on-login` | The silent `old.reddit.com/prefs` rewrite is dropped; a one-time banner replaces it (`03 §5.7`) |
 | `cookie-expiry-rewrite` | Rewrite the session cookie's expiry once per app session per account, not after every response (`03 §5.4`) |
 | `live-text-dead-setting` | Actually implement the Live Text setting the original never wired up (§10.7) |
-| `background-audio-pip` | Picture-in-Picture and background audio remain out of scope; the background mode is declared so it stays cheap (§14.7, §19) |
+| `background-audio-pip` | **Split by #114/#115:** Picture in Picture ships in the fullscreen viewer and `UIBackgroundModes = ["audio"]` is declared for it alone; background audio stays out of scope (§14.7, §14.11, §19) |
 | `push-removed` | No push; foreground poll plus badge only (§14.1) |
 | `unpruned-tables` | Leave `custom_themes`, `counter_stats` and `subreddit_visits` unpruned (§11.3) |
 | `guide-included-or-not` / `guide-prose-rewrite` | Ship the guide as bundled Markdown with on-device FTS5 search and new prose (§11.7) |
@@ -1738,6 +1865,16 @@ All of these now have numbered entries in `08-decisions-and-drift.md` §1.4; the
 | `mark-seen-live` | "Mark as seen on scroll" takes effect without a restart (§11.4) |
 | `op-mod-badges` | Add text badges alongside OP/moderator colour coding, since colour alone is inaccessible (§15.1) |
 | `warnings-as-errors` | Warnings are errors in every configuration, with expiring exemptions (§1.4) |
+
+### 21.3 Items raised by `09-native-polish-and-platform-features.md`
+
+The twenty-seven native-polish decisions are numbered **#101–#127** in `08` §1.5 and are specified in
+`09`. The ones this document depends on structurally are: `native-haptic-map` and
+`haptics-implementation-split` (§5.12, §5.13), `haptics-toggle` (§5.13), `widgets-homescreen` and
+`control-center-controls` (§14.8), `app-intents-shortcuts`, `spotlight-index` and `handoff-continuity`
+(§14.9), `icloud-kvs-sync`, `icloud-keychain-sessions-no` and `cloudkit-dataset-sync-deferred`
+(§11.5, §14.10), `pip-fullscreen-video` and `background-mode-audio-pip-only` (§14.7, §14.11),
+`accessibility-baseline-normative` (§15.1), and `native-polish-free` (§13).
 | `split-view-column-ratio` | Feed column 40 %, detail pane 60 %, 320 pt minimum feed column, fixed (non-draggable) in v1 (§5.15.5) |
 | `split-view-tab-style` | Keep a plain `TabView`; do **not** adopt `.tabViewStyle(.sidebarAdaptable)`; re-derive the inset allow-list for the top-placed iPad bar (§5.4, §5.15.2) |
 | `split-view-pane-navigation` | The pane owns a `NavigationStack` + `Router`; `RouteDestination.for(_:)` decides pane-vs-tab placement; Fullscreen transfers the pane's top route to the tab's stack (§5.15.3) |
