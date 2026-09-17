@@ -5,6 +5,7 @@ import { StyleSheet, ActivityIndicator, Text, View } from "react-native";
 
 import { RedditDataObject } from "../../api/RedditApi";
 import { FeedVideoFocusContext } from "../../contexts/FeedVideoFocusContext";
+import { MediaViewerContext } from "../../contexts/MediaViewerContext";
 import {
   ScrollerContext,
   ScrollerProvider,
@@ -58,6 +59,7 @@ function RedditDataScroller<T extends RedditDataObject>(
   const { theme } = useContext(ThemeContext);
   const { scrollDisabled } = useContext(ScrollerContext);
   const { handleScrollForTabBar } = useContext(TabScrollContext);
+  const { subscribeToVisibility } = useContext(MediaViewerContext);
 
   const [refreshing, setRefreshing] = useState(false);
   const [isLoadingMore, setIsLoadingMore] = useState(
@@ -104,38 +106,75 @@ function RedditDataScroller<T extends RedditDataObject>(
   const mostlyVisibleItems = useRef<ViewToken<T>[]>([]);
   const fillingViewportItems = useRef<ViewToken<T>[]>([]);
 
+  // While the fullscreen viewer is open it owns playback, so the Focused Post
+  // is frozen: the feed underneath still re-lays out (rotating the device
+  // changes every post's height and the viewport's), and acting on those
+  // viewability changes moved focus to whichever video was now center-most,
+  // which then started playing — audibly, with feed audio on — under the
+  // video the user was actually watching. Snapshots keep updating; only the
+  // decision waits until the viewer closes.
+  const isViewerShowing = useRef(false);
+
   // Only touches refs and module state, so it is safe to capture once in the
   // viewability pairs below.
-  const evaluateVideoFocus = useCallback(() => {
-    const decision = decideFeedVideoFocus({
-      mostlyVisible: [
-        ...mostlyVisibleItems.current,
-        ...fillingViewportItems.current,
-      ],
-      anyVisible: anyVisibleItems.current,
-      focusedKey: getFocusedVideo(),
-      ownsFocus: ownsFocus(),
-    });
+  const evaluateVideoFocus = useCallback(
+    ({ keepVisibleFocus = false }: { keepVisibleFocus?: boolean } = {}) => {
+      if (isViewerShowing.current) return;
+      const decision = decideFeedVideoFocus({
+        mostlyVisible: [
+          ...mostlyVisibleItems.current,
+          ...fillingViewportItems.current,
+        ],
+        anyVisible: anyVisibleItems.current,
+        focusedKey: getFocusedVideo(),
+        ownsFocus: ownsFocus(),
+        keepVisibleFocus,
+      });
 
-    if (decision.releaseNow) {
-      commitFocus(null);
-    }
-
-    if (decision.pending === undefined) {
-      pendingFocusKey.current = null;
-      if (focusCommitTimer.current) {
-        clearTimeout(focusCommitTimer.current);
-        focusCommitTimer.current = null;
+      if (decision.releaseNow) {
+        commitFocus(null);
       }
-      return;
-    }
-    pendingFocusKey.current = decision.pending;
-    if (focusCommitTimer.current) clearTimeout(focusCommitTimer.current);
-    focusCommitTimer.current = setTimeout(() => {
-      focusCommitTimer.current = null;
-      commitFocus(pendingFocusKey.current);
-    }, FOCUS_SETTLE_MS);
-  }, []);
+
+      if (decision.pending === undefined) {
+        pendingFocusKey.current = null;
+        if (focusCommitTimer.current) {
+          clearTimeout(focusCommitTimer.current);
+          focusCommitTimer.current = null;
+        }
+        return;
+      }
+      pendingFocusKey.current = decision.pending;
+      if (focusCommitTimer.current) clearTimeout(focusCommitTimer.current);
+      focusCommitTimer.current = setTimeout(() => {
+        focusCommitTimer.current = null;
+        commitFocus(pendingFocusKey.current);
+      }, FOCUS_SETTLE_MS);
+    },
+    [],
+  );
+
+  useEffect(
+    () =>
+      subscribeToVisibility((isShowing) => {
+        if (isShowing === isViewerShowing.current) return;
+        isViewerShowing.current = isShowing;
+        if (isShowing) {
+          // A focus change still settling must not land under the viewer.
+          pendingFocusKey.current = null;
+          if (focusCommitTimer.current) {
+            clearTimeout(focusCommitTimer.current);
+            focusCommitTimer.current = null;
+          }
+          return;
+        }
+        // Catch up on what changed underneath the viewer. The snapshots may be
+        // mid-flight (closing re-locks to portrait, and that relayout is still
+        // to come), so a Focused Post that is still on screen keeps focus
+        // rather than briefly handing it to whatever is central right now.
+        evaluateVideoFocus({ keepVisibleFocus: true });
+      }),
+    [subscribeToVisibility],
+  );
 
   // FlashList builds its viewability helpers once from this prop, so keep the
   // array (and the configs inside it) stable for the life of the list.

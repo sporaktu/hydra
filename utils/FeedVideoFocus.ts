@@ -193,6 +193,12 @@ export type FocusDecision = {
  * @param anyVisible tokens for items with any pixel on screen
  * @param focusedKey the globally focused video key, if any
  * @param ownsFocus whether that focus belongs to this feed
+ * @param keepVisibleFocus when true, the focused video keeps focus as long as
+ *   any of it is on screen, even if another video is now more central. For
+ *   re-evaluating from viewability snapshots that may be about to change
+ *   (e.g. the fullscreen viewer just closed and the feed is rotating back to
+ *   portrait): without it a briefly-central video would start, with audio,
+ *   only to hand focus straight back.
  *
  * Starting is strict: only a mostly visible video can become Focused, and the
  * center-most of those wins. Stopping is lenient: once playing, a video keeps
@@ -204,11 +210,13 @@ export function decideFeedVideoFocus({
   anyVisible,
   focusedKey,
   ownsFocus,
+  keepVisibleFocus = false,
 }: {
   mostlyVisible: ViewabilityToken[];
   anyVisible: ViewabilityToken[];
   focusedKey: string | null;
   ownsFocus: boolean;
+  keepVisibleFocus?: boolean;
 }): FocusDecision {
   const { viewableIndices, videoIndices } =
     collectVideoCandidates(mostlyVisible);
@@ -217,6 +225,9 @@ export function decideFeedVideoFocus({
     collectVideoCandidates(anyVisible).videoIndices.some(
       (video) => video.key === focusedKey,
     );
+  if (keepVisibleFocus && stillOnScreen) {
+    return { releaseNow: false, pending: undefined };
+  }
   const releaseNow = ownsFocus && focusedKey !== null && !stillOnScreen;
   const effectiveFocused = releaseNow ? null : focusedKey;
 

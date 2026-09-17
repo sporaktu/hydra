@@ -52,3 +52,17 @@ viewability configs whose union feeds the decision; see
 starting: a playing video keeps focus while any of it is on screen and no
 mostly visible video replaces it, so nudging the feed doesn't flip it to its
 Poster.
+
+## Amendment: the fullscreen viewer owns playback
+
+While the fullscreen viewer is open, only the video it is showing may play.
+The feed underneath it still re-lays out (rotating the device changes every
+post's height and the viewport's), and acting on those viewability changes
+moved focus to whichever video was now center-most, which then started
+playing under the viewer — audibly, with feed audio on. So the feed freezes
+its Focused Post for as long as the viewer is up (`RedditDataScroller`), and
+an inline player created underneath the viewer never starts on its own
+(`Gallery/Video.tsx`); the viewer-closed handoff starts it. When the viewer
+closes, the feed re-evaluates from its latest viewability, keeping a Focused
+Post that is still on screen at all rather than briefly handing focus to
+whatever is central in a layout that is about to rotate back.
