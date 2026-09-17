@@ -1,6 +1,6 @@
 # 04c — Accounts, Inbox, Messages, User, Search, Subreddit Detail, Web Views, and the Settings Tree (SwiftUI Implementation Spec)
 
-**Target:** `APPNAME`, a from-scratch native SwiftUI iPhone Reddit client.
+**Target:** `APPNAME`, a from-scratch native SwiftUI iPhone **and iPad** Reddit client.
 **Platform floor:** iOS 26.0, built with the iOS 27 SDK, Swift 6.4, strict concurrency with default
 `MainActor` isolation.
 **Companion documents:** `02-architecture.md` (stores, `Route`, `Theme` environment, typed `Settings`,
@@ -10,8 +10,9 @@ model), `04a-feeds-posts-comments.md` (feeds, post cards, comments, composers),
 `06-build-plan-and-acceptance.md`, `07-one-shot-prompt.md`, `08-decisions-and-drift.md` (resolves `[DECISION: <id>]`).
 
 Clean-room reproduction of *behavior*. Quoted strings are functional UI copy and reproduced verbatim,
-with the product name replaced by `APPNAME` where it appears. iPhone only.
-`[DECISION: ipad-split-view-deferred]`
+with the product name replaced by `APPNAME` where it appears. iPhone **and iPad**; the one settings
+surface that is device-conditional on iPad is Appearance → "Enable split view" (§17.1).
+`[DECISION: ipad-split-view-in-scope]`
 
 **Removed by the owner, not specified anywhere here:** AI summaries, AI filters, push notifications /
 "Inbox Alerts". A subscription **paywall entry point** does exist as a placeholder (§13.1) and is
@@ -428,7 +429,7 @@ Rendered **only** on the profile root, never on a deeper section.
 
 A circular **avatar**, 64×64, above the stats: `User.iconURL` (`data.icon_img` truncated at the first
 `?`), loaded with `AsyncImage`, falling back to the generic person glyph when absent. The original
-carried the icon URL in its model and rendered it nowhere; on a modern iPhone the missing avatar reads
+carried the icon URL in its model and rendered it nowhere; on a modern device the missing avatar reads
 as broken, so this one addition is a deliberate, flagged deviation from code parity
 (`[DECISION: user-page-minimal]`).
 
@@ -757,7 +758,7 @@ Settings → General → External Links (§16.7), key `links.externalBrowser` of
 
 | `BrowserChoice` | Label | Behavior |
 |---|---|---|
-| `inApp` | **APPNAME** (default) | Opens an in-app browser, presented full screen, with a "close"-styled dismiss control. Device orientation is unlocked while it is open and re-locked to portrait when it closes — the unlock/re-lock pair itself is **owned by `02-architecture.md` §5.11**, and this row only names one of the two surfaces that use it (the other is the media viewer, `04b` §2.1); do not re-implement it here. Reader mode is applied per `openInReaderMode`. Use `SFSafariViewController` via a representable (`entersReaderIfAvailable` gives reader mode for free) — or a `WebView` if more control is needed, at the cost of reimplementing reader mode. |
+| `inApp` | **APPNAME** (default) | Opens an in-app browser, presented full screen, with a "close"-styled dismiss control. On iPhone, device orientation is unlocked while it is open and re-locked to portrait when it closes (on iPad it is already free, so the pair is a no-op) — the unlock/re-lock pair itself is **owned by `02-architecture.md` §5.11**, and this row only names one of the two surfaces that use it (the other is the media viewer, `04b` §2.1); do not re-implement it here. Reader mode is applied per `openInReaderMode`. Use `SFSafariViewController` via a representable (`entersReaderIfAvailable` gives reader mode for free) — or a `WebView` if more control is needed, at the cost of reimplementing reader mode. |
 | `system` | **Default Browser** | Open the URL unmodified; the system hands it to the default browser. |
 | `chrome` | **Chrome** | Rewrite to `googlechromes://` (https) or `googlechrome://` (http) with the scheme stripped from the original. |
 | `brave` | **Brave** | `braves://` / `brave://`, same shape. |
@@ -1069,7 +1070,10 @@ is not being built.
 Description below, verbatim (with the product name substituted):
 
 > **"'Open in APPNAME' is already available in the share sheet and in the Shortcuts app. Use it to
-> open Reddit links from anywhere on your iPhone directly in APPNAME."**
+> open Reddit links from anywhere on your device directly in APPNAME."**
+
+(The original's copy names the iPhone; `APPNAME` ships for iPhone **and** iPad, so the sentence says
+"your device".)
 
 **Section "Clipboard Links":**
 
@@ -1131,8 +1135,9 @@ Three grouped sections.
 
 | Row | Control | Key | Default | Notes |
 |---|---|---|---|---|
-| Make posts compact | Toggle | `postCompactMode` | `false` | iPhone-only build, so the original's "true on ≥768 pt" default collapses to false |
+| Make posts compact | Toggle | `postCompactMode` | `deviceSupportsSplitView` — **on** for iPad-class devices, **off** for iPhone | The original's default, restored now that iPad is in scope (`03` §8.1, `02` §5.15.7). A plain default; changing the window size never changes it |
 | Show thumbnails on right | Toggle — **only shown when compact mode is on** | `showThumbnailsOnRightSide` | `false` | |
+| **Enable split view** — *"Show a post's comments in a side panel instead of opening it full screen."* Rendered **only** where `deviceSupportsSplitView` is true, i.e. on iPad-class devices | Toggle | `splitViewEnabled` | `deviceSupportsSplitView` (so, effectively **on** wherever the row is visible) | Turns on the two-pane feed/detail layout. The setting alone is not sufficient: the pane only appears while the window is ≥ 768 pt wide and the horizontal size class is regular, and it is suppressed (not resized) below that, live, as the window is dragged (`02` §5.15, `04a` §3.5). Takes effect immediately on every open feed screen; no restart, no alert. `[DECISION: ipad-split-view-in-scope]` |
 | Show subreddit at top | Toggle | `subredditAtTop` | `false` | |
 | Show subreddit icons | Toggle | `showSubredditIcon` | `true` | Also suppressed in low-data mode |
 | Post title max lines | Picker 1–10 | `postTitleLength` | `2` | |
@@ -1147,8 +1152,13 @@ Three grouped sections.
 | Live text | Toggle | `media.liveText` | `false` | `04b` §3.3. Inert in the original; **actually implemented** in `APPNAME` via `ImageAnalysisInteraction`. `[DECISION: live-text-dead-setting]` |
 | Tap to collapse | Toggle | `tapToCollapsePost` | `true` | Post-detail header |
 
-**The "Enable split view" row is omitted** (iPhone-only build). **The "Show post summary" row does not
-exist** — the setting is dead and not carried forward.
+**Row order matches the original's Appearance screen** (`spec/06` §4.1): compact, thumbnails-on-right,
+**split view**, subreddit-at-top, and on from there. Two of the rows are conditional and the divider
+under the last *visible* row must be computed from the rendered collection, not the unfiltered one —
+this screen is precisely where the original's trailing-divider bug shows
+(`[DECISION: list-divider-index]`).
+
+**The "Show post summary" row does not exist** — the setting is dead and not carried forward.
 
 #### 17.2 Comment Appearance Settings
 
@@ -1927,7 +1937,7 @@ the user created them explicitly, the other two because they are meant to be per
 1. **Before any UI:** initialize crash reporting (gated on `privacy.errorReporting`, default on,
    disabled in debug, read reactively thereafter); run the deferred video-cache clear if its flag is
    set (must complete before anything that could mount a player); open the database, run migrations
-   and create/verify the schema; lock orientation to portrait-up.
+   and create/verify the schema; on iPhone, lock orientation to portrait-up (on iPad nothing is locked — `02` §5.11).
 2. **Splash:** the app body renders nothing until the database is ready and the account session has
    been restored. While the account restore is in flight, show a full-screen splash (theme-aware
    image + a centered spinner offset ~10 % below center), which is also what dismisses the launch
@@ -2097,6 +2107,7 @@ launch, and it **must** ship a launch screen or be rejected.
 | `spec/01-navigation-shell.md` §3.2 (tab long-press), §3.3 (initial tab), §4.3 (inbox header button), §6 (incoming URLs), §11 (settings routing), §12.2–12.3 (startup modals, community nudge), §17 (error page), §18 (external links), §19 (web views), §21 (app icons) | accounts entry points, settings routing, URL handling, web views, modals | §1, §13, §14, §16.7, §11, §19, §21.1 |
 | `spec/02-api-contract.md` §2.5 (R4–R7), §2.6 (Q1), §2.7 (I1–I6), §2.8 (U1–U3), §2.10 (the `/prefs` rewrite — **dropped**, §3.4), §2.13 (server endpoints — **dropped**, §20.4) | endpoints used here; the endpoint ids are `03-data-and-networking.md` §5.2's | §2, §4, §5, §6, §7, §8, §3.4, §20.4 |
 | `spec/02-api-contract.md` §3.1–3.7 (login web view, procedure, token, cookies, multi-account, expiry) | the whole login model | §2 |
+| `spec/01` §10 (split view → the Appearance toggle's gate and default) | device-conditional settings | §17.1 |
 | `spec/06-settings-themes.md` §1 (routing + root), §2.1–2.7 (General subtree), §3.1–3.6 (theme, palettes, maker, picker, sharing), §4.1–4.3 (appearance), §5 (app icon), §7 (data use), §8 (stats), §9 (privacy), §10 (advanced), §11 (persistence), §12 (guide), §13 (notifications), §14 (Pro), §15 (about) | the whole settings tree | §14–§22 |
 | `spec/07-accounts-inbox-search-subs.md` §1 (accounts, login, pulse, multi-account, quick swap, session storage, settings normalization), §2 (inbox), §3 (messages), §4 (user page), §5 (search, in-subreddit, quick search), §6 (sort/context vocabulary), §7 (subreddits hub), §8 (sidebar), §9 (wiki), §10 (multireddits) | Parts I–III | §1–§10 |
 | `spec/08-feature-inventory.md` E, F, G, H, L, Q, T, U, V, W | acceptance checklist | throughout |
@@ -2110,7 +2121,7 @@ row of its §3 drift table). There are no aliases.
 
 | Tag | Subject |
 |---|---|
-| `ipad-split-view-deferred` | iPad split view out of scope |
+| `ipad-split-view-in-scope` | iPad split view ships in v1; its Appearance toggle is restored and is device-conditional (§17.1) |
 | `no-confirm-account-delete` | Account removal now confirms before deleting |
 | `login-no-instructions` | One line of explanatory copy is added to the login screen |
 | `login-css-injection` | No cosmetic CSS is injected into Reddit's login page |

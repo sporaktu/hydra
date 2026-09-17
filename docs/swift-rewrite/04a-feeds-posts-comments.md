@@ -1,6 +1,6 @@
 # 04a — Feeds, Post Cards, and Post Details / Comments (SwiftUI Implementation Spec)
 
-**Target:** `APPNAME`, a from-scratch native SwiftUI iPhone Reddit client.
+**Target:** `APPNAME`, a from-scratch native SwiftUI iPhone **and iPad** Reddit client.
 **Platform floor:** iOS 26.0, built with the iOS 27 SDK, Swift 6.4, strict concurrency with
 default `MainActor` isolation (off-main work marked `@concurrent`).
 **Companion documents:** `02-architecture.md` (stores, routing, theming, DI, feature-gate seam),
@@ -15,10 +15,11 @@ This document is **clean-room**: it reproduces *behavior* observed in the origin
 code. UI label strings and error strings are quoted verbatim where the surveys quote them, because
 they are functional copy. No original source, art or documentation prose is reused.
 
-**Scope note — iPad.** iPhone only for v1. The original's iPad split-view feed/detail pane pairing is
-out of scope; do not build `NavigationSplitView`, the split-pane feed column, or the floating
-close/fullscreen pane controls. Every "tapping a post opens the detail pane" branch collapses to a
-plain `NavigationStack` push. `[DECISION: ipad-split-view-deferred]`
+**Scope note — iPad.** iPad is **in scope for v1**, including the original's split view: on a
+wide-enough iPad window, tapping a post in a feed loads it into a right-hand detail pane instead of
+pushing. §3.5 is the normative feed-side specification and `02-architecture.md` §5.15 is the shell
+contract. Do **not** build it with `NavigationSplitView` — `02` §5.15.2 gives the five reasons.
+`[DECISION: ipad-split-view-in-scope]`
 
 ---
 
@@ -309,11 +310,152 @@ comparison. Full header/stat/menu spec is in `04c` §User page.
 
 ---
 
+### 3.5 Split view (iPad)
+
+The shell contract — the gates, the SwiftUI container choice, pane routing, resize handling, Liquid
+Glass and keyboard — is `02-architecture.md` §5.15 and is normative. This section specifies what the
+**feed screen** does. `[DECISION: ipad-split-view-in-scope]`
+
+#### 3.5.1 Activation
+
+```
+deviceSupportsSplitView  = UIDevice.current.userInterfaceIdiom == .pad     // once per process
+windowSupportsSplitView  = horizontalSizeClass == .regular && containerWidth >= 768
+showSplitView            = Settings.splitViewEnabled && windowSupportsSplitView
+```
+
+- `Settings.splitViewEnabled` defaults to `deviceSupportsSplitView` and its Appearance row is rendered
+  only where that is true (`04c` §17.1, `03` §8.1).
+- `containerWidth` comes from `.onGeometryChange(for: CGFloat.self) { $0.size.width }` on the screen's
+  own container — **never** from `UIScreen`. Under iPadOS 26 windowing the window can be any width and
+  can change while the user drags.
+- **Hysteresis:** the pane appears at ≥ 768 pt and disappears below **752 pt**, so a window parked on
+  the boundary cannot flicker.
+- The gate is re-evaluated on every geometry callback and the pane's appearance/disappearance is
+  **not** animated while a live resize is in flight.
+
+#### 3.5.2 Layout
+
+```
+PostFeedScreen
+└─ HStack(spacing: 0)
+   ├─ FeedColumn                       // everything §3.1 already describes
+   │   ├─ List(...)                    // search bar header, rows, footer, .refreshable
+   │   └─ .overlay(.bottomTrailing) { FeedVideoFABs }      // scoped to THIS column
+   ├─ Divider()                        // only when a pane is open
+   └─ DetailPane                       // only when a pane is open
+       ├─ NavigationStack(path: paneRouter.path) { PostDetailScreen(target:) }
+       ├─ .overlay { ScrollToNextButton() }                // snap grid = the PANE's bounds
+       └─ .overlay(.bottom) { PaneControls }               // Close + Fullscreen
+```
+
+- **Column widths:** feed **40 %**, pane **60 %** (the original's `flex: 1` / `flex: 1.5`), with the
+  feed column clamped to a **320 pt minimum** so it stays a usable post list just above the gate. The
+  divider is a 1 px (`1 / displayScale`) hairline in `theme.divider`. The ratio is fixed in v1; the
+  divider is not draggable. `[DECISION: split-view-column-ratio]`
+- **With nothing selected the pane and the divider are not rendered at all** and the feed column
+  occupies the full width. There is therefore **no empty-pane placeholder and no placeholder copy** —
+  this is the original's design, and inventing a "Select a post" splash would be a deviation, not a
+  polish.
+- Each column scrolls independently and each gets its own scroll-edge effect. Neither column sets a
+  custom background (`02` §5.10).
+
+#### 3.5.3 Tapping a post
+
+Replaces the push from §6's tap-target table, and **only** for the card body:
+
+| With `showSplitView` | Card body tap |
+|---|---|
+| **true** | Mark seen synchronously (§7.7), then set `paneTarget = PostTarget(post)`. **No push.** If a pane is already open, its content swaps in place — `PostDetailStore.detail` is set to `nil` first so the pane shows a full-pane `ProgressView` rather than refreshing in place (`spec/04` §1, split-view-mode-specific), then re-fetches |
+| **false** | Unchanged: mark seen, then push `Route.postDetail(...)` onto the tab's stack |
+
+Every other tap target in §6 is unchanged in both modes, including the compact thumbnail (which opens
+the media viewer full-window, not the pane) and the subreddit/author names (which push onto the tab's
+stack from the feed column).
+
+`posts_viewed` increments when a post is opened into the pane, exactly as when it is pushed (§12.3).
+
+#### 3.5.4 Selection state, and what clears it
+
+- `paneTarget` is `@State` on **this** `PostFeedScreen` instance — never shared, never app-level. Two
+  feed screens (same tab or different tabs) each have their own pane, as in the original.
+- **Cleared** when the screen's `FeedTarget` changes *page identity* — a different subreddit,
+  multireddit, user or the home feed. Reaching a different subreddit through the switcher or a link
+  produces a different screen instance with an empty pane anyway; this rule covers the in-place cases.
+- **Preserved** across a sort or Top-window change on the same target (which rewrites the route in
+  place, §3.2), across pull-to-refresh, across tab switches, and across a collapse/re-expand of the
+  window (`02` §5.15.4 rule 3).
+- **Preserved when the post leaves the feed.** Pull-to-refresh, a filter change or hide-seen may remove
+  the selected post from `items`; the pane keeps showing it, because the pane's state is a `PostTarget`
+  value and not an index into the list.
+- **Selection affordance.** The original renders none — the selected row is distinguishable only by its
+  seen dimming, which is not enough once the pane is persistent. `APPNAME` adds a 3 pt leading accent
+  bar in `theme.tint` on the row whose post is in the pane, plus
+  `.accessibilityAddTraits(.isSelected)`. Seen tracking and the 0.75 seen opacity are unchanged.
+
+#### 3.5.5 Pane controls
+
+A floating glass capsule of two 40 × 40 circular buttons anchored to the **bottom-centre of the detail
+pane**, clear of the tab bar (the original centres the same pair over the whole window; anchoring to
+the pane is the generalisation once the pane can be any width). Both are `IconButton`s with VoiceOver
+labels.
+
+| Control | Glyph | Effect |
+|---|---|---|
+| **Close** | `xmark` | `paneTarget = nil` and the pane `Router`'s path is reset to empty. The feed column animates back to full width. Nothing is pushed or popped on the tab's stack |
+| **Fullscreen** | `arrow.up.left.and.arrow.down.right` | Pushes the pane's **current top** route onto the **tab's** main stack, full width over both columns. `paneTarget` and the pane's path are left exactly as they are, so popping back restores the same two panes (`spec/01` §10) |
+
+#### 3.5.6 Inside the pane
+
+The pane hosts the full `PostDetailScreen` (§12) with no behavioural subtractions: voting, saving,
+replying, sharing, collapse / collapse-children-only / collapse-thread, the comment sort menu, comment
+swipe actions, the nine-item long-press menu, text selection, markdown link taps and the composer all
+behave exactly as they do full-screen. Pane-specific details:
+
+- **No navigation bar at the pane's root** — the pane sits below the feed screen's own bar, as in the
+  original. A compact bar appears *inside* the pane, with a Back chevron, once the pane's own stack is
+  non-empty (`02` §5.15.3).
+- **Pull-to-refresh inside the pane** does a full re-fetch and replaces the whole tree, as §12.1
+  specifies; in pane mode `detail` is blanked to `nil` first (full-pane spinner) rather than refreshed
+  in place (`spec/04` §14). The feed column is untouched.
+- **The scroll-to-next/previous button** (§15.4) belongs to the pane. Its ten snap positions are laid
+  out against the **pane's** bounds, not the window's, and the reposition-mode overlay dims the pane
+  only. The persisted position (`Settings.scrollToNextButtonPosition`) is shared with the full-screen
+  case — one anchor, resolved against whichever container the button is in.
+- **The feed video FABs** (§9) belong to the **feed column** and are positioned relative to it, so they
+  never float over the pane (`spec/03` §9.5).
+- **Video focus.** The feed column owns the only focus-managed list; the pane's own video is outside
+  any focus context and is always eligible to play, exactly as in the original (`spec/03` §9.2). The
+  focus engine is injected per screen, so the two never contend.
+- **The media viewer** opens full-window over both panes (`04b` §2.1) — never inside the pane.
+- **Where a push from inside the pane lands** is `02` §5.15.3's `RouteDestination.for(_:)` table:
+  post details, subreddit / multireddit feeds, user profiles, sidebar, wiki and in-subreddit search
+  stay in the pane; gallery mode, settings, accounts, inbox, message threads, the search tab, the
+  subreddits hub, web views and the error page push onto the tab's stack over both columns.
+
+#### 3.5.7 Post Details as pane vs. pushed
+
+`PostDetailScreen` takes one extra parameter, `presentation: .pushed | .pane`. It changes exactly four
+things and nothing else:
+
+| | `.pushed` | `.pane` |
+|---|---|---|
+| Navigation bar | The tab stack's bar, with the sort and "…" buttons | None at the pane's root; the sort and "…" buttons move into the pane's own top-trailing overlay |
+| Loading a different post | Never happens — a different post is a different screen | `detail = nil` first, then fetch (full-pane spinner) |
+| Bottom inset | `.safeAreaPadding(.bottom, 100)` clearing the tab bar | Clears the pane controls capsule instead |
+| Floating button bounds | The window | The pane |
+
+Everything else — the store, the flattening, the row layout, every interaction — is the same code on
+the same path. A change to post details that only works in one of the two modes is a defect.
+
+---
+
 ## 4. The post card
 
 `PostRow` renders one post. Two mutually exclusive layouts controlled by `Settings.postCompactMode`
-(default: `false` on iPhone — the original's default was "true on ≥768pt screens", which on an
-iPhone-only build is always false).
+(default: `deviceSupportsSplitView` — **on** for iPad-class devices, **off** for iPhone, exactly as in
+the original; `03-data-and-networking.md` §8.1, `02-architecture.md` §5.15.7). It is a plain default:
+a user who switches it stays switched, and resizing the window never changes it.
 
 Container for both: 12 pt vertical / 10 pt horizontal padding, 10 pt spacing between direct
 children, background `theme.background`, `.opacity(post.seen ? 0.75 : 1.0)`. Cards are separated by
@@ -570,6 +712,10 @@ Exactly 1000 prints `"1000"`.
 
 Upvote, Downvote and Save do **not** mark a post seen. Only "Mark as Read", the card tap, and media
 taps do.
+
+**In split view** (§3.5.3) the card-body row of this table changes — and only that row: the tap loads
+the post into the detail pane instead of pushing. Seen-marking still fires synchronously first. Every
+other row is unchanged.
 
 ---
 
@@ -1283,6 +1429,10 @@ array forward (or backward) to the next row where `kind == .comment && depth == 
 
 Opacity dims to 0.7 while held.
 
+**Container.** The button's bounds, and the ten snap positions below, are laid out against the
+container it floats in: the window when post details is pushed, the **detail pane** when it is rendered
+as a pane (§3.5.6). The persisted anchor is shared between the two cases.
+
 **Reposition mode:** a `rgba(0,0,0,0.5)` overlay fades in over 300 ms above everything (including the
 tab bar), showing **10** locked target positions as 40×40 dashed-outline circles in `theme.buttonBg`,
 positioned relative to the screen area above the tab bar:
@@ -1629,8 +1779,9 @@ and defaults**; its namespaced `APPNAME` equivalents (`post.compactMode`, `filte
 
 | Key | Type | Default | Effect on this document's screens |
 |---|---|---|---|
-| `postCompactMode` | Bool | `false` (iPhone) | Compact vs normal card layout (§4) |
+| `postCompactMode` | Bool | `deviceSupportsSplitView` (on for iPad-class devices, off for iPhone) | Compact vs normal card layout (§4) |
 | `showThumbnailsOnRightSide` | Bool | `false` | Compact thumbnail side; row becomes space-between |
+| `splitViewEnabled` | Bool | `deviceSupportsSplitView` | Enables the two-pane split view; combined with the live window gate to produce `showSplitView` (§3.5.1) |
 | `subredditAtTop` | Bool | `false` | Subreddit row above title vs inline in metadata |
 | `showSubredditIcon` | Bool | `true` | Draw subreddit icons (also suppressed in low-data) |
 | `postTitleLength` | Int (1–10) | `2` | Title line clamp |
@@ -1836,7 +1987,7 @@ Write these as `@Test` functions in Swift Testing (new tests; XCTest reserved fo
 |---|---|---|
 | `spec/01-navigation-shell.md` §4.2 (screen registry), §5.1–5.2 (switcher, sort/context buttons), §5.3 (nav helpers), §7.5–7.6 (sort parsing, preferred sorts), §13 (scroll-to-next button), §14 (haptics), §15 (one-time alerts) | routing, toolbar, sorts, floating button | §3.2, §8, §15.4, §16.4, §7.1 |
 | `spec/01` §3 (tab bar hide-on-scroll), §3.1 (tab re-tap) | scroll-to-top semantics | §2.5, §19 |
-| `spec/01` §10 (split view) | explicitly out of scope | §Scope note |
+| `spec/01` §10 (split view); `spec/03` §5 (tap targets), §9.2 (focus scoping), §9.5 (FAB scoping); `spec/04` §1, §14 (pane mode); `spec/08` items 204–207 | the iPad split view, in full | §3.5, §6, §12, §15.4 |
 | `spec/02-api-contract.md` §2.1 (P1–P3), §2.2 (C1–C3), §2.3 (V1–V5), §2.4 (S1–S4), §2.5 (R4), §2.9 (M2–M5) | endpoints used | §2.1, §3.3, §7.4–7.5, §11.1, §14.5, §16.5 |
 | `spec/02` §4.1–4.9 (models), §4.13 (formatting) | post/comment model fields, time & number formatting | §4, §5, §14 |
 | `spec/02` §5.1–5.2 (cursors, list state machine), §7 (error copy) | pagination + error states | §2.1, §2.2 |
@@ -1856,7 +2007,10 @@ no aliases, and the register's "Default (assumed)" column is what this document 
 
 | Tag | Subject |
 |---|---|
-| `ipad-split-view-deferred` | iPad split view omitted in v1 |
+| `ipad-split-view-in-scope` | The iPad two-pane split view ships in v1 at parity (§3.5) |
+| `split-view-column-ratio` | Feed column 40 % / detail pane 60 %, 320 pt minimum feed column, fixed divider (§3.5.2) |
+| `split-view-pane-navigation` | The pane owns a `NavigationStack`; `RouteDestination.for(_:)` decides pane-vs-tab placement; Fullscreen transfers the top route (§3.5.5, §3.5.6) |
+| `split-view-tab-style` | Plain `TabView`, no `.sidebarAdaptable`; the iPad bar sits at the top and the inset allow-list follows it (`02` §5.15.2) |
 | `post-summary-dead-setting` | `showPostSummary` dropped |
 | `comment-summary-dead-setting` | `showCommentSummary` dropped |
 | `poll-voting-stub` | Polls render read-only with results; no fake Vote button; no poll post type |
@@ -1887,9 +2041,9 @@ no aliases, and the register's "Default (assumed)" column is what this document 
 | `raw-json-param` | `raw_json=1` on every read; no client-side entity decoding |
 | `snudown-renderer` | One first-party markdown pipeline for fetched content and previews |
 | `quote-first-line` | The composer's quote-on-first-line no-op is fixed |
-| `scroll-to-next-button` | The floating comment-nav button, with "previous" as a long-press |
+| `scroll-to-next-button` | The floating comment-nav button, reproduced with strict parity (300 ms hold = previous, ~1 s hold = reposition) |
 | `hidden-posts-local` | Hiding stays local; Reddit's hide endpoint is never called |
-| `swipe-forward-gesture` | The right-edge forward swipe is dropped in v1 |
+| `swipe-forward-gesture` | The right-edge forward swipe is reproduced; mechanics and precedence in `02` §5.8 |
 | `nav-bar-tap-guard` | Verify the switcher title is not swallowed by scroll-to-top |
 | `ai-removed` | No AI summaries, no AI filters |
 

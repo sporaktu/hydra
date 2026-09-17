@@ -120,11 +120,13 @@ Build settings that are not optional:
 | `SWIFT_STRICT_CONCURRENCY` | `complete` | `spec/10` §A3 |
 | `SWIFT_APPROACHABLE_CONCURRENCY` | `YES` | `spec/10` §A3 |
 | `SWIFT_DEFAULT_ACTOR_ISOLATION` | `MainActor` | SE-0466; `spec/10` §A3 |
-| `TARGETED_DEVICE_FAMILY` | `1` (iPhone only) | `[DECISION: ipad-split-view-deferred]` |
+| `TARGETED_DEVICE_FAMILY` | `1,2` (iPhone **and** iPad) | `[DECISION: ipad-split-view-in-scope]`; `02` §1.4, §5.15 |
 | `UILaunchScreen` in Info.plist | present | Required by the iOS 27 SDK (`spec/10` §A1) |
 | `ITSAppUsesNonExemptEncryption` | `false` | `spec/08` §6 |
 | `UIDesignRequiresCompatibility` | **absent** | Ignored on the 27 SDK; `spec/10` §A2 |
-| `UISupportedInterfaceOrientations` | Portrait only at the app level; the media viewer and in-app browser opt into rotation per-scene | `spec/01` §1.5 |
+| `UISupportedInterfaceOrientations` | Portrait only at the app level (this key is the **iPhone** variant); the media viewer and in-app browser opt into rotation per-scene | `spec/01` §1.5; `02` §5.11 |
+| `UISupportedInterfaceOrientations~ipad` | **All four**: `UIInterfaceOrientationPortrait`, `UIInterfaceOrientationPortraitUpsideDown`, `UIInterfaceOrientationLandscapeLeft`, `UIInterfaceOrientationLandscapeRight`. Nothing locks or unlocks orientation on iPad | `02` §5.11, §5.15; [WWDC25 282](https://developer.apple.com/videos/play/wwdc2025/282/) |
+| `UIRequiresFullScreen` | **absent** (equivalently `NO`) | Deprecated and ignored under the 26/27 SDKs; declaring it fights iPadOS 26 windowing ([TN3192](https://developer.apple.com/documentation/technotes/tn3192-migrating-your-app-from-the-deprecated-uirequiresfullscreen-key)). `02` §5.15.4 |
 
 **Info.plist keys and entitlements (normative, and every one of them is a launch-day blocker).** The
 app crashes, fails a deep link, or cannot hand off from the share extension if any row is missing.
@@ -151,6 +153,7 @@ The list is derived from the capability inventory in `spec/08` §6 and is mirror
 | `aps-environment` (Push Notifications) | No push, no APNs (`[DECISION: push-removed]`). `UNAuthorizationOptions.badge` alone needs no entitlement (`02` §14.2) |
 | `com.apple.developer.associated-domains` | We cannot serve an `apple-app-site-association` file for `reddit.com` (`[DECISION: universal-links-absent]`) |
 | `LSApplicationQueriesSchemes` | `canOpenURL` is deprecated on the 27 SDK and the app never probes: the external-browser handoff attempts `UIApplication.open(_:options:completionHandler:)` and handles the failure (`02` §5.7, `04c` §12). With no `canOpenURL` call there is nothing to declare |
+| `UIRequiresFullScreen` | Deprecated; ignored on the 26/27 SDKs; the app is fully adaptive and requests only a best-effort **minimum** window size at scene connect (`02` §5.15.4). Declaring it would produce a console warning and no behaviour ([TN3192](https://developer.apple.com/documentation/technotes/tn3192-migrating-your-app-from-the-deprecated-uirequiresfullscreen-key), [WWDC25 282](https://developer.apple.com/videos/play/wwdc2025/282/)) |
 | `NSCameraUsageDescription`, location, microphone, contacts, Bluetooth, HealthKit | None of these APIs is used anywhere (`spec/08` §6 "Explicitly NOT used") |
 | `UIAppFonts` | The app ships no custom font; `.monospaced` covers code blocks (§1.8) |
 
@@ -196,7 +199,8 @@ Deliberately **not** used: any purchase SDK (StoreKit 2 direct), any networking 
 |---|---|
 | `lint` | checkout → `Scripts/lint.sh` |
 | `test` | checkout → select Xcode 27 (`sudo xcode-select -s /Applications/Xcode_27.app`) → cache `~/Library/Developer/Xcode/DerivedData` and `.build` → `swift test` in each `Packages/*` → `xcodebuild test -scheme APPNAME -destination 'platform=iOS Simulator,name=iPhone 17,OS=27.0' -resultBundlePath Results.xcresult` → upload the result bundle |
-| `ui-smoke` | same setup → `xcodebuild test -scheme APPNAMEUITests -only-testing:UITests/SmokeTests` (launch, tab through all five tabs, open a post from a fixture-backed feed, open settings, dismiss) |
+| `build-ipad` | same setup → `xcodebuild build -scheme APPNAME -destination 'platform=iOS Simulator,name=iPad Pro 13-inch (M5),OS=27.0'` — zero first-party warnings. The app ships for `TARGETED_DEVICE_FAMILY = 1,2`, so a build that only ever compiles for an iPhone destination is not a build of the shipping product |
+| `ui-smoke` | same setup → `xcodebuild test -scheme APPNAMEUITests -only-testing:UITests/SmokeTests` on **two** destinations, one iPhone (`iPhone 17`) and one iPad (`iPad Pro 13-inch (M5)`) — launch, tab through all five tabs, open a post from a fixture-backed feed, open settings, dismiss. On the iPad destination the same test additionally asserts that opening a post **populates the detail pane instead of pushing**, and that Close returns the feed to full width |
 | `fixtures` | `Scripts/replay-fixtures.sh` — decodes every committed fixture through `RedditAPI`'s parsers and asserts no throw and no field regressions (§3.3) |
 
 `.github/workflows/release.yml` — on a `v*` tag:
@@ -249,7 +253,7 @@ personal identifiers:
 | 3 alternate icons | One Icon Composer document each, added to the *Alternate App Icon Sets* build setting so Xcode writes `CFBundleAlternateIcons` |
 | Launch screen | `UILaunchScreen` dictionary in Info.plist with the app's background colour and, optionally, the icon image. **Required by the iOS 27 SDK.** Not a storyboard |
 | Paywall review screenshot | One capture of the paywall sheet per IAP product, uploaded in App Store Connect |
-| App Store screenshots | 6.9" and 6.5" classes; produced with `fastlane snapshot` against the fixture-backed UI tests so they are reproducible |
+| App Store screenshots | iPhone 6.9" and 6.5" classes **and an iPad 13" class set** — the iPad set is required by App Store Connect for a `1,2` device family and blocks submission if it is missing (`[DECISION: ipad-split-view-in-scope]`, risk R15). At least one iPad shot shows the two-pane split view. Produced with `fastlane snapshot` against the fixture-backed UI tests on both destinations so they are reproducible |
 | Fonts | **None.** System font only. The original bundled a monospace face for code blocks; `.monospaced` design covers that |
 | Colours | Defined as semantic tokens in `Theming`/`DesignSystem`, not as asset-catalogue colours, because themes are runtime data (`[DECISION: theme-count]`) |
 
@@ -257,8 +261,8 @@ personal identifiers:
 
 ## 2. Phased build order
 
-Each phase ends at a **gate**. The gate is not "it looks right" — it is: the project builds for the
-simulator with zero warnings from our own code, `swift test` passes in every package, the
+Each phase ends at a **gate**. The gate is not "it looks right" — it is: the project builds for **both**
+an iPhone and an iPad simulator destination with zero warnings from our own code, `swift test` passes in every package, the
 `xcodebuild test` scheme passes, `Scripts/lint.sh` is clean, `PROGRESS.md` is updated, and a commit
 is made. **The agent does not start phase N+1 until phase N's gate is green.** If a gate cannot be
 made green, the agent records the blocker in `PROGRESS.md` and continues only with work that does
@@ -275,13 +279,25 @@ not depend on it.
   the five tabs (Posts / Inbox / Account / Search / Settings) and the tab-retap and tab-long-press
   hooks stubbed; an empty Settings root list; SwiftLint/swift-format configs, `Scripts/*`, both CI
   workflows; `PROGRESS.md` seeded with every checklist item from §4 marked `TODO`.
-- **DoD:** app launches in the simulator to a five-tab shell; switching tabs preserves each stack;
-  theme switch visibly repaints; CI green on a pushed branch.
+  Also in Phase 0, because they are shell-shaped and expensive to retrofit: `TARGETED_DEVICE_FAMILY = 1,2`,
+  the `~ipad` orientation key, the scene-connect `sizeRestrictions` request, and the split-view
+  **container** — the `HStack` + width/size-class gate from `02` §5.15 with a placeholder detail pane —
+  wired into the feed screen stub so the gate is exercised from day one.
+- **DoD:** app launches in the simulator to a five-tab shell on **both** an iPhone and an iPad
+  destination; switching tabs preserves each stack; theme switch visibly repaints; CI green on a pushed
+  branch.
 - **Tests:** `Theming` — theme merge/resolution (custom over base), colour-token validation
   (including the fixed `validateHex-bug` rules, i.e. an anchored validator and a `hexToRgb` that
-  handles the 3-, 6- and 8-digit forms); `AppRouting` — `Route` round-trips.
-- **Smoke:** launch; tap each tab; rotate (stays portrait); toggle system dark mode (theme follows
-  when the light/dark pairing is on); background and foreground.
+  handles the 3-, 6- and 8-digit forms); `AppRouting` — `Route` round-trips, and
+  `RouteDestination.for(_:)` returns `.pane` or `.tabStack` for every one of the 17 `Route` cases
+  (`02` §5.15.3).
+- **Smoke:** launch; tap each tab; rotate (iPhone stays portrait; **iPad rotates and relayouts in all
+  four orientations**); toggle system dark mode (theme follows when the light/dark pairing is on);
+  background and foreground.
+- **Smoke (iPad):** the two-column shell renders on an iPad simulator; drag the window narrower and
+  confirm the second column **collapses live** below the width gate and re-expands above it, with the
+  hysteresis band behaving (no flicker when parked on the boundary) and no per-frame animation; confirm
+  the tab bar renders at the top and content scrolls under it.
 
 ### Phase 1 — RedditAPI: networking, models, auth
 
@@ -322,9 +338,14 @@ not depend on it.
   full ordered action list; sorting UI including the two-step Top picker; filters (text trie with
   whole-word matching, subreddit filters with durations, hidden posts, hide-seen with per-page
   override) — `[GATE: gate.filters]`; the Subreddits hub with sections and the A–Z scroller; the
-  subreddit switcher header and quick-search modal.
+  subreddit switcher header and quick-search modal; **the split view's feed side** (`04a` §3.5,
+  `02` §5.15) — the activation gate with its hysteresis, the 40/60 columns and hairline divider, the
+  320 pt feed-column floor, tap-to-load-into-pane with seen-marking preserved, the selected-row accent
+  bar, per-instance selection state and its clear-on-target-change rule, and the pane control capsule
+  with Close and Fullscreen.
 - **DoD:** a fixture-backed feed scrolls, filters, sorts, dedupes, and reports every access-failure
-  state with the right copy.
+  state with the right copy; on an iPad destination the same feed opens posts into a pane and Close
+  restores a full-width feed.
 - **Tests:** paged-list state machine (dedupe, retry ladder, filter starvation, refresh clearing);
   text-filter whole-word matcher (including "cat" vs "caterpillar" and multi-word phrases); swipe
   band classification at 74/75/129/130 px in both directions and under swipe-anywhere; seen-state
@@ -332,6 +353,12 @@ not depend on it.
   including deletion when it equals the global; subreddit-filter expiry.
 - **Smoke:** scroll a 500-post fixture feed at 120 Hz with no hitches; swipe every band on a row;
   long-press every action; change sort; filter a subreddit for a day; toggle compact mode.
+- **Smoke (iPad):** tap a post and confirm it loads into the **pane**, not a push; tap a second post and
+  confirm the pane swaps in place; confirm the tapped row carries the selection accent and is marked
+  seen; tap **Close** and confirm the feed returns to full width with nothing pushed; tap
+  **Fullscreen** and confirm the post pushes over both columns and that backing out restores the same
+  pane; change sort and confirm the pane survives; switch subreddit and confirm it does not; turn
+  Appearance → "Enable split view" off and confirm the pane disappears immediately with no restart.
 
 ### Phase 3 — Post detail and comments
 
@@ -346,7 +373,9 @@ not depend on it.
   blocks, blockquotes, correctly numbered nested lists, inline images, Giphy interception, true
   superscript (`[DECISION: superscript-baseline]`), clamped emoji runs, and the link-tap routing
   rules — with inline text selection **disabled** on bodies; the text-selection sheet; read-only
-  polls.
+  polls; the `presentation: .pushed | .pane` parameter on `PostDetailScreen` and the four differences it
+  controls (`04a` §3.5.7), plus the pane's own `NavigationStack`/`Router` and the
+  `RouteDestination.for(_:)` routing table (`02` §5.15.3).
 - **DoD:** the 2,000-comment fixture renders its first screen in well under a second and memory
   does not scale with thread size; collapsing a 500-child thread does not re-render the list.
 - **Tests:** flattening (port every case of the original's ~20-case suite: emission order,
@@ -356,6 +385,11 @@ not depend on it.
   transforms including the fixed first-line quote (`[DECISION: quote-first-line]`).
 - **Smoke:** open a megathread; collapse/expand at several depths; tap "N more replies" twice;
   jump with the floating button; reveal a spoiler; scroll a wide table; select text.
+- **Smoke (iPad):** do all of the above **inside the pane** and confirm nothing is missing; confirm the
+  scroll-to-next button's ten snap positions are laid out against the **pane's** bounds; tap a
+  subreddit link in a comment and confirm it pushes **inside the pane** with a Back chevron; tap
+  "Open in Gallery Mode" from the pane's "…" menu and confirm it pushes over **both** columns; pull to
+  refresh inside the pane and confirm the feed column is untouched.
 
 ### Phase 4 — Media
 
@@ -371,7 +405,7 @@ not depend on it.
   concurrency/backoff contract; query-param-trim fallback with signed-host exclusions; reload
   watchdog; overlay state machine; the viewer's zoom navigation transition
   (`[DECISION: viewer-zoom-transition]`) and its tappable-to-retry hard-error state
-  (`[DECISION: fullscreen-player-retry]`); Gallery Mode grid (masonry, 2 columns) **with NSFW blur**
+  (`[DECISION: fullscreen-player-retry]`); Gallery Mode grid (masonry, **width-derived 2–5 columns**, `[DECISION: gallery-mode-wide-columns]`) **with NSFW blur**
   (`[DECISION: gallery-mode-no-blur]`), a **4-player ceiling** (`[DECISION: gallery-video-cap]`) and
   the `[GATE: gate.galleryMode]` 100-item inline footer; download/share/save flows with add-only
   Photos permission (`[GATE: gate.downloads]`); the new video long-press menu
@@ -387,6 +421,11 @@ not depend on it.
 - **Smoke:** scroll a video feed; fling; tap into fullscreen and back (no reload, position kept);
   rotate in the viewer; scrub; change playback rate; save an image (paywall appears when locked);
   open Gallery Mode and hit the 100 cap.
+- **Smoke (iPad):** open the viewer from the **pane** and confirm it covers the whole window including
+  both columns and the tab bar; confirm dismissal still fires at the same 50 pt / 40 pt flick
+  thresholds (`04b` §2.1a — they are deliberately not scaled); confirm Gallery Mode renders 4 columns in
+  portrait and 5 in landscape and re-flows live on rotation and window resize
+  (`[DECISION: gallery-mode-wide-columns]`), with never more than 4 players running.
 
 ### Phase 5 — Accounts, inbox, messages, user, search, subreddits, sidebar, wiki
 
@@ -465,6 +504,9 @@ not depend on it.
   the exact-equality milestone messages); sort-key clearing by prefix.
 - **Smoke:** walk every settings screen; build and save a custom theme; import one from a comment;
   change the app icon; open Stats; clear both caches.
+- **Smoke (iPad):** confirm Appearance shows **Enable split view** in the position `04c` §17.1 gives it,
+  defaulted **on**, with no trailing-divider artefact under the last visible row; confirm the row is
+  **absent** on an iPhone destination; toggle it and confirm every open feed screen responds at once.
 
 ### Phase 8 — Entitlements and paywall
 
@@ -495,7 +537,10 @@ not depend on it.
   call site; one-time tips;
   the fix-forward sweep over `08` §2; a **Liquid Glass audit** (remove custom backgrounds from
   bars/tab bar/toolbars, verify scroll-edge effects, verify all themes against Reduce Transparency,
-  Reduce Motion and Increase Contrast — `spec/10` §A2); an **accessibility audit** (VoiceOver
+  Reduce Motion and Increase Contrast — `spec/10` §A2 — **and run the whole audit a second time on an
+  iPad**, where the tab bar sits at the top, two scrolling columns each carry their own scroll-edge
+  effect, and the pane control capsule is the fourth and last sanctioned `glassEffect` site,
+  `02` §5.10, §5.15.5); an **accessibility audit** (VoiceOver
   labels and custom actions on every post and comment — the original exposed its whole action
   catalogue as VoiceOver actions and the rewrite must too; Dynamic Type through XXL on every
   screen; contrast; hit targets ≥44 pt; the "Read post contents" announcement action);
@@ -506,13 +551,28 @@ not depend on it.
 - **Tests:** XCUITest smoke covering launch → each tab → post → comments → media → settings;
   snapshot-free (avoid brittle image diffs at this scale).
 - **Smoke:** the consolidated manual list assembled from all prior phases, run on a real device.
+- **Smoke (iPad), on a real iPad, all of it:** drag-resize the window through the 768 pt gate in both
+  directions and confirm the pane collapses and re-expands with the selected post intact and no
+  flicker at the boundary; do the same in **Stage Manager** and in **Windowed Apps** tiling
+  (iPadOS 26 folds the old Split Screen and Slide Over into windowing —
+  [MacRumors](https://www.macrumors.com/2025/09/17/ipados-26-multitasking-tips-and-tricks/)), including
+  a window narrow enough to force the single-column layout; rotate through all four orientations in
+  both layouts; confirm the window cannot be made smaller than the requested minimum in practice **and
+  that the app still works if it is** (`sizeRestrictions` is best-effort, not a guarantee); drive the
+  whole app with a trackpad — hover effects on rows, buttons, FABs and pane controls, and
+  **secondary-click** opening every long-press menu; drive it with a hardware keyboard — every shortcut
+  in `02` §5.15.6, and the iPadOS 26 menu bar populated from `.commands`; confirm Apple Pencil taps
+  dismiss every modal and the pane's Close control (`08` §2, `pencil-modal-close`).
 
 ### Phase 10 — Release
 
 - **Inputs:** `05-monetization.md` §7; this doc §1.6, §1.8.
 - **Deliverables:** App Store Connect record complete; IAP products in "Ready to Submit"; privacy
   nutrition label; age rating (17+, UGC questions answered, block/report paths documented);
-  screenshots; description and keywords avoiding Reddit trademark misuse; `CHANGELOG.md`;
+  **screenshots for both device classes — App Store Connect requires an iPad screenshot set as well as
+  an iPhone one for any app shipping `TARGETED_DEVICE_FAMILY = 1,2`, and submission is blocked without
+  it; at least one iPad shot must show the two-pane split view, since it is the iPad-specific reason
+  the app exists on iPad**; description and keywords avoiding Reddit trademark misuse; `CHANGELOG.md`;
   `v1.0.0` tag → `release.yml` → TestFlight; internal testing pass; submission.
 - **DoD:** TestFlight build installs and runs on a clean device with no account, completes a
   sandbox purchase, and passes the §7 compliance checklist of `05-monetization.md` line by line.
@@ -521,14 +581,18 @@ not depend on it.
 
 ## 3. Verification method
 
-1. **Compile gate.** `xcodebuild build -scheme APPNAME -destination 'platform=iOS Simulator,name=iPhone 17,OS=27.0'` with zero warnings from first-party code.
+1. **Compile gate.** `xcodebuild build -scheme APPNAME` with zero warnings from first-party code, on
+   **both** `-destination 'platform=iOS Simulator,name=iPhone 17,OS=27.0'` and
+   `-destination 'platform=iOS Simulator,name=iPad Pro 13-inch (M5),OS=27.0'`.
 2. **Unit gate.** `swift test` in every package (Swift Testing) + `xcodebuild test` for the app
    scheme. No network, no StoreKit, no filesystem outside a temp directory.
 3. **Fixtures replay.** `Scripts/replay-fixtures.sh` walks `Fixtures/reddit/*.json`, decodes each
    through the real parsers, and asserts a golden summary per file (counts, ids, classified media
    type, error mapping). A parser change that silently drops a field fails here.
 4. **UI smoke.** One XCUITest target, kept deliberately small, launched with
-   `-UITestFixtureMode 1` so `RedditAPI` serves fixtures instead of the network.
+   `-UITestFixtureMode 1` so `RedditAPI` serves fixtures instead of the network. It runs on **two
+   destinations**, one iPhone and one iPad; on the iPad destination it additionally asserts
+   tap-to-pane, Close and Fullscreen.
 5. **StoreKit-configuration matrix.** With `Fixtures/StoreKit/APPNAME.storekit` active, walk the
    full matrix in `05-monetization.md` §9 — purchase monthly and annual, cancel, restore, intro-offer
    eligibility on and off, and the Transaction Manager's simulated billing retry, grace period,
@@ -548,7 +612,7 @@ per `08-decisions-and-drift.md`, with a new area **Y** for the subscription.
 **Numbering is 1:1 with the inventory.** Item *N* here is inventory item *N* there, in every area, so
 a cross-reference by number always lands on the same feature. Behaviour the rewrite adds that the
 inventory has no number for is given a **lettered suffix** on the item it sits nearest
-(`73a`, `114a`–`114c`, `131a`, `208a`–`208c`, `214a`, `297a`, `312a`), which keeps the base numbering
+(`73a`, `114a`–`114c`, `131a`, `208a`–`208g`, `214a`, `297a`, `312a`), which keeps the base numbering
 stable. Area **Y** (328–345) is net-new and has no inventory counterpart. Pointers name the doc
 section that specifies each item. **CUT** items are deliberately not built and must be recorded as
 such in `PROGRESS.md`. **CHANGED** items are built differently from the original by decision.
@@ -619,7 +683,7 @@ such in `PROGRESS.md`. **CHANGED** items are built differently from the original
 - [ ] 56. Each comment shows author (with mod/OP treatment), score, time, flair, edited state.
 - [ ] 57. Tap to collapse/expand (setting, default on) — takes effect without a refresh.
 - [ ] 58. Collapsed threads keep children's own collapsed state across cycles.
-- [ ] 59. Floating scroll-to-next-comment button; long-press for previous (`04a` §15.4, `[DECISION: scroll-to-next-button]`).
+- [ ] 59. Floating scroll-to-next-comment button: tap = next, 300 ms hold = previous, ~1 s hold = reposition (`04a` §15.4, `[DECISION: scroll-to-next-button]`).
 - [ ] 60. The floating comment button can be **repositioned**: a ~1 s hold enters move mode (dimmed overlay, 10 dashed snap circles), dragging moves it, and releasing on a snap point persists it to `ui.scrollToNextButtonPosition` (`04a` §15.4).
 - [ ] 61. "N more replies" loads 10 further children per tap (`04a` §14.5).
 - [ ] 62. Pull to refresh reloads the whole thread (`04a` §12.1).
@@ -654,7 +718,7 @@ such in `PROGRESS.md`. **CHANGED** items are built differently from the original
 - [ ] 87. Horizontal drag scrubs a fullscreen video (engages after 20 pt horizontal, <30 pt vertical).
 - [ ] 88. **CUT** Picture-in-Picture (`[DECISION: background-audio-pip]`).
 - [ ] 89. **CHANGED** Long-press a video: Share / Save / Copy Link (`[DECISION: no-video-longpress-menu]`).
-- [ ] 90. Rotation supported in the media viewer and the in-app browser; portrait-locked elsewhere.
+- [ ] 90. **On iPhone:** rotation supported in the media viewer and the in-app browser, portrait-locked elsewhere. **On iPad:** all four orientations on every screen, with nothing locking or unlocking anything (`02` §5.11, §5.15).
 - [ ] 91. Auto-play toggle for feed videos.
 - [ ] 92. Redgifs resolved lazily at display time, cached in memory only (`[DECISION: redgifs-memory-only]`).
 - [ ] 93. One shared player per video between inline and fullscreen; no reload on open or rotate.
@@ -799,14 +863,18 @@ such in `PROGRESS.md`. **CHANGED** items are built differently from the original
 - [ ] 201. Custom URL scheme deep links plus ordinary Reddit URLs resolving in-app.
 - [ ] 202. "Swipe Anywhere to Navigate" disables right-side swipe actions while enabled.
 - [ ] 203. Pull to refresh; swipe down to dismiss sheets.
-- [ ] 204. **CUT** iPad split view (`[DECISION: ipad-split-view-deferred]`).
-- [ ] 205. **CUT** Split-view default-on and its Appearance toggle.
-- [ ] 206. **CUT** Split-view Close / Fullscreen controls.
-- [ ] 207. **CUT** Post interactions inside the split view.
-- [ ] 208. **CUT** Multi-pane iPad support.
+- [ ] 204. iPad split view: the feed stays visible in the left column while the tapped post opens in the right-hand pane, each column scrolling independently; active only while the window is ≥ 768 pt wide and re-evaluated live on every window change (`04a` §3.5.1–§3.5.3, `02` §5.15).
+- [ ] 205. Split view is on by default on iPad-class devices and off elsewhere; the Appearance → "Enable split view" toggle is rendered **only** on qualifying devices (`04c` §17.1, `03` §8.1, `04a` §3.5.1).
+- [ ] 206. The pane's **Close** (collapse to a full-width feed) and **Fullscreen** (push the pane's current top route onto the tab's stack, leaving the pane state underneath) controls (`04a` §3.5.5).
+- [ ] 207. Every post interaction works normally inside the pane — vote, comment, save, share, collapse, sort, swipe actions, long-press menus, text selection (`04a` §3.5.6, §3.5.7).
+- [ ] 208. **CUT** Three-or-more-pane iPad support. The original lists it as "Unlikely"; v1 ships exactly two panes (`[DECISION: ipad-split-view-in-scope]`, `02` §19).
 - [ ] 208a. Incoming URLs always land on the Posts tab's stack; unknown URLs show an explanatory alert.
 - [ ] 208b. Hide-tab-bar-on-scroll option.
-- [ ] 208c. **CUT** Right-edge swipe-forward gesture (`[DECISION: swipe-forward-gesture]`).
+- [ ] 208c. Right-edge swipe-forward gesture restores popped routes, with the precedence rule against "swipe anywhere to navigate" (`02` §5.8, `[DECISION: swipe-forward-gesture]`).
+- [ ] 208d. Selection state is **per feed screen instance**, survives a sort change, a refresh and a window collapse/re-expand, and is cleared when the feed's target changes (`04a` §3.5.4).
+- [ ] 208e. Pushes from inside the pane land in the pane or on the tab's stack per `RouteDestination.for(_:)` (`02` §5.15.3) (`[DECISION: split-view-pane-navigation]`).
+- [ ] 208f. iPad supports all four orientations on every screen; iPhone stays portrait-only (`02` §5.11, `06` §1.3).
+- [ ] 208g. Pointer/trackpad hover effects and secondary-click context menus throughout; the minimal keyboard-shortcut set, surfaced in the iPadOS 26 menu bar via `.commands` (`02` §5.15.6) (`[DECISION: ipad-keyboard-shortcuts]`).
 
 ### N. Gesture configuration → `04c`
 
@@ -863,8 +931,8 @@ such in `PROGRESS.md`. **CHANGED** items are built differently from the original
 - [ ] 249. Delete by swipe or long-press; deleting the active theme reverts to the default.
 - [ ] 250. Attach a custom theme to a comment/message from the composer toolbar.
 - [ ] 251. Import or Import & Apply from the detected theme card (`[GATE: gate.customThemes]`).
-- [ ] 252. Appearance — Make posts compact.
-- [ ] 253. **CUT** Appearance — Enable split view.
+- [ ] 252. Appearance — Make posts compact (default **on** for iPad-class devices, off for iPhone — `04c` §17.1).
+- [ ] 253. Appearance — Enable split view, shown only on iPad-class devices, default on (`04c` §17.1).
 - [ ] 254. Appearance — Show subreddit at top.
 - [ ] 255. Appearance — Show subreddit icons.
 - [ ] 256. Appearance — Post title max lines (1–10).
@@ -936,7 +1004,7 @@ such in `PROGRESS.md`. **CHANGED** items are built differently from the original
 - [ ] 309. **CHANGED** Feedback opens the owner-configured `feedbackDestinationURL` constant through the external-link opener; there is **no** third-party subreddit destination and no default value the owner has not chosen (`04c` §15 row 13).
 - [ ] 310. All settings autosave and persist.
 - [ ] 311. **CHANGED** Gated affordances stay visible with a trailing "Plus" capsule badge rather than being hidden, look disabled but remain tappable, and present the paywall on tap — the normative chrome contract is `05` §5.11, with the four presentation styles in `05` §5.9 and a pointer from `02` §13.3 and `04c` §14.
-- [ ] 312. **CHANGED** Device-conditional settings: App Icon only where alternates are supported. Split view no longer exists.
+- [ ] 312. Device-conditional settings appear and disappear on their own: **Enable split view** only on iPad-class devices (`04c` §17.1), **App Icon** only where the OS reports alternate-icon support (`04c` §19).
 - [ ] 312a. Clear Video Cache, deferred to the next launch, with an explanatory alert.
 
 ### V. App icons → `04c`, `[GATE: gate.appIcons]`
@@ -1002,6 +1070,9 @@ such in `PROGRESS.md`. **CHANGED** items are built differently from the original
 | R10 | **Redgifs rate-limiting the developer's IP during development** | Medium | Low | The lazy-resolution contract is reproduced exactly; fixtures replace live calls in tests; avoid scroll-testing Redgifs-heavy subreddits |
 | R11 | **iOS 27.x toolchain churn** — Xcode 27.1/27.2 not yet shipped as of the baseline date; the JSON project format is beta | Medium | Medium | Pin the Xcode version in CI by path; do not adopt the `.xcproj` JSON format; re-check `spec/10` Part B before upgrading |
 | R12 | **Owner decisions arriving mid-build** — a gate flips after the code is written | Medium | Low | Gates are a single table (`Feature.isGated`) and tags in docs; flipping one is a one-line change plus a checklist annotation |
+| R13 | **Split-view state loss during live resize** — under iPadOS 26 windowing the gate is re-evaluated on every geometry callback while the user drags; a naive implementation destroys the pane's view tree, loses the selected post, flickers at the boundary, or animates the whole layout once per frame | High | High | The gate is a pure function of container width plus size class, with a **752/768 pt hysteresis band**; `paneTarget` and the pane `Router`'s path are value types held on the **feed screen**, not inside the pane, so a collapse cannot destroy them (`02` §5.15.4). The pane's appearance is `.animation(nil)` during a live resize. Phase 0's iPad smoke drags the window through the gate in both directions before any feature code exists, and Phase 9 repeats it in Stage Manager and tiling |
+| R14 | **Liquid Glass placement differs on iPad** — the tab bar renders at the **top**, both columns carry their own scroll-edge effect, and a future OS update could move sidebar/tab chrome again, silently breaking the inset allow-list | Medium | Medium | `02` §5.4's beneath-the-bar allow-list is a single table applied to the **top** edge on iPad; no custom background is ever set on any bar; `glassEffect` is confined to four named controls (`02` §5.10). The Phase 9 Liquid Glass audit is run **twice**, once per device class, and is a gate, not a nicety. Do not adopt `.sidebarAdaptable` (`[DECISION: split-view-tab-style]`) without redoing that audit |
+| R15 | **iPad App Store assets block submission** — App Store Connect requires an iPad screenshot set for a `1,2` device family, and the review team judges an iPad build on whether it looks designed for iPad rather than stretched | Medium | Medium | iPad screenshots are a named Phase 10 deliverable with at least one shot of the two-pane layout; the split view, all-four-orientation support, pointer hover and keyboard shortcuts are the evidence that the iPad build is not a stretched phone app. Capture them from the Phase 9 device pass, not at submission time |
 
 ---
 
@@ -1018,25 +1089,25 @@ Ballpark, to calibrate the one-shot. Swift lines, excluding tests, comments and 
 | `Theming` | 10–14 | 900 | `Theme`/`ThemeColor` model, resolution order, custom-theme merge, import/export codec, glass tint rules |
 | `Entitlements` | 12–16 | 1,100 | StoreKit 2, `Feature.isGated`, paywall, Plus settings screen, `requiresEntitlement` modifier |
 | `MediaKit` | 40–50 | 5,000 | Image pipeline, viewer, tap classifier, zoom/pan, player registry, focus engine, watchdog, gallery grid, download/share, Live Text bridge |
-| `AppRouting` | 12–16 | 1,000 | `Route`, per-tab `Router` + forward history, `RouteResolver`, `LinkIntake`, `ModalCoordinator` |
+| `AppRouting` | 13–17 | 1,150 | `Route`, per-tab and per-pane `Router` + forward history, `RouteResolver`, **`RouteDestination.for(_:)`**, `LinkIntake`, `ModalCoordinator` |
 | `DesignSystem` | 30–40 | 2,500 | Rows, list primitives, four-band swipe container, context menus, badges, refresh, access-failure views, haptics facade |
-| `Features/FeedFeature` | 25–35 | 3,200 | Feed screens, post card (2 layouts), filters, sorting, subreddit switcher |
-| `Features/PostDetailFeature` | 20–25 | 2,600 | Header, action bar, flattened tree, comment row, collapse, load-more, scroll-to-next |
+| `Features/FeedFeature` | 28–38 | 3,700 | Feed screens, post card (2 layouts), filters, sorting, subreddit switcher, **the split-view container: gate, columns, divider, selection state, pane controls** (`04a` §3.5) |
+| `Features/PostDetailFeature` | 21–26 | 2,800 | Header, action bar, flattened tree, comment row, collapse, load-more, scroll-to-next, **the `.pushed`/`.pane` presentation split** (`04a` §3.5.7) |
 | `Features/ComposerFeature` | 15–20 | 1,800 | Shell, editor, toolbar, preview, drafts, four composers, image upload |
-| `Features/MediaFeature` | 10–14 | 900 | Fullscreen viewer screen and Gallery Mode screen over `MediaKit` |
+| `Features/MediaFeature` | 10–14 | 950 | Fullscreen viewer screen and Gallery Mode screen over `MediaKit`, including the width-derived gallery column count |
 | `Features/AccountsFeature` | 15–20 | 1,500 | Login web view, accounts list, quick swap, NSFW-visibility banner |
 | `Features/InboxFeature` | 12–15 | 1,100 | List, two row kinds, thread view, poller/badge wiring |
 | `Features/SearchFeature` | 10–14 | 900 | Three scopes, trending, in-subreddit, quick search |
 | `Features/SubredditsFeature` | 14–18 | 1,400 | Hub, A–Z rail, sidebar, wiki, multireddits |
 | `Features/SettingsFeature` | 40–55 | 4,200 | ~19 screens, theme maker, colour picker, stats, help |
-| App target + ShareExtension | 12–15 | 700 | Composition root, scene, tabs, extension |
-| **Total (production)** | **~380–480** | **~40,900** | 18 packages plus two non-package targets |
+| App target + ShareExtension | 13–17 | 900 | Composition root, scene, tabs, **`.commands` / keyboard shortcuts and the scene `sizeRestrictions` request** (`02` §5.15.6, §5.15.4), extension |
+| **Total (production)** | **~390–495** | **~42,300** | 18 packages plus two non-package targets. The iPad work adds roughly **1,400 lines**: it is a container, a gate, a router rule and some chrome, not a second app — which is the whole point of specifying it as `02` §5.15 does |
 | Tests | ~120–160 | ~12,000 | Swift Testing; roughly 30% of production LoC |
 | Fixtures | ~40 JSON | — | A few MB |
 
 
-For calibration: this is a 10–14 week build for one experienced iOS engineer working full time, or
-roughly 60–90 agent-hours of well-gated generation with human review at each phase boundary. The
+For calibration: this is an **11–15** week build for one experienced iOS engineer working full time, or
+roughly **65–95** agent-hours of well-gated generation with human review at each phase boundary. The
 three most expensive single items are `MediaKit` (video is where all the subtlety lives),
 `RedditMarkdown` (breadth of constructs), and `Features/SettingsFeature` (sheer surface area).
 
@@ -1063,5 +1134,5 @@ three most expensive single items are `MediaKit` (video is where all the subtlet
 | §2 Phase 8 | `05-monetization.md` §§4–6, 9 | Area Y of the checklist |
 | §2 Phase 9 | `spec/01` §§6–20; `spec/10` §A2; `08` §2 | `07` verification method |
 | §4 checklist | `spec/08-feature-inventory.md` §1 items 1–327, adjusted by `08-decisions-and-drift.md` | `PROGRESS.md` in the new repo |
-| §5 risks | `spec/02` §§1.3, 3.1, 7, 8; `spec/05` §§4–5; `spec/04` §12; `spec/10` §§A2–A3, Part B | `07` guardrails |
+| §5 risks | `spec/02` §§1.3, 3.1, 7, 8; `spec/05` §§4–5; `spec/04` §12; `spec/10` §§A2–A3, Part B; `02` §5.15 (R13–R15) | `07` guardrails |
 | §6 sizing | Derived from the feature surface catalogued across `spec/01`–`spec/09` | Calibration of the one-shot prompt |

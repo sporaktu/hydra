@@ -65,7 +65,20 @@ Do these first. The agent cannot do them and will stall or invent values without
       ("Explore Community Themes", `04c` §18.1) and `themeSharingSubreddits` (the composer's Attach
       Theme button, `04c` §18.5). Each has **no default** and names no third-party community; an
       unset value means the row or button is simply not rendered.
-- [ ] **14. Xcode 27** installed (Swift 6.4, iOS 27 SDK) on macOS Tahoe 26.6+.
+- [ ] **13c. Have an iPad to test on**, or accept that the iPad half of the app is only ever verified
+      in the simulator. The app ships `TARGETED_DEVICE_FAMILY = 1,2` and its split view (`02` §5.15,
+      `04a` §3.5) is a Phase 9 device item: Stage Manager, window tiling, a window narrow enough to
+      collapse the pane, all four orientations, a trackpad (hover and secondary click), a hardware
+      keyboard (the shortcut set and the iPadOS 26 menu bar) and Apple Pencil taps cannot be judged
+      honestly on a simulator. An iPad-class device running iPadOS 26 or 27 is enough; a Magic
+      Keyboard or any Bluetooth keyboard and a trackpad or mouse cover the rest.
+- [ ] **13d. Plan for iPad App Store screenshots.** App Store Connect requires an iPad screenshot set
+      for a `1,2` device family and will not accept the submission without one. At least one shot must
+      show the two-pane split view. Capture them during the Phase 9 device pass rather than at
+      submission time (`06` Phase 10, risk R15).
+- [ ] **14. Xcode 27** installed (Swift 6.4, iOS 27 SDK) on macOS Tahoe 26.6+. Have **both** an iPhone
+      and an iPad simulator runtime installed (`iPhone 17` and `iPad Pro 13-inch (M5)`, OS 27.0) —
+      every phase gate builds for both.
 - [ ] **15. Capture the Reddit JSON fixtures** listed in `06-build-plan-and-acceptance.md` §1.7, or
       let the agent stub them and fill them in at the end of Phase 1. Capturing them by hand first
       is strongly recommended — every unit test in the build depends on them.
@@ -83,7 +96,7 @@ skip a verification gate.
 
 ## Mission
 
-Build **APPNAME**, a native SwiftUI Reddit client for iPhone, to the behavioural specification in
+Build **APPNAME**, a native SwiftUI Reddit client for **iPhone and iPad**, to the behavioural specification in
 `docs/`. The specification describes, in exhaustive detail, how an existing React Native app
 behaves. You are reproducing that **behaviour**, from scratch, in Swift. You are not porting code —
 there is no code to port, and copying any would be a licence violation.
@@ -118,7 +131,7 @@ Before anything else:
 
 Tag spellings: **there are no aliases.** Every `[GATE: gate.*]` tag names one of the eleven gate ids
 defined in `05-monetization.md` §4, and every `[DECISION: <id>]` tag names a numbered entry in
-`08-decisions-and-drift.md` §1 (#1–#95), a bug id in its §2, or a drift row `D1`–`D20` in its §3. A
+`08-decisions-and-drift.md` §1 (#1–#100), a bug id in its §2, or a drift row `D1`–`D20` in its §3. A
 gate not defined in `05` §4 does not exist — treat that feature as free. A decision id you cannot find
 is an error: record it in `PROGRESS.md` under "Open questions" and match the code as `spec/` describes
 it. Do not invent register entries.
@@ -135,8 +148,16 @@ option that best matches `spec/`'s description of the current code, and continue
    app or its documentation. The original is AGPL-3.0. Behaviour may be reproduced; expression may
    not. Every user-visible string in this app is written by you, fresh. If you catch yourself
    copying a sentence out of a `spec/` file because it reads well, stop and rewrite it.
-2. **iPhone only.** `TARGETED_DEVICE_FAMILY = 1`. No iPad layout, no split view, no
-   `NavigationSplitView`.
+2. **iPhone and iPad.** `TARGETED_DEVICE_FAMILY = 1,2`. The iPad split view is **in scope** and is
+   specified in `02-architecture.md` §5.15 (shell contract) and `04a-feeds-posts-comments.md` §3.5
+   (feed behaviour): a two-column layout, active only while the window is ≥ 768 pt wide and the
+   horizontal size class is regular, gated additionally on the Appearance → "Enable split view"
+   setting (default on for iPad-class devices), with selection state **per feed screen instance** and
+   Close / Fullscreen pane controls. **Do not use `NavigationSplitView`** — build the explicit
+   `HStack` of feed column + detail `NavigationStack` that `02` §5.15.2 specifies, and read its five
+   reasons before you are tempted otherwise. Do **not** apply `.tabViewStyle(.sidebarAdaptable)`. Gate
+   on the **container's** width via `onGeometryChange`, never on `UIScreen`. Do **not** declare
+   `UIRequiresFullScreen`. iPhone is portrait-only; iPad supports all four orientations.
 3. **Deployment target iOS 26.0**, built with the **iOS 27 SDK**, **Xcode 27**, **Swift 6.4**.
    iOS 27-only APIs go behind `@available`. The app uses the scene-based lifecycle and ships a
    `UILaunchScreen` — both are hard requirements of the 27 SDK.
@@ -191,6 +212,8 @@ Scripts/lint.sh                       # swift format --lint + swiftlint, zero vi
 for p in Packages/*/; do (cd "$p" && swift test); done
 xcodebuild build -scheme APPNAME \
   -destination 'platform=iOS Simulator,name=iPhone 17,OS=27.0'   # zero warnings from our code
+xcodebuild build -scheme APPNAME \
+  -destination 'platform=iOS Simulator,name=iPad Pro 13-inch (M5),OS=27.0'   # ships 1,2 — build both
 xcodebuild test  -scheme APPNAME \
   -destination 'platform=iOS Simulator,name=iPhone 17,OS=27.0'
 Scripts/replay-fixtures.sh            # every committed fixture decodes, golden summaries match
@@ -208,8 +231,10 @@ passes.
 
 ## Verification method
 
-- **Compile**: `xcodebuild build` for the simulator, zero warnings from first-party code. Warnings
-  from dependencies are acceptable; warnings from `Packages/*` and `APPNAME/` are not.
+- **Compile**: `xcodebuild build` for the simulator on **two destinations** — one iPhone and one iPad
+  (`iPad Pro 13-inch (M5)`) — zero warnings from first-party code on both. Warnings from dependencies
+  are acceptable; warnings from `Packages/*` and `APPNAME/` are not. The app ships for iPhone **and**
+  iPad, so a build that only ever compiles for an iPhone destination is not a build of the product.
 - **Unit**: `swift test` in every package. Tests must be hermetic — **no network, no real StoreKit,
   no Keychain, no filesystem outside a temp directory, no wall-clock dependence**. Inject clocks,
   inject the transport, inject entitlement snapshots.
@@ -219,7 +244,14 @@ passes.
   drops a field. Write it in Phase 1 and keep it green thereafter.
 - **UI smoke**: one XCUITest target, kept small, launched with `-UITestFixtureMode 1` so the
   network layer serves fixtures. It must cover: launch, each of the five tabs, opening a post,
-  scrolling comments, opening the media viewer, opening settings, and backing out.
+  scrolling comments, opening the media viewer, opening settings, and backing out. It runs on **both**
+  destinations; on the **iPad** destination it additionally asserts that opening a post populates the
+  detail pane rather than pushing, that **Close** returns the feed to full width, and that
+  **Fullscreen** pushes over both columns.
+- **iPad manual smoke**: from Phase 0 onward, each phase's iPad smoke list in
+  `06-build-plan-and-acceptance.md` §2, run on an iPad simulator — and in Phase 9 on a real iPad,
+  including Stage Manager, window tiling, a narrow window, all four orientations, a trackpad and a
+  hardware keyboard.
 - **Manual smoke**: the per-phase lists, consolidated before Phase 10 and run once on a device.
 
 ## Decisions you must assume
@@ -267,6 +299,20 @@ Restated here so you never have to guess:
   timed previews of locked features, ever. Do not copy a single hex value or a single theme name from
   the surveys' palette tables.
 - App icons: all-new artwork, one default plus three alternates, no artist-credit pages.
+- **iPad ships in v1 with the original's split view, at parity.** Two panes, feed left and the tapped
+  post's comments right, active only while the window is ≥ 768 pt wide (with a 752 pt collapse
+  threshold for hysteresis) and the horizontal size class is regular, and only while Appearance →
+  "Enable split view" is on — a setting that defaults to **on** for iPad-class devices, **off**
+  elsewhere, and whose row is rendered only where it can be true. Selection is **per feed screen
+  instance**. The pane has **Close** and **Fullscreen**; Fullscreen pushes the pane's current top route
+  onto the tab's stack and leaves the pane intact underneath. With nothing selected there is **no
+  pane and no placeholder** — the feed is simply full width. Build it as an explicit `HStack`, not a
+  `NavigationSplitView`, and keep a plain `TabView`. The pane owns its own `NavigationStack` and
+  `Router`; `RouteDestination.for(_:)` decides which pushes stay in the pane and which escape to the
+  tab's stack. `post.compactMode` goes back to defaulting to **on** for iPad-class devices, as in the
+  original. Gallery Mode's column count becomes width-derived (2–5); every current iPhone width still
+  yields exactly 2. The media viewer stays full-window over both panes, and its flick thresholds are
+  deliberately **not** scaled with the window.
 - The Settings root's first row is **Help**, and its last two are **What's New** and **Feedback**; the
   original's "Guide", "Patch Notes" and "Request A Feature" labels are not carried over, and neither
   is a paid tier called "Pro" — the row above Data Use is **APPNAME Plus** and it is not a gate.
@@ -275,8 +321,9 @@ Restated here so you never have to guess:
 - The in-app help section shrinks to a 10–14 topic hand-written corpus. Its search is **SQLite FTS5
   with BM25 ranking, entirely on-device** — no embeddings, no vectors, no cosine similarity, no AI
   answer card, and no self-hosted-server setting.
-- The right-edge swipe-forward gesture is dropped. The scroll-to-next-comment button stays, with
-  its 10 snap positions, but "previous" becomes a long-press with haptic confirmation.
+- The right-edge swipe-forward gesture is reproduced (`02` §5.8). The scroll-to-next-comment
+  button is reproduced with strict parity: tap = next, 300 ms hold = previous, ~1 s hold =
+  reposition, 10 snap positions (`04a` §15.4).
 - Universal links are not configured (we cannot host an AASA file for `reddit.com`); the entry
   points are the Share Extension, an "Open in APPNAME" App Intent, the custom URL scheme, and
   clipboard detection (default **off**).
@@ -350,14 +397,19 @@ Violating any of these is a defect even if the code compiles and the tests pass.
 
 At the end of the run, this repository contains:
 
-1. **A buildable Xcode project** — `xcodebuild build -scheme APPNAME` succeeds for the simulator
-   with zero first-party warnings, and the app runs.
+1. **A buildable Xcode project** — `xcodebuild build -scheme APPNAME` succeeds with zero first-party
+   warnings on **both** an iPhone and an iPad simulator destination, and the app runs on both.
+   `TARGETED_DEVICE_FAMILY = 1,2`; no `UIRequiresFullScreen`; `UISupportedInterfaceOrientations~ipad`
+   lists all four orientations.
 2. **Passing tests** — `swift test` green in every package; `xcodebuild test` green; the fixture
-   replay green; the UI smoke test green.
+   replay green; the UI smoke test green **on both the iPhone and the iPad destination**, with the
+   iPad run covering tap-to-pane, Close and Fullscreen.
 3. **`PROGRESS.md`** — every acceptance-checklist item marked `DONE`, `CUT` (with the
    `[DECISION: <id>]` that cuts it), or `DEFERRED` (with a reason and a suggested follow-up). Plus a
-   "Blocked", an "Open questions", and a "Could not verify without a device/account" section.
-4. **`README.md`** — what the app is; the iOS/Xcode/Swift versions; how to build, test and run;
+   "Blocked", an "Open questions", a "Could not verify without a device/account" section, and a
+   **"iPad smoke results"** section recording each phase's iPad manual list and its outcome.
+4. **`README.md`** — what the app is (an iPhone **and iPad** client); the iOS/Xcode/Swift versions;
+   the two simulator destinations the gate uses; how to build, test and run;
    the package layout and what each package owns; how fixtures work and how to record new ones;
    how to run the StoreKit configuration file; the dependency allow-list and why each one is there;
    and a clear statement that this is an independent client not affiliated with Reddit.
@@ -396,7 +448,7 @@ did not cover.
   the only product decisions still open when the prompt runs. Settle them in step A-11; flipping one
   later is a one-line change in the `Feature.isGated` table (`02` §13.2) plus a checklist annotation,
   but it is much cheaper to decide first.
-- **The 95 numbered decisions in `08` §1 all carry a default.** The agent does not need any of them
+- **The 100 numbered decisions in `08` §1 all carry a default.** The agent does not need any of them
   answered to start; it needs them *not contradicted* mid-build. Read §1's "Default (assumed)"
   column top to bottom once before kickoff and flag anything you disagree with.
 
@@ -411,7 +463,7 @@ did not cover.
 | §A step 14 | `spec/10-swiftui-2026-baseline.md` §A1 (Xcode 27 / Swift 6.4 / macOS Tahoe 26.6+) | Non-negotiable 3 |
 | §A step 15 | `06-build-plan-and-acceptance.md` §1.7 (fixture list) | Verification method, Phase 1 |
 | §B "Mission" and "Step 0" | `06-build-plan-and-acceptance.md` §1.1 (clean-room boundary), §2 (phases) | `PROGRESS.md` |
-| §B non-negotiables 2–8 | `spec/10` §§A1–A3 and Part C; `08-decisions-and-drift.md` items 6, 14, 39, 93–95 | Build settings in `06` §1.3 |
+| §B non-negotiables 2–8 | `spec/10` §§A1–A3 and Part C; `02` §5.15; `08-decisions-and-drift.md` items 6, 14, 39, 93–100 | Build settings in `06` §1.3 |
 | §B non-negotiables 9–11 | `08-decisions-and-drift.md` items 2, 3, 10; `05-monetization.md` §5.4 | Phases 5, 7, 8 |
 | §B working method and gate | `06-build-plan-and-acceptance.md` §2 (per-phase DoD), §3 (verification method) | CI workflows |
 | §B assumed decisions | `08-decisions-and-drift.md` §§1–3 in condensed form — **that file remains authoritative** | Every `[DECISION: <id>]` tag in `02`–`06` |

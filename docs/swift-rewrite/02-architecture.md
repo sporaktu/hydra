@@ -1,6 +1,6 @@
 # 02 — Architecture
 
-**Project:** `APPNAME` — a native SwiftUI iPhone Reddit client, written from scratch.
+**Project:** `APPNAME` — a native SwiftUI iPhone and iPad Reddit client, written from scratch.
 **Status:** design document. Normative for the build plan (`06-build-plan-and-acceptance.md`) and the one-shot prompt (`07-one-shot-prompt.md`).
 **Companion documents:** `03-data-and-networking.md` (wire contract, domain model, persistence DDL), `04a-feeds-posts-comments.md` / `04b-media.md` / `04c-accounts-inbox-search-subs-settings.md` (per-screen feature specs), `05-monetization.md`, `06-build-plan-and-acceptance.md`, `07-one-shot-prompt.md`, `08-decisions-and-drift.md`.
 
@@ -24,7 +24,7 @@ No source code, artwork, icon art, font files or documentation prose from the or
 
 | Non-goal | Why | Door left open (§ reference) |
 |---|---|---|
-| iPad / split view | iPhone-only product decision | §5.4, §5.11, §19 |
+| Three-or-more panes on iPad, and an app-level sidebar | The original ships exactly two panes and lists more as "Unlikely"; the owner asked for parity, not for a new layout language. **Two-pane split view itself is in scope** — §5.15 | §5.15, §19 |
 | AI summaries, AI/"smart" filters | Removed by the owner; never existed in shipped code either | — |
 | Push notifications / Inbox Alerts | Removed by the owner; shipped code has only a foreground poll + badge | §14.1 |
 | An `APPNAME` backend server | Only ever used for guide search; replaced on-device | §11.6, `03 §9` |
@@ -44,8 +44,9 @@ No source code, artwork, icon art, font files or documentation prose from the or
 | SDK | **iOS 27.0** | Mandatory for App Store uploads from April 2027; opens Liquid Glass, `swipeActions` outside `List`, `AsyncImage` HTTP caching, `toolbarMinimizationBehavior`, `MetricManager` |
 | Swift | **6.4**, language mode **6** | Ships in Xcode 27 |
 | Deployment target | **iOS 26.0** | iOS 26 was on 79 % of all iPhones / 86 % of the last four years' iPhones as of 2026‑06‑07; iOS 27 is days old. Every architectural dependency (Liquid Glass, `Tab`, `WebPage`/`WebView`, `TextEditor` + `AttributedString`, `BGContinuedProcessingTask`) exists at 26.0 |
-| Devices | iPhone only (`TARGETED_DEVICE_FAMILY = 1`) | Product decision |
-| Orientation | Portrait only for the app; all orientations for the media viewer and the in-app browser scenes | `spec/01 §1.5`, `spec/05 §2.1` |
+| Devices | iPhone **and iPad** (`TARGETED_DEVICE_FAMILY = 1,2`) | Product decision; the original's iPad split view is reproduced (§5.15) |
+| Orientation | **iPhone:** portrait only for the app, all orientations for the media viewer and the in-app browser scenes. **iPad:** all four orientations, always, on every screen | `spec/01 §1.5`, `spec/05 §2.1`; §5.11 and §5.15 for the iPad policy |
+| Windowing | Freely resizable on iPadOS 26+; `UIRequiresFullScreen` is **never** declared; a best-effort minimum window size is requested at scene connect (§5.15) | [TN3192](https://developer.apple.com/documentation/technotes/tn3192-migrating-your-app-from-the-deprecated-uirequiresfullscreen-key), [WWDC25 282](https://developer.apple.com/videos/play/wwdc2025/282/) |
 
 **Reassess the floor at iOS 27 adoption ≥ 70 %** (Apple publishes at `developer.apple.com/support/app-store`), expected roughly Q1 2027. That is a one-line change plus deletion of the `@available` shims catalogued in §1.3.
 
@@ -91,7 +92,7 @@ SWIFT_OPTIMIZATION_LEVEL (Release)     = -O
 ENABLE_TESTABILITY (Debug)             = YES
 OTHER_SWIFT_FLAGS (Debug)              = -warn-long-function-bodies=300 -warn-long-expression-type-checking=300
 IPHONEOS_DEPLOYMENT_TARGET             = 26.0
-TARGETED_DEVICE_FAMILY                 = 1
+TARGETED_DEVICE_FAMILY                 = 1,2      // iPhone and iPad
 ```
 
 **Warnings-as-errors policy.** Warnings are errors in every configuration, for first-party code, from commit one. The only sanctioned escape is a file-scoped or declaration-scoped suppression with a `// WARNING-EXEMPT(<reason>, <owner>, <expiry-date>)` comment; CI fails on any exemption past its expiry. Third-party packages are consumed with warnings **not** escalated (SwiftPM does this by default for dependencies).
@@ -169,7 +170,7 @@ Each directory under `Packages/` is its own `Package.swift` with `swift-tools-ve
 | 5 | **Theming** | `Theme` model (20 colours + mode flags), `ThemeStore` `@Observable`, environment plumbing, theme import/export codec, Liquid Glass tint rules. | AppCore, Persistence (custom theme table) | RedditAPI, Features |
 | 6 | **Entitlements** | `Entitlements` `@Observable`, the `Feature.isGated` table, `EntitlementProvider` protocol, the `requiresEntitlement(_:style:)` view modifier, `PaywallPresenter`, `PaywallSheet` / `PlusSettingsScreen` / `PlusBadge` / `FeatureLockView`. Ships a `FreeEverythingProvider` so the app is fully functional before `05` lands StoreKit. | AppCore, Theming (for the lock chrome), StoreKit | RedditAPI, Features |
 | 7 | **MediaKit** | Image pipeline, `PlayerRegistry` actor, focus engine, video source ladder + fallbacks + watchdog, playback-position memory, Live Text bridge, save/share. Resolution of "lazy" sources is injected via a protocol. | AppCore, Theming, DesignSystem | RedditAPI (uses `VideoSourceResolving` protocol instead), Persistence |
-| 8 | **AppRouting** | `Route` enum, `Router` per tab, `RouteResolver` (link → route), deep-link/clipboard/share-extension intake, `ModalCoordinator` (single slot + startup priority queue), forward-navigation ("stack future") store. | AppCore | SwiftUI feature views, RedditAPI |
+| 8 | **AppRouting** | `Route` enum, `Router` per tab **and per split-view detail pane** (§5.15), `RouteResolver` (link → route), the `RouteDestination` classifier that decides pane-vs-tab placement (§5.15), deep-link/clipboard/share-extension intake, `ModalCoordinator` (single slot + startup priority queue), forward-navigation ("stack future") store. | AppCore | SwiftUI feature views, RedditAPI |
 | 9 | **DesignSystem** | Theme-aware primitives: `SwipeActionsRow` (four-band), `ThemedList`, `SectionHeader`, `IconButton`, `TextButton`, `PulseHighlight`, `AlphabetScroller`, `ScrollToNextButton`, `ThemedRefreshable`, haptics facade, context-menu helpers, `EmptyStateView`, `AccessFailureView`. | AppCore, Theming, Entitlements | RedditAPI, Persistence, Features |
 | 10 | **Features/**\* | One package per screen family. Owns its views, its `@Observable` view models, and its navigation intents. Talks to the world exclusively through protocols vended by AppCore. | AppCore, RedditAPI, Persistence, RedditMarkdown, Theming, MediaKit, AppRouting, DesignSystem, Entitlements | **any other Feature package** |
 | 11 | **App target** | Composition root: constructs the concrete `RedditClient`, `Database`, `SettingsStore`, `ThemeStore`, `Entitlements`, `PlayerRegistry`, `InboxPoller`; injects them into the environment; owns the `App`/`Scene`, the `TabView`, startup sequencing, URL intake, Sentry/MetricKit init, alternate icons. | everything | — |
@@ -422,6 +423,7 @@ TabView(selection: $selection) {
   subreddit sidebar, the wiki, the plain web view, and every Settings screen. A screen in the first
   group must also keep its scroll content reachable — it relies on the bar minimizing on scroll — so a
   screen that does **not** scroll belongs in the second group (`spec/01` §3, §4.1, §16).
+- **On iPad the same `TabView` renders its bar at the top**, as a floating Liquid Glass capsule, rather than along the bottom. We keep the plain `TabView` and do **not** apply `.tabViewStyle(.sidebarAdaptable)`; the reasoning, and the consequences for the inset allow-list above, are in §5.15. `[DECISION: split-view-tab-style]`
 - **iOS 27 crash guard.** A `TabView` crashes if `selection` names a hidden or unavailable tab. Our tab set is fixed, so this cannot happen today, but `selection` is validated against the live tab set in one place (`TabRouters.validateSelection()`), so a future customisable tab bar cannot regress into it (`spec/10 §A3`).
 
 ### 5.5 Per-tab navigation stacks and the `Route` enum
@@ -541,7 +543,7 @@ The "join our subreddit" nag from the original — a separate, continuously-eval
 Liquid Glass is not optional under the 27 SDK. The hazard for a heavily themed client is that custom backgrounds fight the material and defeat the scroll-edge effect. Normative rules:
 
 1. **Never set a custom background on the tab bar, the navigation bar, toolbars or sheets.** Let the system material render. The theme tints *content*, not chrome.
-2. **`glassEffect` is reserved for exactly three custom controls**: the feed video FAB pair, the scroll-to-next-comment button, and the media viewer's control pills. Nothing else gets it.
+2. **`glassEffect` is reserved for exactly four custom controls**: the feed video FAB pair, the scroll-to-next-comment button, the media viewer's control pills, and the split-view pane's Close/Fullscreen cluster (§5.15). Nothing else gets it.
 3. **Custom bars that content scrolls under** use `scrollEdgeEffectStyle(_:for:)`.
 4. **Every theme must define, per colour token, a light variant, a dark variant, and an increased-contrast variant.** The theme model therefore stores `ThemeColor = { light, dark, lightHighContrast, darkHighContrast }` rather than a single hex (§8.1). This is the single largest deviation from the original's flat 19-hex model and it is forced by Liquid Glass plus accessibility.
 5. **Test matrix:** every built-in theme × {light, dark} × {Reduce Transparency on/off} × {Increase Contrast on/off} × {Reduce Motion on/off}. Snapshot-tested (§16.3).
@@ -549,7 +551,8 @@ Liquid Glass is not optional under the 27 SDK. The hazard for a heavily themed c
 
 ### 5.11 Orientation and status bar
 
-- The app scene is **portrait-only**. `UISupportedInterfaceOrientations` lists portrait only for the app; the media viewer and the in-app browser opt in to landscape via `supportedInterfaceOrientations` on their hosting controller (a small `UIViewControllerRepresentable`, since SwiftUI has no per-view orientation lock).
+- **On iPhone the app scene is portrait-only.** `UISupportedInterfaceOrientations` lists portrait only; the media viewer and the in-app browser opt in to landscape via `supportedInterfaceOrientations` on their hosting controller (a small `UIViewControllerRepresentable`, since SwiftUI has no per-view orientation lock).
+- **On iPad every screen supports all four orientations.** `UISupportedInterfaceOrientations~ipad` lists portrait, portrait-upside-down, landscape-left and landscape-right, and nothing ever locks or unlocks orientation on iPad — the media viewer's and browser's unlock/re-lock dance is a mechanism that applies on iPhone alone and is a no-op when `userInterfaceIdiom == .pad`. This is both the original's behaviour (its split view is a landscape-first feature) and Apple's current guidance: on iPadOS 26 an app is expected to be adaptive rather than orientation-locked, and `UIRequiresFullScreen` is deprecated and will be ignored ([WWDC25 282](https://developer.apple.com/videos/play/wwdc2025/282/), [TN3192](https://developer.apple.com/documentation/technotes/tn3192-migrating-your-app-from-the-deprecated-uirequiresfullscreen-key)). See §5.15.
 - Rotating inside the media viewer re-seeds the pager from the *current* item, not the item it opened on (`spec/05 §2.2`). The `PlayerRegistry`'s deferred release (§10.3) is what makes the rotation remount free.
 - **Status bar style follows the theme**, not the system appearance: `Theme.statusBar` is `.light`/`.dark` and is applied with `.preferredColorScheme` on the root plus `.toolbarColorScheme` where a bar needs to differ. We never touch `UIApplication.statusBarStyle` (deprecated, may return null under the 27 SDK).
 
@@ -576,6 +579,204 @@ One facade, three semantic calls, all expressed as `sensoryFeedback` modifiers d
 ### 5.14 One-time alerts
 
 `OneTimeAlert(key:)` reads a `UserDefaults` bool; if unset, presents a plain alert and sets the flag unconditionally — dismissal alone suppresses it forever (`spec/09 §7.6`). Keys used at shell level, spelled as `03 §8.1` declares them: `flags.quickSearchTip`, `flags.quickAccountSwapTip`, `flags.galleryModeOffered`. The gallery-mode flag is the one case the original wrote only on acceptance; here it is written on either answer (`gallery-offer-cancel` in `08`).
+
+### 5.15 iPad shell and split view
+
+The original's iPad split view is reproduced in v1 at full behavioural parity (`spec/01 §10`,
+`spec/03 §5`, `spec/04 §1`, `spec/08` items 204–207, 253, 312).
+`[DECISION: ipad-split-view-in-scope]`
+
+#### 5.15.1 The contract, restated from the original
+
+| Rule | Value |
+|---|---|
+| **Device gate** | `deviceSupportsSplitView` — a constant evaluated once per process. The original computes it from the **physical screen** width ≥ 768 pt, deliberately not the window. Our equivalent is `UIDevice.current.userInterfaceIdiom == .pad` (identical in practice, and the only stable device-class signal now that an iPad window can be any width). It decides **only** whether the Appearance toggle is rendered and what its default is |
+| **Setting** | `post.splitViewEnabled` (`03 §8.1`), **default = `deviceSupportsSplitView`** — on by default on every iPad, off on every iPhone. The Appearance → "Enable split view" row is rendered **only** when `deviceSupportsSplitView` is true (`04c` §17.1) |
+| **Window gate** | `windowSupportsSplitView` — live, re-evaluated on **every** window geometry change (rotation, Stage Manager drag-resize, tiling, entering or leaving a narrow window). True when the feed screen's own container is ≥ 768 pt wide **and** `horizontalSizeClass == .regular` |
+| **Effective state** | `showSplitView = post.splitViewEnabled && windowSupportsSplitView`. With the setting on but the window narrow, split view is **suppressed**, not merely resized |
+| **Scope** | **Per feed screen instance.** The selected post is `@State` on each `PostFeedScreen`, never a shared or app-level selection. Two feed screens on the same tab's stack, or on different tabs, each have their own pane |
+| **Tap behaviour** | With `showSplitView` true, tapping a post card **loads it into the right-hand pane instead of pushing**. Seen-marking fires synchronously first, exactly as on the push path (`04a` §7.7). Tapping a different card swaps the pane's content in place, with no close/reopen animation |
+| **Pane controls** | Two controls, **Close** (collapses the pane back to a full-width feed) and **Fullscreen** (pushes the pane's current top route onto the tab's main stack, **leaving the pane state intact underneath**) |
+| **Nothing selected** | The pane and the divider are **not rendered at all**; the feed column occupies the full width. There is therefore **no empty-pane placeholder and no placeholder copy** — an intentional part of the original's design, not an omission |
+| **Interactions inside the pane** | Everything the full-screen post detail does: vote, save, reply, share, collapse, comment sorting, swipe actions, long-press menus, text selection, markdown link taps, pull-to-refresh |
+| **Not in scope** | Three or more panes, and a user-draggable column divider (§19) |
+
+#### 5.15.2 SwiftUI mapping — an explicit two-column layout, **not** `NavigationSplitView`
+
+`PostFeedScreen` renders, inside the tab's existing `NavigationStack` entry:
+
+```swift
+HStack(spacing: 0) {
+    FeedColumn(...)                                   // the List, its FABs, its focus context
+        .frame(width: showSplitView && paneTarget != nil ? feedColumnWidth : nil)
+    if showSplitView, let target = paneTarget {
+        Divider()                                     // 1 px hairline, theme.divider
+        DetailPane(target: target, router: paneRouter) // its own NavigationStack
+    }
+}
+.onGeometryChange(for: CGFloat.self) { $0.size.width } action: { containerWidth = $0 }
+```
+
+**Why not `NavigationSplitView`:**
+
+1. **The selection is per feed screen, not per scene.** `NavigationSplitView` is a scene-level container with one column visibility state and one selection. Our selection lives on each `PostFeedScreen`, and there can be several of them alive on one tab's stack at once. Modelling that with nested `NavigationSplitView`s is neither supported nor meaningful.
+2. **The tab bar stays the root container.** `NavigationSplitView` inside a `TabView` inside a `NavigationStack`, appearing at arbitrary stack depth, is not what the container is for; it is documented and reported to mis-lay-out its sidebar toolbar in exactly that arrangement ([WWDC24 10147](https://developer.apple.com/videos/play/wwdc2024/10147/), [`NavigationSplitView`](https://developer.apple.com/documentation/swiftui/navigationsplitview)).
+3. **The collapse rule is ours, not the framework's.** Our pane appears and disappears on `splitViewEnabled && width ≥ 768`, a user setting combined with a specific threshold. `NavigationSplitView`'s automatic column visibility is neither configurable to that rule nor overridable without fighting it.
+4. **The chrome is custom.** Close and Fullscreen, with Fullscreen *transferring a route to a different stack*, have no `NavigationSplitView` analogue.
+5. **Neither column is a sidebar.** On iPadOS 26 `NavigationSplitView`'s leading column is rendered as an inset Liquid Glass **sidebar** with content flowing behind it ([Adopting Liquid Glass](https://developer.apple.com/documentation/TechnologyOverviews/adopting-liquid-glass), [WWDC25 323](https://developer.apple.com/videos/play/wwdc2025/323/)). Our feed column is *content* — a full post list with its own toolbar semantics — and must not read as chrome.
+
+**No new package.** The split view adds no module to §3.1's eighteen. The container, the gate, the
+columns, the selection state and the pane controls live in `Features/FeedFeature`; the pane's `Router`,
+the `RouteDestination.for(_:)` classifier and the pane's stack live in `AppRouting`; the
+`presentation: .pushed | .pane` parameter lives in `Features/PostDetailFeature`; the `.commands` block
+and the scene's `sizeRestrictions` request live in the **App target**. Nothing crosses a boundary the
+module graph does not already allow, which is exactly the property §19 claimed this design had.
+
+**Tab style.** We keep the plain `TabView` and do **not** apply `.tabViewStyle(.sidebarAdaptable)`
+(`[DECISION: split-view-tab-style]`). The app has exactly five fixed peer destinations with no
+hierarchy to expose in a sidebar; a sidebar would eat the horizontal width the two panes need; the
+tab-retap-pops-one-level and tab-long-press behaviours (§5.4, `tab-longpress-mechanism` in `08`) are
+anchored to the tab bar's slot geometry and would need a second implementation for sidebar rows.
+**Consequence to build for:** on iPadOS 26 a plain `TabView` renders its bar at the **top** as a
+floating glass capsule. §5.4's beneath-the-bar allow-list therefore applies to the **top** edge on
+iPad: the screens in that list take no *top* inset and scroll under the capsule with
+`scrollEdgeEffectStyle(.soft, for: .top)`, and the screens in the second group take
+`.safeAreaPadding(.top, tabBarHeight)` instead of the bottom padding they take on iPhone.
+`tabBarMinimizeBehavior(.onScrollDown)` still applies.
+
+#### 5.15.3 Routing: the pane owns a stack
+
+The pane hosts its **own `NavigationStack` driven by its own `Router`** (`AppRouting`), held in the
+feed screen's `@State` beside `paneTarget`. `[DECISION: split-view-pane-navigation]`
+
+- The pane's stack root is `.postDetail(paneTarget)` and renders **no navigation bar** — matching the
+  original, where the pane sits below the feed screen's own bar. Once the pane's path is non-empty, a
+  compact bar appears **inside the pane** carrying a Back chevron and the pushed screen's title.
+- **Where a push from inside the pane goes** is decided by one pure function in `AppRouting`,
+  `RouteDestination.for(_ route: Route) -> .pane | .tabStack`:
+
+  | Route pushed from inside the pane | Destination |
+  |---|---|
+  | `.postDetail`, `.subredditFeed`, `.multiredditFeed`, `.userProfile`, `.sidebar`, `.wiki`, `.subredditSearch` | **the pane's stack** |
+  | `.gallery`, `.settings(_)`, `.accounts`, `.inbox`, `.messageThread`, `.search`, `.subreddits`, `.webView`, `.unsupported` | **the tab's main stack**, full width over both columns |
+  | The media viewer | Neither — it is a `fullScreenCover` at the app root (§5.1) and covers the whole window |
+  | Any modal (`ModalContent`) | Neither — app-level, unchanged (§5.9) |
+  | Anything arriving through `LinkIntake` (scheme, share extension, clipboard) | Always the **Posts tab's** main stack, unchanged (§5.7) |
+
+  **This is a deliberate improvement on the original**, which routed every push from inside the pane
+  onto the tab's stack, so tapping a subreddit link in a comment tore the two-pane layout down. The
+  routes that stay in the pane are exactly the ones a reader follows *while reading*; the routes that
+  escape are the ones that are full-screen experiences in their own right.
+- **Fullscreen** pushes the pane's **current top** route onto the tab's main stack and changes nothing
+  else: `paneTarget` and the pane's path survive underneath, so popping back returns to the same two
+  panes in the same state (`spec/01 §10`).
+- **Close** sets `paneTarget = nil` and resets the pane's `Router` to an empty path. The feed column
+  animates back to full width.
+- **Back gesture precedence.** The pane's stack gets the system interactive-pop gesture within the
+  pane's own bounds. When "Swipe Anywhere to Navigate" is on (§5.8), the tab-level full-screen back
+  gesture is restricted to the **feed column's** bounds while a pane is open, so a horizontal drag
+  inside the pane pops the pane's stack rather than the tab's.
+
+#### 5.15.4 Window resize under iPadOS 26 windowing
+
+iPadOS 26 gives every app a freely resizable window with macOS-style window controls, and folds the
+old Split Screen and Slide Over into that windowing model; Stage Manager remains as a separate mode
+([WWDC25 282](https://developer.apple.com/videos/play/wwdc2025/282/),
+[MacRumors, iPadOS 26 multitasking](https://www.macrumors.com/2025/09/17/ipados-26-multitasking-tips-and-tricks/)).
+iPadOS 27 makes resizing more responsive and extends automatic resizability to iPhone apps built with
+the iOS 27 SDK ([What's new in iPadOS 27](https://developer.apple.com/ipados/whats-new/)). Normative
+consequences:
+
+1. **Gate on the container, never on the screen.** `UIScreen`-derived width is wrong by construction
+   here. The gate reads the feed screen's own width via
+   `onGeometryChange(for: CGFloat.self) { $0.size.width }`, combined with `@Environment(\.horizontalSizeClass)`
+   ([`onGeometryChange`](https://developer.apple.com/documentation/swiftui/view/ongeometrychange(for:of:action:)),
+   [`horizontalSizeClass`](https://developer.apple.com/documentation/swiftui/environmentvalues/horizontalsizeclass)).
+   Anything sized as a fraction of a column uses
+   [`containerRelativeFrame`](https://developer.apple.com/documentation/swiftui/view/containerrelativeframe(_:alignment:_:)),
+   which re-resolves automatically when the container width changes. **No `GeometryReader` may wrap a
+   feed or comment list** — it defeats lazy sizing (§18.3).
+2. **Survive live resize.** The gate is evaluated on every geometry callback during a drag, so it must
+   be cheap and must not animate per frame: the pane's appearance and disappearance are
+   `.animation(nil)` while a resize is in flight. **Hysteresis is required**: the pane appears at
+   ≥ 768 pt and disappears below **752 pt**, so a window parked on the boundary cannot flicker.
+3. **State survives a collapse.** `paneTarget` and the pane `Router`'s path are value types held on
+   `PostFeedScreen`, so a collapse **cannot** destroy them. While collapsed, the screen behaves exactly
+   as it does on iPhone (a tap pushes onto the tab's stack) and `paneTarget` is left untouched; on
+   re-expansion the previously selected post returns to the pane. What is *not* preserved: the pane's
+   `PostDetailStore` is released while collapsed and re-fetches on re-expansion, and the pane's scroll
+   offset is not restored — holding a live comment tree for an invisible pane across an arbitrarily
+   long collapse is real memory against §18.1's budgets.
+4. **Minimum window size.** At scene connect we request
+   `windowScene.sizeRestrictions?.minimumSize = CGSize(width: 375, height: 600)` — deliberately **below**
+   the 768 pt gate, so that a narrow window is a fully usable single-column reader rather than a refusal.
+   `sizeRestrictions` is a preference the system satisfies on a best-effort basis, not a guarantee, so no
+   layout may assume it ([TN3192](https://developer.apple.com/documentation/technotes/tn3192-migrating-your-app-from-the-deprecated-uirequiresfullscreen-key)).
+5. **`UIRequiresFullScreen` is never declared.** It is deprecated, it is ignored on the 26/27 SDKs, and
+   declaring it would fight everything above (`06` §1.3). Same reasoning as `UIDesignRequiresCompatibility` (§1.2).
+
+#### 5.15.5 Layout, chrome and Liquid Glass
+
+- **Columns.** Feed column **40 %**, detail pane **60 %**, separated by a 1 px (`1 / displayScale`)
+  hairline in `theme.divider` — the original's `flex: 1` / `flex: 1.5`. The feed column is clamped to a
+  minimum of **320 pt** so it stays a usable post list just above the gate. The ratio is fixed in v1;
+  the divider is not draggable. `[DECISION: split-view-column-ratio]`
+- **Pane controls.** A floating capsule of two 40 × 40 circular buttons — ✕ and an expand glyph —
+  anchored to the **bottom-centre of the detail pane**, clear of the tab bar. This is the fourth and
+  last sanctioned `glassEffect` site (§5.10 rule 2). The original centres the same pair over the whole
+  window; anchoring to the pane is the correct generalisation once the pane can be any width.
+- **No custom background on either column.** Both draw `theme.background` as *content*; the system
+  material owns every bar. Each column is an independently scrolling container and therefore gets its
+  own scroll-edge effect.
+- `backgroundExtensionEffect` is not used anywhere: we have no sidebar for content to flow behind.
+- **FAB and floating-button ownership.** The feed video FAB pair belongs to the **feed column** and is
+  positioned relative to it (`spec/03 §9.5`). The scroll-to-next-comment button belongs to the **detail
+  pane**, and its ten snap positions are computed relative to the **pane's** bounds, not the window's
+  (`04a` §15.4).
+- **Video focus.** The focus engine is injected per screen (§10.4), so the feed column owns the only
+  focus-managed list; the pane's own video sits outside any focus context and is always eligible to
+  play, exactly as in the original (`spec/03 §9.2`).
+- **Media viewer.** Presented full-window over both panes as a `fullScreenCover` at the app root
+  (§5.1) — never inside a column. Its thresholds and zoom maths are container-relative and unchanged
+  (`04b` §2).
+
+#### 5.15.6 Pointer, trackpad and keyboard
+
+- `UIApplicationSupportsIndirectInputEvents` is already declared (§14.6) and is what makes pointer
+  input correct.
+- **Hover.** Post rows, comment rows, toolbar buttons, the pane controls and the FABs take
+  `.hoverEffect(.automatic)`. The divider takes none, because it is not draggable in v1.
+- **Secondary click.** Every menu this plan describes as a "long-press menu" is implemented with
+  `.contextMenu`, so right-click and two-finger tap open it for free. Custom long-press gestures are
+  **not** an acceptable implementation for any of them. The context menu therefore remains the
+  guaranteed pointer-accessible path to every swipe action, which is already its contract (`04a` §7.2).
+- **Keyboard shortcuts.** The original has none. `APPNAME` ships a deliberately minimal set
+  (`[DECISION: ipad-keyboard-shortcuts]`), declared once in a `.commands { … }` block on the
+  `WindowGroup` plus `.keyboardShortcut` on the buttons that already exist — which also populates the
+  iPadOS 26 menu bar, since the `commands` API now builds the iPad menu bar as well as the Mac's
+  ([Building and customizing the menu bar with SwiftUI](https://developer.apple.com/documentation/SwiftUI/Building-and-customizing-the-menu-bar-with-SwiftUI),
+  [WWDC25 256](https://developer.apple.com/videos/play/wwdc2025/256/),
+  [`keyboardShortcut`](https://developer.apple.com/documentation/swiftui/keyboardshortcut)):
+
+  | Shortcut | Action |
+  |---|---|
+  | ⌘1 … ⌘5 | Select Posts / Inbox / Account / Search / Settings |
+  | ⌘R | Refresh the focused list (the same code path as pull-to-refresh) |
+  | ⌘F | Focus the search field on a screen that has one |
+  | ⌘[ | Back in the focused stack — the pane's stack when the pane has focus, else the tab's |
+  | ⌘W | Close the split-view pane (enabled only while a pane is open) |
+  | ⌘⇧F | Fullscreen the pane's current content |
+  | ⌘, | Settings |
+
+  Nothing else. Space / ⇧Space paging and Escape-to-dismiss come from the system and are not
+  re-implemented. No shortcut may be the only way to reach an action.
+
+#### 5.15.7 Compact-mode default
+
+`post.compactMode`'s default is `deviceSupportsSplitView` again, as in the original — **on** for
+iPad-class devices, **off** for iPhone (`03 §8.1`, `04c` §17.1). It is a plain default, not a live
+layout rule: a user who switches it stays switched, and resizing the window never changes it.
+
 
 ---
 
@@ -1418,8 +1619,10 @@ sentry-cocoa, initialised before anything renders, `enabled` iff not a debug bui
 
 | Deferred capability | What v1 does so it stays cheap |
 |---|---|
-| **iPad / split view** | `Route` is a value type and each tab owns a `Router`, so a `NavigationSplitView` shell is a shell swap, not a rewrite. Feed and detail are already separate feature packages with no direct edge. The focus engine is injected, not global, so two managed lists on screen is representable. `postCompactMode`'s default already keys off screen width in the original; we keep the setting |
-| **Foldable / `ArrangementView`** | Same shell-swap argument. No hard-coded portrait-width assumptions outside the media viewer |
+| **Three-or-more panes on iPad** | The two-pane split view ships (§5.15). A third pane is another element in the same `HStack` with another `Router`; `RouteDestination.for(_:)` is the one function that would have to learn about it. The original lists this as "Unlikely" |
+| **A user-draggable column divider** | The 40/60 ratio is one constant read in one place (§5.15.5, `[DECISION: split-view-column-ratio]`); making it a persisted, drag-adjustable value is a setting plus a gesture on the divider, with no structural change |
+| **An app-level sidebar (`.sidebarAdaptable`)** | Rejected for v1 with reasons (§5.15.2). The tab set is data in one place, so switching styles later is a one-line change plus re-deriving §5.4's inset allow-list |
+| **Foldable / `ArrangementView`** | Same argument as the split view, which already proves it: layout is driven by container width and size class, never by screen width, and there are no hard-coded portrait-width assumptions outside the media viewer |
 | **Push notifications** | `InboxPoller.pollOnce()` is already isolated from the timer that drives it |
 | **Background inbox refresh** | Same |
 | **Picture-in-Picture** | `audio` background mode is already declared; the registry already owns player lifetime |
@@ -1446,7 +1649,8 @@ sentry-cocoa, initialised before anything renders, `enabled` iff not a debug bui
 | §5.8 Stack future | `spec/01 §9`, and open question 5 |
 | §5.9 Modals | `spec/01 §12`, `§12.2`, `§12.3`; `spec/09 §11.5` |
 | §5.10 Liquid Glass | `spec/10 §A2` |
-| §5.11 Orientation/status bar | `spec/01 §1.5`, `§18`; `spec/05 §2.1`; `spec/06 §3.1` |
+| §5.11 Orientation/status bar | `spec/01 §1.5`, `§18`; `spec/05 §2.1`; `spec/06 §3.1`; [WWDC25 282](https://developer.apple.com/videos/play/wwdc2025/282/) |
+| §5.15 iPad shell and split view | `spec/01 §10`; `spec/03 §5`, `§9.2`, `§9.5`; `spec/04 §1`, `§14`; `spec/05 §2.1`; `spec/06 §4.1`; `spec/08` items 204–208, 253, 312; [TN3192](https://developer.apple.com/documentation/technotes/tn3192-migrating-your-app-from-the-deprecated-uirequiresfullscreen-key), [WWDC25 282](https://developer.apple.com/videos/play/wwdc2025/282/), [WWDC25 256](https://developer.apple.com/videos/play/wwdc2025/256/), [WWDC24 10147](https://developer.apple.com/videos/play/wwdc2024/10147/), [Adopting Liquid Glass](https://developer.apple.com/documentation/TechnologyOverviews/adopting-liquid-glass), [`onGeometryChange`](https://developer.apple.com/documentation/swiftui/view/ongeometrychange(for:of:action:)), [`horizontalSizeClass`](https://developer.apple.com/documentation/swiftui/environmentvalues/horizontalsizeclass), [`containerRelativeFrame`](https://developer.apple.com/documentation/swiftui/view/containerrelativeframe(_:alignment:_:)), [`NavigationSplitView`](https://developer.apple.com/documentation/swiftui/navigationsplitview), [`sidebarAdaptable`](https://developer.apple.com/documentation/SwiftUI/TabViewStyle/sidebarAdaptable), [Menu bar with SwiftUI](https://developer.apple.com/documentation/SwiftUI/Building-and-customizing-the-menu-bar-with-SwiftUI), [`keyboardShortcut`](https://developer.apple.com/documentation/swiftui/keyboardshortcut), [What's new in iPadOS 27](https://developer.apple.com/ipados/whats-new/) |
 | §5.12 Swipe actions | `spec/03 §7`; `spec/04 §8`; `spec/09 §6.1` |
 | §5.13 Haptics | `spec/01 §14`; `spec/09 §7.4` |
 | §5.14 One-time alerts | `spec/01 §15`; `spec/09 §7.6` |
@@ -1466,7 +1670,7 @@ sentry-cocoa, initialised before anything renders, `enabled` iff not a debug bui
 | §16 Testing | `spec/09 §9`; `spec/04 §3` (flatten test suite); `spec/10 §A3` (Swift Testing) |
 | §17 Observability | `spec/02 §6.7`; `spec/06 §9`; `spec/10 §A3` (MetricManager) |
 | §18 Performance | `spec/04 §12`; `spec/10 §A3` (lazy stacks, List vs LazyVStack, `@State` macro) |
-| §19 Door-open | `spec/01 §10`; `spec/10 §B6` |
+| §19 Door-open | `spec/08 §5` ("Unlikely": multi-pane iPad); `spec/10 §B6` |
 
 ---
 
@@ -1510,7 +1714,7 @@ Every item below is resolved in `08-decisions-and-drift.md`. Short names are the
 | `app-icons-new-art` | Alternate icons exist; the art is new, authored in Icon Composer (§14.5) |
 | `sentry-or-not` | Crash reporting, opt-out, default on (§17.3) |
 | `error-reporting-default` | Same setting's default (§17.3) |
-| `ipad-split-view-deferred` | iPad and split view deferred; §19 lists what keeps the door open |
+| `ipad-split-view-in-scope` | iPad and the original's two-pane split view ship in v1, at parity; the full contract is §5.15, and §19 lists what stays deferred |
 | `android-out-of-scope` | Out of scope |
 | `nav-bar-tap-guard` | The nav-bar-vs-scroll-to-top gesture hazard, verified by a UI test rather than pre-solved with a patch (§18.4) |
 | `startup-modals` | The single-slot modal plus priority-ordered startup queue (§5.9) |
@@ -1534,3 +1738,7 @@ All of these now have numbered entries in `08-decisions-and-drift.md` §1.4; the
 | `mark-seen-live` | "Mark as seen on scroll" takes effect without a restart (§11.4) |
 | `op-mod-badges` | Add text badges alongside OP/moderator colour coding, since colour alone is inaccessible (§15.1) |
 | `warnings-as-errors` | Warnings are errors in every configuration, with expiring exemptions (§1.4) |
+| `split-view-column-ratio` | Feed column 40 %, detail pane 60 %, 320 pt minimum feed column, fixed (non-draggable) in v1 (§5.15.5) |
+| `split-view-tab-style` | Keep a plain `TabView`; do **not** adopt `.tabViewStyle(.sidebarAdaptable)`; re-derive the inset allow-list for the top-placed iPad bar (§5.4, §5.15.2) |
+| `split-view-pane-navigation` | The pane owns a `NavigationStack` + `Router`; `RouteDestination.for(_:)` decides pane-vs-tab placement; Fullscreen transfers the pane's top route to the tab's stack (§5.15.3) |
+| `ipad-keyboard-shortcuts` | Ship the minimal ten-shortcut set in §5.15.6, surfaced through `.commands` so the iPadOS 26 menu bar is populated |

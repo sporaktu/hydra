@@ -1172,7 +1172,8 @@ Backed by `UserDefaults` through a typed `SettingsStore`. Every read is `stored 
 | `sorting.postTop.<sub-lowercased>` | `TopWindow` | — | `PostSubredditSortTop-<sub>` | Dynamic |
 | `sorting.comment.<sub-lowercased>` | `CommentSort` | — | `CommentSubredditSort-<sub>` | Dynamic |
 | **Post appearance** | | | | |
-| `post.compactMode` | Bool | `false` (iPhone) | `postCompactMode` | Compact vs normal card |
+| `post.compactMode` | Bool | **`deviceSupportsSplitView`** — `true` on iPad-class devices, `false` on iPhone | `postCompactMode` | Compact vs normal card. A plain default, evaluated once at first read; resizing the window never changes it (`02` §5.15.7) |
+| `post.splitViewEnabled` | Bool | **`deviceSupportsSplitView`** — `true` on iPad-class devices, `false` otherwise | `splitViewEnabled` | Enables the two-pane feed/detail split view. The Appearance row is rendered **only** where `deviceSupportsSplitView` is true (`04c` §17.1). Consumed by `PostFeedScreen`, which combines it with a live window-width gate (≥ 768 pt, `horizontalSizeClass == .regular`) to produce `showSplitView` (`02` §5.15, `04a` §3.5). `deviceSupportsSplitView` is itself derived, not stored: `UIDevice.current.userInterfaceIdiom == .pad` |
 | `post.thumbnailsOnRight` | Bool | `false` | `showThumbnailsOnRightSide` | Compact thumbnail side; row shown only when compact is on |
 | `post.subredditAtTop` | Bool | `false` | `subredditAtTop` | Subreddit row above the title vs inline in the footer |
 | `post.showSubredditIcon` | Bool | `true` | `showSubredditIcon` | Also suppressed entirely in low-data mode |
@@ -1223,7 +1224,6 @@ Backed by `UserDefaults` through a typed `SettingsStore`. Every read is `stored 
 | `redgifsToken` | String? | `nil` | `redgifsToken` | Cached bearer token |
 | **Removed** | | | | |
 | — | — | — | `showPostSummary`, `showCommentSummary` | Dead in the original (no consumer). Not carried over |
-| — | — | — | `splitViewEnabled` | iPad only; out of scope for v1 |
 | — | — | — | `useHydraServer`, `customHydraServerUrl` | No backend exists (§9) |
 | — | — | — | `lastFixedAccountSettings` | The silent prefs write is dropped (§5.7) |
 | — | — | — | `lastAskedToSubscribeToHydraClient-<userId>` | The community-subscribe nag is not reproduced (`subscribe-nag-removed`) |

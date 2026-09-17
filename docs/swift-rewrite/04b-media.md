@@ -1,6 +1,6 @@
 # 04b — Media: Fullscreen Viewer, Video, Gallery Mode, Downloads, Caches (SwiftUI Implementation Spec)
 
-**Target:** `APPNAME`, a from-scratch native SwiftUI iPhone Reddit client.
+**Target:** `APPNAME`, a from-scratch native SwiftUI iPhone **and iPad** Reddit client.
 **Platform floor:** iOS 26.0, built with the iOS 27 SDK, Swift 6.4, strict concurrency with default
 `MainActor` isolation; all decode/network work marked `@concurrent`.
 **Companion documents:** `02-architecture.md` (stores, routing, theming, entitlements seam),
@@ -10,7 +10,8 @@
 `05-monetization.md` (binds `[GATE: gate.*]`), `08-decisions-and-drift.md` (resolves `[DECISION: <id>]`).
 
 Clean-room reproduction of *behavior*. Quoted strings are functional UI copy and are reproduced
-verbatim. iPhone only; no iPad split-view media pane. `[DECISION: ipad-split-view-deferred]`
+verbatim. iPad is in scope; §2.1a states what changes on a wide window and what deliberately does not.
+`[DECISION: ipad-split-view-in-scope]`
 
 ---
 
@@ -96,16 +97,47 @@ read from `@Environment`.
   keeps appending posts while the viewer is open. Model it as a closure capturing an `@Observable`
   store, never a captured array value.
 - Presented as a `.fullScreenCover` over a solid black background. `.statusBarHidden(true)`.
-- **Orientation:** the app is otherwise locked portrait-up. The viewer unlocks rotation while open
-  and re-locks to portrait-up on dismiss. On the iOS 27 SDK this must be done through scene APIs
-  (`UIWindowScene.requestGeometryUpdate(.iOS(interfaceOrientations:))` plus a
+- **Orientation:** on **iPhone** the app is otherwise locked portrait-up; the viewer unlocks rotation
+  while open and re-locks to portrait-up on dismiss. On the iOS 27 SDK this must be done through scene
+  APIs (`UIWindowScene.requestGeometryUpdate(.iOS(interfaceOrientations:))` plus a
   `supportedInterfaceOrientations` override on the hosting controller), never via the deprecated
-  `UIApplication` status-bar/orientation APIs.
+  `UIApplication` status-bar/orientation APIs. On **iPad** every screen already supports all four
+  orientations (`02` §5.11), so the unlock/re-lock pair is a **no-op** there — it must be skipped, not
+  executed against an already-free scene.
 - **Zoom transition.** Enter with `.navigationTransition(.zoom(sourceID:in:))` from the tapped
   thumbnail, matched on the media item's id (`02-architecture.md` §10.5). The original simply
   presented on a black background with no shared-element transition; this is a deliberate,
   flagged enhancement, and it is **suppressed under Reduce Motion**
   (`02-architecture.md` §15.1 rule 3). `[DECISION: viewer-zoom-transition]`
+
+### 2.1a The viewer on iPad
+
+The viewer is one app-wide `fullScreenCover` at the app root (`02` §5.1), so on iPad it covers **the
+whole window — both split-view columns and the tab bar**. It is never presented inside a column, never
+sized to a pane, and never adopts the split layout. Opening it from the feed column, from the detail
+pane, from a comment body or from Gallery Mode is the same call and produces the same full-window
+presentation.
+
+What is **container-relative and therefore already correct at any width**, needing no width-specific code at all:
+
+- `contentFit: .fit` sizing and the aspect-ratio container height (§3.1, §8).
+- Double-tap zoom to `ZOOM_SCALE = 3` and pinch 1–10 with the focal-jump guard, and the pan clamp
+  `maxX = width * (scale - 1) / 2`, `maxY = height * (scale - 1) / 2` (§3.2) — all expressed against the
+  presented frame.
+- The 30 %-width side-tap paging zones (§2.4).
+- Vertical paging between posts and horizontal paging within a post's gallery (§2.2).
+
+What is **deliberately left in absolute points**: the dismiss thresholds — 50 pt vertical overscroll,
+40 pt horizontal, and the `|velocity| > 1` alternatives (§2.3) — and the tap classifier's 10 pt / 300 ms
+and 280 ms / 45 pt constants (§2.4). These are thresholds on *hand movement*, not on screen area; a
+40 pt flick is exactly as deliberate a gesture on a 1366 pt window as on a 393 pt one, and scaling them
+with the container would make dismissal progressively harder on larger iPads. `spec/05` specifies no
+iPad variant of any of them. This is a decision, not an oversight — do not "fix" it by making them
+proportional.
+
+Pointer and keyboard (`02` §5.15.6): the close button, the arrow pills and the overlay chrome take
+`.hoverEffect(.automatic)`; Escape dismisses the viewer through the system's own cover behaviour, and
+no custom shortcut is added for it.
 
 ### 2.2 Paging structure
 
@@ -757,20 +789,34 @@ normal feed but renders it as a media grid. `[GATE: gate.galleryMode]`
 
 ### 10.3 Grid layout and scrolling
 
-- Two-column **masonry** layout with arrangement optimization. In SwiftUI, either a two-column
-  `LazyVStack` pair fed by a running-height balancer, or a `UICollectionViewCompositionalLayout`
-  bridge. Prefer the former; measure with Instruments before bridging.
+- **Masonry** layout with arrangement optimization. In SwiftUI, either a `LazyVStack` per column fed by
+  a running-height balancer, or a `UICollectionViewCompositionalLayout` bridge. Prefer the former;
+  measure with Instruments before bridging.
+- **Column count is width-derived, not fixed at two.** The original hard-codes `numColumns: 2` with
+  `width = contentWidth / 2`, which on a 1366 pt iPad window yields 683 pt-wide cells — a grid of two
+  enormous tiles rather than a gallery. The rule is:
+
+  ```
+  columns = min(5, max(2, Int((contentWidth / 230).rounded())))
+  cellWidth = (contentWidth - spacing * CGFloat(columns - 1)) / CGFloat(columns)
+  ```
+
+  `contentWidth` is the grid's own container width from `.onGeometryChange`, re-derived live on window
+  resize and rotation. **Every current iPhone width lands on exactly 2**, so iPhone behaviour is
+  byte-identical to the original; an iPad portrait window gets 4 and a landscape one gets 5.
+  `[DECISION: gallery-mode-wide-columns]`
 - **Every qualifying post's media is flattened into individual grid cells:** a video-only post
   contributes one cell per video, an image-only post one cell per image. Never both from one post —
   videos still take priority, mirroring the single-post rendering rule.
 - **Cell aspect ratio uses the parent post's `mediaAspectRatio`**, not a per-image ratio:
-  `width = contentWidth / 2`, `height = width / mediaAspectRatio`.
+  `height = cellWidth / mediaAspectRatio`, with `cellWidth` from the column rule above.
 - **Cell content:**
   - Images: `.scaledToFit()`, **no autoplay** for animated content, and **downscaling disabled** on
     iOS — downscaling was found to cause glitchy scroll performance from heavy CPU use, at the cost of
     higher memory.
   - Videos: the shared video view with **no focus context**, so visible video cells play immediately,
-    muted, with no focused-only gating. **At most 4 gallery players run simultaneously**: the focus
+    muted, with no focused-only gating. **At most 4 gallery players run simultaneously at any column count** — the cap is a decoder budget, not
+    a per-column allowance, so a 5-column iPad grid still plays at most 4: the focus
     engine's candidate set is applied as a ceiling, nearest-to-viewport-centre first, because letting
     every visible cell play is real decoder pressure against the registry's cap of 12
     (`02-architecture.md` §10.6). `[DECISION: gallery-video-cap]`
@@ -1090,7 +1136,7 @@ All pure logic below is testable without a network, a player, or a screen.
 | `spec/05-media.md` §13 (settings keys) | settings cross-ref | §7.2, §13, §12 |
 | `spec/02-api-contract.md` §2.14–2.15 (Redgifs G1/G2, other hosts), §5.3–5.4 (caches), §6.1–6.6 (third-party services), §8 (throttling table) | endpoints, concurrency, cooldowns | §6, §11, §12 |
 | `spec/02-api-contract.md` §4.1.1–4.1.3 (image/video/link extraction) | media derivation | §1 |
-| `01-navigation-shell.md` §1 (orientation lock/unlock), §20 (backgrounding) | rotation + background teardown | §2.1, §7.4 |
+| `01-navigation-shell.md` §1 (orientation lock/unlock), §10 (split view), §20 (backgrounding) | rotation, the viewer over a split layout, background teardown | §2.1, §2.1a, §7.4 |
 | `03-feed-and-posts.md` §4.5–4.6 (blur, feed image strip), §9 (focus algorithm), §20 (low data) | feed-side media | §3, §7, §13 |
 | `08-feature-inventory.md` D (media), K (sharing/downloading) | acceptance checklist | throughout |
 | `09-persistence-pro-utils.md` §2.3 (media caches), §5.2 (media sharing) | caches, share/save | §9, §12 |
@@ -1103,7 +1149,8 @@ no aliases, and the register's "Default (assumed)" column is what this document 
 
 | Tag | Subject |
 |---|---|
-| `ipad-split-view-deferred` | iPad split view out of scope |
+| `ipad-split-view-in-scope` | iPad ships in v1; the viewer is full-window over both panes (§2.1a) |
+| `gallery-mode-wide-columns` | Gallery Mode's column count is derived from the grid's width, 2–5 (§10.3) |
 | `raw-json-param` | `raw_json=1` on every read; no entity decoding anywhere, `hls_url` included |
 | `viewer-zoom-transition` | Enter the viewer with a zoom navigation transition |
 | `live-text-dead-setting` | The Live Text toggle is inert in the original; implemented for real here |

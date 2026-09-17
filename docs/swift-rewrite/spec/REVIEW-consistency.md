@@ -241,3 +241,78 @@ of them.
 - **Feature completeness was not audited.** This pass only reconciled what the documents already
   said; a separate gap audit covers anything the set is missing against `spec/08`'s 327-item
   inventory.
+
+---
+
+## 5. iPad reinstatement (2026-09-17, after §§1–4)
+
+The owner reversed one product decision: **iPad support, including the original's split view, is in
+scope for v1** and is "very important". Decision #6 in `08` changed from `ipad-split-view-deferred`
+(iPhone only) to **`ipad-split-view-in-scope`** (parity with `spec/01` §10). This section records what
+changed and on what evidence. Nothing in `spec/01`–`spec/10` was edited; the surveys remain the ground
+truth, and this pass reads them rather than revising them.
+
+**The retired id.** `ipad-split-view-deferred` no longer exists anywhere in `00`–`08`. §3's
+normalization table above still lists the earlier-draft spelling `ipad-split-view` mapping onto it;
+that mapping is historical, and the live id for the subject is `ipad-split-view-in-scope`.
+
+### 5.1 New decision ids
+
+| # | id | Subject |
+|---|---|---|
+| 6 | `ipad-split-view-in-scope` | **Rewritten.** iPhone **and** iPad, `TARGETED_DEVICE_FAMILY = 1,2`, the original's two-pane split view at parity. Default = full parity per `spec/01` §10; alternative = a `NavigationSplitView`-based simplification |
+| 96 | `split-view-column-ratio` | 40 % feed / 60 % detail (the original's `flex: 1` / `flex: 1.5`), hairline divider, 320 pt minimum feed column, not draggable in v1 |
+| 97 | `split-view-tab-style` | Keep a plain `TabView`; do **not** adopt `.tabViewStyle(.sidebarAdaptable)`; the iPad bar sits at the top, so `02` §5.4's inset allow-list applies to the top edge |
+| 98 | `split-view-pane-navigation` | The pane owns a `NavigationStack` + `Router`; `RouteDestination.for(_:)` decides pane-vs-tab placement; Fullscreen transfers the pane's top route. The one knowing divergence from the original's split-view behaviour |
+| 99 | `gallery-mode-wide-columns` | Gallery Mode's column count becomes width-derived (2–5); every current iPhone width still yields exactly 2 |
+| 100 | `ipad-keyboard-shortcuts` | A minimal shortcut set surfaced through `.commands`, so the iPadOS 26 menu bar is not empty. The only net-new UX in this pass |
+
+Drift row **D19** was rewritten from "out of scope" to "reproduced at full parity". Bug id
+`pencil-modal-close` lost its "not applicable on iPhone-only" disposition and became a Phase 9 iPad
+device check.
+
+### 5.2 Files and sections changed
+
+| File | Sections |
+|---|---|
+| `00-README.md` | Intro line; principle 3 (now "iPhone and iPad"); principle 8 id range (#1–#100); owner-decisions table (Platform row rewritten, new "iPad split view" row); reading-order row for `08` (95 → 100 decisions). Reading order otherwise unchanged — no new file was added |
+| `02-architecture.md` | Header line; §0.4 non-goals (iPad row replaced by "three-or-more panes / app-level sidebar"); §1.1 (Devices, Orientation, new Windowing row); §1.4 (`TARGETED_DEVICE_FAMILY = 1,2`); §3.1 (AppRouting responsibilities); §5.4 (iPad tab-bar placement); §5.10 rule 2 (three → four `glassEffect` sites); §5.11 (split iPhone/iPad orientation policy); **new §5.15 "iPad shell and split view"** with §5.15.1 the restated contract, §5.15.2 the SwiftUI mapping and the five reasons not to use `NavigationSplitView`, §5.15.3 pane routing, §5.15.4 window resize, §5.15.5 layout/chrome/Liquid Glass, §5.15.6 pointer and keyboard, §5.15.7 the compact-mode default; §19 (door-open table rewritten); §20 (new traceability row, §5.11 and §19 rows updated); §21.1 (#6 entry) and §21.2 (four new ids) |
+| `03-data-and-networking.md` | §8.1 — `post.compactMode`'s default restored to `deviceSupportsSplitView`; new `post.splitViewEnabled` row with its default rule, visibility rule and consumer; the `splitViewEnabled` row removed from the "Removed" block. No other split-view key exists in `spec/01` |
+| `04a-feeds-posts-comments.md` | Target line; scope note rewritten; **new §3.5 "Split view (iPad)"** (§3.5.1 activation, §3.5.2 layout, §3.5.3 tap-to-pane, §3.5.4 selection state and what clears it, §3.5.5 pane controls, §3.5.6 inside the pane, §3.5.7 pane vs. pushed); §4 compact-mode default; §6 tap-target note; §15.4 container note; §19 settings table; §21.1 traceability; §21.2 decision inventory |
+| `04b-media.md` | Target line; deferral note replaced; §2.1 orientation bullet made device-aware; **new §2.1a "The viewer on iPad"**; §10.3 width-derived gallery columns and the unchanged 4-player cap; §16.1 traceability; §16.2 decision inventory |
+| `04c-accounts-inbox-search-subs-settings.md` | Target line; scope note; §12 browser-orientation row; §17.1 — `postCompactMode` default corrected and the **"Enable split view"** row restored in `spec/06` §4.1's position, with label, description copy, default rule, key, visibility rule and effect, plus a row-order and divider note; §13 "Open in APPNAME" copy ("your device"); §4 avatar rationale; §22 startup orientation step; §24.1 traceability; §24.2 decision inventory |
+| `05-monetization.md` | §3.1 row **M** — split view named explicitly as free structural navigation, with the reasoning; no gate id added, and the row states that none may be |
+| `06-build-plan-and-acceptance.md` | §1.3 (`TARGETED_DEVICE_FAMILY = 1,2`, `UISupportedInterfaceOrientations~ipad`, `UIRequiresFullScreen` absent — in both the settings table and the deliberately-absent table); §1.6 CI (new `build-ipad` job, `ui-smoke` on two destinations); §1.8 assets (iPad screenshot set); §2 gate paragraph; Phase 0 (deliverables, DoD, tests, smoke, new iPad smoke); Phase 2, 3, 4, 7, 9 (deliverables and new iPad smoke lists); Phase 9 Liquid Glass audit run per device class; Phase 10 screenshots; §3 verification method items 1 and 4; §4 items 204–208 un-CUT and rewritten, new 208d–208g, 252, 253, 312, 90; §5 risks **R13** (live-resize state loss), **R14** (Liquid Glass placement on iPad), **R15** (iPad review assets); §6 size estimate (+~1,400 LoC, 11–15 weeks) |
+| `07-one-shot-prompt.md` | Mission line; §A new kickoff items **13c** (an iPad-class test device) and **13d** (iPad App Store screenshots) and item 14 (both simulator runtimes); non-negotiable **2** rewritten; the phase gate block (second `xcodebuild build` destination); verification method (compile, UI smoke, new iPad manual smoke); assumed-decisions block (new iPad paragraph); output artifacts 1–4; id range #1–#100; traceability |
+| `08-decisions-and-drift.md` | Counts (95 → 100); **#6 rewritten** as `ipad-split-view-in-scope` with evidence, default, alternative and impact; **#96–#100 appended** after #95; §2 `pencil-modal-close` disposition; §3 rows **D16** and **D19**; §4 gained a "one id has been retired" paragraph; Traceability rows for §1.1 items 6–7 and §1.4 |
+
+### 5.3 Platform facts verified for this pass (cited in `02` §1.1, §5.11, §5.15, §20)
+
+- [TN3192 — Migrating your iPad app from the deprecated `UIRequiresFullScreen` key](https://developer.apple.com/documentation/technotes/tn3192-migrating-your-app-from-the-deprecated-uirequiresfullscreen-key)
+- [`UIRequiresFullScreen`](https://developer.apple.com/documentation/BundleResources/Information-Property-List/UIRequiresFullScreen) — deprecated; ignored in a future release
+- [WWDC25 282 — Make your UIKit app more flexible](https://developer.apple.com/videos/play/wwdc2025/282/) — resizable scenes, window controls, `sizeRestrictions.minimumSize` as a best-effort preference, "build adaptive UIs rather than locking orientation"
+- [`horizontalSizeClass`](https://developer.apple.com/documentation/swiftui/environmentvalues/horizontalsizeclass) · [`onGeometryChange(for:of:action:)`](https://developer.apple.com/documentation/swiftui/view/ongeometrychange(for:of:action:)) · [`containerRelativeFrame(_:alignment:_:)`](https://developer.apple.com/documentation/swiftui/view/containerrelativeframe(_:alignment:_:))
+- [Building and customizing the menu bar with SwiftUI](https://developer.apple.com/documentation/SwiftUI/Building-and-customizing-the-menu-bar-with-SwiftUI) · [WWDC25 256 — What's new in SwiftUI](https://developer.apple.com/videos/play/wwdc2025/256/) · [`keyboardShortcut`](https://developer.apple.com/documentation/swiftui/keyboardshortcut)
+- [`NavigationSplitView`](https://developer.apple.com/documentation/swiftui/navigationsplitview) · [`TabViewStyle.sidebarAdaptable`](https://developer.apple.com/documentation/SwiftUI/TabViewStyle/sidebarAdaptable) · [WWDC24 10147 — Elevate your tab and sidebar experience in iPadOS](https://developer.apple.com/videos/play/wwdc2024/10147/)
+- [Adopting Liquid Glass](https://developer.apple.com/documentation/TechnologyOverviews/adopting-liquid-glass) · [WWDC25 323 — Build a SwiftUI app with the new design](https://developer.apple.com/videos/play/wwdc2025/323/) — inset glass sidebars with content flowing behind them
+- [What's new in iPadOS 27](https://developer.apple.com/ipados/whats-new/) — platform/SwiftUI additions
+- [MacRumors — iPadOS 26 multitasking](https://www.macrumors.com/2025/09/17/ipados-26-multitasking-tips-and-tricks/) — the consumer-facing shape of the change (Full-Screen Apps / Windowed Apps / Stage Manager; Split Screen and Slide Over folded into windowing). Secondary source, used only where Apple documents the API rather than the mode names
+
+### 5.4 Programmatic checks run after the pass
+
+A checker over `00`–`08` (10 files) asserts, and passes on, all of:
+
+1. No occurrence of the retired id, of "iPhone only" / "iPhone-only", of `TARGETED_DEVICE_FAMILY = 1`
+   without `,2`, of "no iPad"/"No iPad", or of "out of scope" on a line mentioning iPad or split view
+   (the three-or-more-pane exclusions are the only sanctioned exception and are matched explicitly).
+2. Every `[DECISION: <id>]` tag names a numbered entry in `08` §1 (now #1–#100, contiguous and
+   duplicate-free), a bug id in §2, or a drift row `D1`–`D20` in §3.
+3. Every `[GATE: gate.*]` tag names one of the eleven canonical gate ids.
+4. All 305 `` `NN` §N.N `` cross-references between `02`–`06` resolve to a real heading in the target
+   document — including every new pointer from `06`'s checklist into `04a` §3.5 and `04c` §17.1.
+5. Exactly one H1 per file.
+6. Every Markdown table has a consistent column count across its header, delimiter and body rows.
+7. Positive assertions that each new section, key, setting row, plist key and decision id is present.
+
+The checker was verified against deliberately injected faults (a dangling `§99.9` reference, a second
+H1, a ragged table row) before being run for real.

@@ -1,8 +1,8 @@
 # APPNAME — native SwiftUI rewrite plan
 
 This folder is the complete, self-contained plan for rebuilding this app as a
-**native SwiftUI iPhone app in a new repository that reuses none of this
-repository's code**. It was produced on 2026-09-17 by a survey swarm that read
+**native SwiftUI iPhone and iPad app in a new repository that reuses none of
+this repository's code**. It was produced on 2026-09-17 by a survey swarm that read
 the entire current codebase and the current Apple platform documentation, and it
 is written so that an engineer or an AI coding agent can build the new app in
 one pass from these documents alone, without consulting this codebase.
@@ -20,7 +20,7 @@ one pass from these documents alone, without consulting this codebase.
 | 05 | `05-monetization.md` | StoreKit 2 subscription design, free/paid feature matrix, entitlement seam, paywall, compliance | Phase 8 |
 | 06 | `06-build-plan-and-acceptance.md` | New-repo bootstrap, CI, phased build order with gates, the full acceptance checklist, risks | Throughout |
 | 07 | `07-one-shot-prompt.md` | The prompt to hand a coding agent in the new empty repo | Kickoff |
-| 08 | `08-decisions-and-drift.md` | The decision register: 95 numbered decisions with the default the plan assumes, 16 original-app bugs fixed forward, 20 doc-vs-code drift rows | Before kickoff |
+| 08 | `08-decisions-and-drift.md` | The decision register: 100 numbered decisions with the default the plan assumes, 16 original-app bugs fixed forward, 20 doc-vs-code drift rows | Before kickoff |
 | spec/01–09 | `spec/*.md` | The raw behavioral surveys of the current app, area by area (~88k words). Normative where 02–05 are silent. | As reference |
 | spec/10 | `spec/10-swiftui-2026-baseline.md` | Verified platform baseline as of 2026-09-17 with citations | Before 02 |
 
@@ -37,8 +37,13 @@ one pass from these documents alone, without consulting this codebase.
    AI filters, and push notifications. The owner removed all of those on
    purpose. The surveys record every such doc/code drift; `08-decisions-and-drift.md`
    lists each one with the default the plan assumes.
-3. **iPhone only.** iPad split view is deferred. The architecture keeps the door
-   open; no v1 screen implements it.
+3. **iPhone and iPad.** `TARGETED_DEVICE_FAMILY = 1,2`. The original's iPad
+   split view — feed on the left, the tapped post's comments in a right-hand
+   pane, per feed screen, with Close and Fullscreen controls — is **in scope for
+   v1** and is specified with the same rigour as every other screen:
+   `02-architecture.md` §5.15 for the shell contract and `04a-feeds-posts-comments.md`
+   §3.5 for the feed-side behaviour. iPhone stays portrait-only; iPad supports all
+   four orientations. Split view is structural navigation and is never gated.
 4. **Latest platform, verified.** Deployment floor iOS 26.0, built with the
    iOS 27 SDK in Xcode 27 with Swift 6.4, Liquid Glass throughout, Observation,
    approachable concurrency with MainActor default isolation, Swift Testing,
@@ -59,14 +64,15 @@ one pass from these documents alone, without consulting this codebase.
    (listed in `08` §2) are not reproduced unless the owner says otherwise.
 8. **One vocabulary.** Every `[GATE: gate.*]` tag names one of the eleven gate ids in
    `05` §4, and every `[DECISION: <id>]` tag names a numbered entry in `08` §1
-   (#1–#95), a bug id in `08` §2, or a drift row `D1`–`D20` in `08` §3. There are
+   (#1–#100), a bug id in `08` §2, or a drift row `D1`–`D20` in `08` §3. There are
    no aliases and no placeholder tags anywhere in the set.
 
 ## Owner decisions already made
 
 | Decision | Value |
 |----------|-------|
-| Platform | iPhone, iOS 26.0+, SwiftUI only, no UIKit view controllers except where SwiftUI has no equivalent (documented in 02) |
+| Platform | iPhone **and iPad**, iOS/iPadOS 26.0+, SwiftUI only, no UIKit view controllers except where SwiftUI has no equivalent (documented in 02) |
+| iPad split view | **In scope for v1**, at full parity with the original (`02` §5.15, `04a` §3.5, `04c` §17.1). Not `NavigationSplitView` — see `02` §5.15 |
 | Code reuse | None |
 | Pro / AI / push from the original | Not carried over |
 | Monetization | Subscription, about $1/month, most features paid |
