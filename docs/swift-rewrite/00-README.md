@@ -29,8 +29,9 @@ one pass from these documents alone, without consulting this codebase.
 1. **Clean room.** Behavior is reproduced; nothing else is. No source code,
    artwork, app icons, fonts, or documentation prose from this repository may
    be copied into the new one. This repository is AGPL-3.0-licensed fork
-   material; the new app is the owner's own work. UI labels and error strings
-   that the surveys quote are functional copy and may match.
+   material; the new app is the owner's own work. All user-visible text is
+   written fresh; short functional labels such as "Upvote" will inevitably
+   coincide, and that is fine, but no sentence is copied.
 2. **Fidelity target is the current code, not the current docs.** The in-app
    guide and `documentation/` describe a paid "Hydra Pro" tier, AI summaries,
    AI filters, and push notifications. The owner removed all of those on
