@@ -1,8 +1,8 @@
 # 02 — Architecture
 
 **Project:** `APPNAME` — a native SwiftUI iPhone Reddit client, written from scratch.
-**Status:** design document. Normative for the build plan (`06-build-plan.md`) and the one-shot prompt (`07-one-shot-prompt.md`).
-**Companion documents:** `03-data-and-networking.md` (wire contract, domain model, persistence DDL), `04a-feeds-posts-comments.md` / `04b-media.md` / `04c-accounts-inbox-search-subs-settings.md` (per-screen feature specs), `05-monetization.md`, `06-build-plan.md`, `07-one-shot-prompt.md`, `08-decisions-and-drift.md`.
+**Status:** design document. Normative for the build plan (`06-build-plan-and-acceptance.md`) and the one-shot prompt (`07-one-shot-prompt.md`).
+**Companion documents:** `03-data-and-networking.md` (wire contract, domain model, persistence DDL), `04a-feeds-posts-comments.md` / `04b-media.md` / `04c-accounts-inbox-search-subs-settings.md` (per-screen feature specs), `05-monetization.md`, `06-build-plan-and-acceptance.md`, `07-one-shot-prompt.md`, `08-decisions-and-drift.md`.
 
 ---
 
@@ -112,7 +112,7 @@ TARGETED_DEVICE_FAMILY                 = 1
 
 | Option | Verdict | Reasoning |
 |---|---|---|
-| Plain `.xcodeproj` | **Chosen** | The merge-conflict pain that motivates generators is proportional to how much lives in the project file. With ~15 local SPM packages and an app target containing under 20 files, the `.pbxproj` barely changes. No extra toolchain, no generation step in CI, no risk of a generator lagging Xcode 27. |
+| Plain `.xcodeproj` | **Chosen** | The merge-conflict pain that motivates generators is proportional to how much lives in the project file. With the **18** local SPM packages of §2.2/§3.1 and an app target containing under 20 files, the `.pbxproj` barely changes. No extra toolchain, no generation step in CI, no risk of a generator lagging Xcode 27. |
 | XcodeGen | Rejected | Buys merge-friendliness we get for free by pushing code into packages, and adds a generation step every contributor and every CI job must run. |
 | Tuist | Rejected for v1 | Genuinely good at this scale and above, but it is a second build system to learn and to keep current with Xcode 27, and its caching pays off with large teams. Revisit if the app target grows past ~5 targets or the team past ~4 engineers. |
 | JSON `.xcproj` (Xcode 27.2 beta) | **Watch, do not adopt** | It is exactly what we want — readable, merge-friendly, agent-editable — but it is beta in a beta Xcode, and 27.1 has not shipped. Migration is a file-format conversion in the file inspector, so adopting later is cheap. Recorded as `xcproj-format` in `08`. |
@@ -152,6 +152,8 @@ APPNAME/
 
 Each directory under `Packages/` is its own `Package.swift` with `swift-tools-version: 6.4` (which enables Swift Testing's Complete XCTest interop mode). The app target links the feature packages; feature packages link the infrastructure packages.
 
+**This layout is the canonical package list.** There are exactly **18** local Swift packages — 9 infrastructure (`AppCore`, `RedditAPI`, `Persistence`, `RedditMarkdown`, `Theming`, `Entitlements`, `MediaKit`, `AppRouting`, `DesignSystem`) and 9 feature packages under `Packages/Features/` (`FeedFeature`, `PostDetailFeature`, `ComposerFeature`, `MediaFeature`, `AccountsFeature`, `InboxFeature`, `SearchFeature`, `SubredditsFeature`, `SettingsFeature`) — plus two non-package targets, the app shell and `ShareExtension`. `06-build-plan-and-acceptance.md` §1.2 and §6 use these names; nothing else does.
+
 ---
 
 ## 3. Module map
@@ -165,7 +167,7 @@ Each directory under `Packages/` is its own `Package.swift` with `swift-tools-ve
 | 3 | **Persistence** | GRDB database, migrations, six table stores, `SettingsStore` (`UserDefaults`-backed `@Observable`), `KeychainStore`, maintenance job. | AppCore, GRDB | SwiftUI (except a tiny `Environment` shim), RedditAPI, any Feature |
 | 4 | **RedditMarkdown** | Reddit-flavored markdown → `MarkdownDocument` AST; SwiftUI block renderer; link-tap routing protocol; plain-text extraction (for filters, accessibility, "copy text"). | AppCore, Theming, swift-cmark-gfm | RedditAPI, Persistence |
 | 5 | **Theming** | `Theme` model (19 colours + mode flags), `ThemeStore` `@Observable`, environment plumbing, theme import/export codec, Liquid Glass tint rules. | AppCore, Persistence (custom theme table) | RedditAPI, Features |
-| 6 | **Entitlements** | `Entitlements` `@Observable`, `Feature` gating matrix, `EntitlementProvider` protocol, `.requires(_:)` view modifier, paywall presentation hook. Ships a `FreeEverythingProvider` so the app is fully functional before `05` lands StoreKit. | AppCore, Theming (for the lock chrome) | RedditAPI, Features |
+| 6 | **Entitlements** | `Entitlements` `@Observable`, the `Feature.isGated` table, `EntitlementProvider` protocol, the `requiresEntitlement(_:style:)` view modifier, `PaywallPresenter`, `PaywallSheet` / `PlusSettingsScreen` / `PlusBadge` / `FeatureLockView`. Ships a `FreeEverythingProvider` so the app is fully functional before `05` lands StoreKit. | AppCore, Theming (for the lock chrome), StoreKit | RedditAPI, Features |
 | 7 | **MediaKit** | Image pipeline, `PlayerRegistry` actor, focus engine, video source ladder + fallbacks + watchdog, playback-position memory, Live Text bridge, save/share. Resolution of "lazy" sources is injected via a protocol. | AppCore, Theming, DesignSystem | RedditAPI (uses `VideoSourceResolving` protocol instead), Persistence |
 | 8 | **AppRouting** | `Route` enum, `Router` per tab, `RouteResolver` (link → route), deep-link/clipboard/share-extension intake, `ModalCoordinator` (single slot + startup priority queue), forward-navigation ("stack future") store. | AppCore | SwiftUI feature views, RedditAPI |
 | 9 | **DesignSystem** | Theme-aware primitives: `SwipeActionsRow` (four-band), `ThemedList`, `SectionHeader`, `IconButton`, `TextButton`, `PulseHighlight`, `AlphabetScroller`, `ScrollToNextButton`, `ThemedRefreshable`, haptics facade, context-menu helpers, `EmptyStateView`, `AccessFailureView`. | AppCore, Theming, Entitlements | RedditAPI, Persistence, Features |
@@ -524,7 +526,7 @@ Two mechanisms, exactly as the original, because conflating them causes the "rev
 
 Use `requestReview` from `StoreKit`'s SwiftUI environment rather than an `itms-apps://` deep link, so the OS's own throttling applies; keep the custom pre-prompt card that gates it, which is why the flag is set on every exit path.
 
-The "join our subreddit" nag from the original is a **separate**, continuously-evaluated overlay with a 365-day per-account cooldown; whether `APPNAME` ships an equivalent is a product question for `05`/`08` (`subscribe-nag-removed`). The architecture supports it as a third `ModalCoordinator` channel (`ambientPrompt`) that never collides with (a) or (b).
+The "join our subreddit" nag from the original — a separate, continuously-evaluated overlay with a 365-day per-account cooldown — is **not reproduced** (`subscribe-nag-removed` in `08`). The architecture would support it as a third `ModalCoordinator` channel (`ambientPrompt`) that never collides with (a) or (b), but no such channel ships in v1.
 
 ### 5.10 Liquid Glass adoption rules
 
@@ -565,7 +567,7 @@ One facade, three semantic calls, all expressed as `sensoryFeedback` modifiers d
 
 ### 5.14 One-time alerts
 
-`OneTimeAlert(key:)` reads a `UserDefaults` bool; if unset, presents a plain alert and sets the flag unconditionally — dismissal alone suppresses it forever (`spec/09 §7.6`). Keys used at shell level: `quickSearchTip`, `quickAccountSwapTip`, `galleryModeHint`.
+`OneTimeAlert(key:)` reads a `UserDefaults` bool; if unset, presents a plain alert and sets the flag unconditionally — dismissal alone suppresses it forever (`spec/09 §7.6`). Keys used at shell level, spelled as `03 §8.1` declares them: `flags.quickSearchTip`, `flags.quickAccountSwapTip`, `flags.galleryModeOffered`. The gallery-mode flag is the one case the original wrote only on acceptance; here it is written on either answer (`gallery-offer-cancel` in `08`).
 
 ---
 
@@ -744,12 +746,13 @@ Stored in the `custom_themes` table keyed by unique `name`, value = JSON of a `C
 
 The original shares themes by embedding a sentinel plus one-level JSON inside Reddit markdown, detected at render time and surfaced as an inline importable chip.
 
-**Decision (recorded as `theme-import-format-compat` in `08`):**
+**Decision (recorded as `theme-import-format-compat` in `08`):** a **new sentinel and a new format**; we neither emit nor import the original's.
 
-- **Import: accept both sentinels.** `::hydra-theme-import::{…}` (community compatibility) and `::appname-theme-import::{…}` (ours). The payload schema is identical because our 19 tokens are the same 19 tokens.
-- **Export: emit our own sentinel by default**, with a Settings toggle "Also share in legacy format" (default **on** while the shared-theme community is on the original's subreddit). When on, the composer inserts both sentinels on consecutive lines; each app strips the one it recognises and, because the regex is anchored to its own prefix, ignores the other.
-- **Built-in theme catalogue is new.** We ship our own named themes with our own palettes; copying the original's named catalogue would be copying data whose names carry third-party trademarks. To keep `extends` resolvable, `ThemeStore` maintains a **compatibility alias map** from the twelve legacy base keys to the nearest `APPNAME` base theme, applied only when resolving an imported `extends`. Recorded as `theme-count` in `08`.
-- **Parsing is defensive.** A malformed payload is stripped from the rendered text and silently dropped, exactly as the original; the chip simply does not appear. Payloads containing nested braces are rejected by the one-level regex — we keep that limitation so both apps agree on what is a valid share.
+- **Format.** `::appname-theme::<base64url(JSON of CustomTheme)>`, newline-wrapped. Base64url-encoding the payload means no brace, quote or newline ever reaches the markdown, so the original's one-level-braces limitation disappears: nested objects and braces inside a theme name are fine.
+- **We do not read `::hydra-theme-import::`.** Wire compatibility would mean adopting a format defined by an AGPL project and interoperating with its community; a fresh format keeps the clean-room boundary clean. There is therefore no legacy-format import path, no dual-emit toggle and no "Also share in legacy format" setting.
+- **Built-in theme catalogue is new.** We ship 6–8 new themes with our own palettes; copying the original's named catalogue would be copying data whose names carry third-party associations. An imported `extends` that names no theme in our catalogue falls back to the default theme rather than being rejected — there is no legacy alias map, because there are no legacy payloads to resolve. Recorded as `theme-count` in `08`.
+- **Parsing is defensive.** A payload that fails base64url decoding, fails JSON decoding, or decodes to something that is not a `CustomTheme` is stripped from the rendered text and silently dropped; the chip simply does not appear.
+- **Scanning is brace-balanced, not regex.** Detection finds the sentinel and consumes the following base64url run to the next whitespace; the HTML-era single-level `{…}` regex is not reproduced.
 
 ### 8.6 Liquid Glass interplay
 
@@ -962,7 +965,7 @@ Behaviors that are architecture, not screen detail (the rest is in `04b`): tap c
 
 ### 10.6 Gallery mode
 
-Two-column masonry grid over the same feed pipeline plus a "has media" filter, cells sized by the parent post's aspect ratio. SwiftUI has no masonry primitive; we implement `MasonryLayout: Layout` (shortest-column placement) inside a `LazyVStack` of row chunks so virtualization still applies. Video cells in gallery mode are **not** focus-managed in the original — every visible cell plays. That is a decoder-pressure risk at cap 12; we keep the behavior but apply the focus engine's *candidate* set as a ceiling of 4 simultaneous gallery players. Recorded as `gallery-video-cap` in `08`. NSFW/spoiler blur, absent from the original's gallery grid, **is applied** in ours; recorded as `gallery-mode-no-blur` in `08`.
+Two-column masonry grid over the same feed pipeline plus a "has media" filter, cells sized by the parent post's aspect ratio. SwiftUI has no masonry primitive; we implement `MasonryLayout: Layout` (shortest-column placement) inside a `LazyVStack` of row chunks so virtualization still applies. Video cells in gallery mode are **not** focus-managed in the original — every visible cell plays. That is a decoder-pressure risk at cap 12; we keep the behavior but apply the focus engine's *candidate* set as a ceiling of 4 simultaneous gallery players. Recorded as `gallery-video-cap` in `08`. NSFW/spoiler blur, absent from the original's gallery grid, **is applied** in ours; recorded as `gallery-mode-no-blur` in `08`. The 100-item free limit is a presentation of `gate.galleryMode` (`05 §4`), rendered as an inline footer row, not a hard stop.
 
 ### 10.7 Live Text
 
@@ -1021,7 +1024,7 @@ One `MaintenanceJob`, run once per cold launch after first paint, in this order:
 - **Enum-valued settings are `RawRepresentable` enums**, not strings. Unknown stored values fall back to the default instead of producing a broken UI.
 - **Dynamic keys** (per-subreddit remembered sort, per-account favorites, per-account nag timestamps) use a namespaced prefix and a typed accessor pair, plus a `removeAll(prefix:)` helper for the "clear remembered sorts" action.
 - **No schema migration exists** for settings, matching the original: every read is `stored ?? default`. If a key's meaning ever changes we rename the key rather than migrate.
-- Settings that require a restart to take effect (error reporting, custom server, mark-seen-on-scroll) show the same restart alert. Architecturally we could make them all live; we deliberately do not change which ones warn, except that **mark-seen-on-scroll becomes live** because our implementation reads it reactively. Recorded as `mark-seen-live` in `08`.
+- **No setting requires a restart.** The original warned on three (error reporting, custom server, mark-seen-on-scroll); the custom-server setting does not exist here (`self-hosted-server-row`), and the other two are read reactively, so both take effect immediately and neither shows an alert. Recorded as `mark-seen-live` and `error-reporting-default` in `08`. The single exception is not a setting at all: clearing the **video** cache is deferred to the next launch because the cache cannot be cleared while a player exists (§10.9).
 
 ### 11.5 Keychain
 
@@ -1062,69 +1065,97 @@ Detail is normative in `03`; the architectural shape is:
 
 ### 13.1 The three pieces
 
+`05-monetization.md` §4 and §5 own the **names** — the eleven gate ids, the `Feature` cases they map
+to, and the `Entitlements` API. This section only records where they live and what the rest of the app
+is allowed to see. Where the two documents ever disagree about a name, `05` wins.
+
 ```swift
-// AppCore — a value, so it can be referenced from anywhere without a dependency on Entitlements
+// AppCore — a value, so it can be referenced from anywhere without a dependency on Entitlements.
+// Exactly the eleven cases of 05 §5.9; adding a twelfth is a product decision, not a code change.
 public enum Feature: String, CaseIterable, Sendable, Codable {
-    case customThemes, themeMaker, alternateAppIcons
-    case galleryMode, multiAccount, statsDetail
-    case advancedFilters, perSubredditSort, savedSearches
-    case iCloudBackup                     // placeholder; `05` decides the real set
+    case multiAccount, customThemes, gestures, filters, galleryMode
+    case downloads, stats, appIcons, sortMemory, videoAutoplay, compose
 }
 
 // Entitlements package
-public enum EntitlementState: Sendable { case locked, unlocked, grace(until: Date) }
+public enum EntitlementState: Sendable { case locked, unlocked }
 
 public protocol EntitlementProvider: Sendable {
     var statePublisher: AsyncStream<SubscriptionStatus> { get }
     func refresh() async
-    func purchase() async throws
+    func purchase(_ product: Product) async throws -> PurchaseOutcome
     func restore() async throws
 }
 
 @MainActor @Observable
 public final class Entitlements {
-    public private(set) var subscription: SubscriptionStatus      // .none | .active(expiry) | .grace(until) | .expired
-    public private(set) var matrix: FeatureMatrix                 // data, see below
-    public func state(of feature: Feature) -> EntitlementState
+    public private(set) var isSubscribed: Bool
+    public private(set) var state: State   // .unknown | .subscribed | .notSubscribed
+                                           // | .inGracePeriod | .inBillingRetry  (05 §5.2)
     public func isUnlocked(_ feature: Feature) -> Bool
-    public func requestUnlock(_ feature: Feature, reason: PaywallReason)   // presents the paywall
+    public func refresh() async
+    public func purchase(_ product: Product) async throws -> PurchaseOutcome
+    public func restore() async throws
 }
 ```
 
-### 13.2 The matrix is data
+`isUnlocked(_:)` is the only thing the rest of the app calls. It is `true` when the subscription is
+active (including grace period and billing retry) **or** when that feature's gate is configured off.
+
+### 13.2 The gate configuration is data, and it is small
 
 ```swift
-public struct FeatureMatrix: Codable, Sendable {
-    public struct Rule: Codable, Sendable {
-        public var requiresSubscription: Bool
-        public var freeAllowance: Int?      // e.g. "2 custom themes free"
-        public var trial: TrialPolicy?      // e.g. 5-minute preview
-    }
-    public var rules: [Feature: Rule]
+public extension Feature {
+    /// The OWNER switches of `05` §4: `.videoAutoplay` and `.compose` are `false` (free) by default;
+    /// every other case is `true`. One table, one line to flip.
+    static let isGated: [Feature: Bool]
+    var title: String { get }      // lock-screen / paywall highlight
+    var blurb: String { get }      // one sentence
+    var symbol: String { get }     // SF Symbol
 }
 ```
 
-The matrix is loaded from a bundled JSON resource (`FeatureMatrix.json`) with a code default as a fallback, and can later be overridden by a value fetched at launch if `05` wants server-side tuning. **No feature code ever contains the words "free" or "pro".** A feature asks `entitlements.isUnlocked(.themeMaker)` and nothing else.
+There is **no** `freeAllowance`, no server-tunable matrix JSON, and — emphatically — **no
+`TrialPolicy`**: timed previews of a paid feature that silently revert are forbidden outright by
+`05-monetization.md` §3.3, and the original's five-minute theme trial is exactly the dark pattern that
+rule exists to prevent. The one quantity that looks like an allowance, Gallery Mode's 100-item limit,
+is a property of that feature's lock presentation, not a generic mechanism.
+
+**No feature code ever contains the words "free" or "pro".** A feature asks
+`entitlements.isUnlocked(.customThemes)` and nothing else.
 
 ### 13.3 The gating modifier
 
 ```swift
 public extension View {
-    /// Renders the view, but intercepts interaction when the feature is locked,
-    /// overlaying the configured lock chrome and routing taps to the paywall.
-    func requires(_ feature: Feature, style: LockStyle = .overlay) -> some View
+    /// Renders the view, intercepts interaction when the feature is locked, applies the configured
+    /// lock chrome, and routes taps to the paywall through `PaywallPresenter`.
+    func requiresEntitlement(_ feature: Feature,
+                             style: GateStyle = .interceptTap) -> some View
 }
 ```
 
-`LockStyle` covers the three presentations we need: `.overlay` (visible but locked, with a badge — the original's own docs describe visible-but-disabled as the house style), `.hidden` (not rendered at all), `.previewable(duration:)` (usable for N minutes, then reverts — the original's 5-minute theme preview). Which style a feature uses is part of the matrix, not the call site.
+`GateStyle` has the four cases of `05-monetization.md` §5.9 — `.interceptTap`, `.lockScreen`,
+`.inlineFooter`, `.passthrough` — and the style is chosen at the **call site**, because which
+presentation is right is a property of the surface, not of the feature. Note what is absent: there is
+no `.hidden` style. A gated affordance that disappears when locked is undiscoverable and therefore
+never converts, and `05` §5.9 forbids it.
+
 
 ### 13.4 Rules
 
 1. **The app is fully functional with `FreeEverythingProvider`.** Until `05` lands, the provider returns `.active(.distantFuture)`, so nothing is gated and nothing is blocked in development.
 2. **No feature package imports StoreKit.** Only the `Entitlements` package's `StoreKitProvider` does, and only the app target constructs it.
 3. **Gating is never security.** Nothing behind a gate is a secret; it is a product boundary.
-4. **Entitlement state is cached durably** (a Keychain-stored last-known-good status with an expiry) so a launch without network does not lock a paying user out.
-5. **Never gate anything the original shipped as free in a way that breaks existing behavior for a returning user** — that is a product rule for `05`, but the seam records it: `FeatureMatrix` carries a `grandfathered: Bool` per rule.
+4. **Entitlement state is cached durably** — a last-known-good snapshot with an expiry, plus a
+   16-day offline leeway matched to the configured billing grace period, so a launch without network
+   never locks a paying user out (`05` §5.5, `03 §7.4`).
+5. **Nothing is ever deleted on lapse.** Custom themes are kept and stay applied, filters are kept and
+   stop applying, extra accounts are kept and only the most recently used one can be switched to
+   (`05` §3.3). There is no grandfathering flag, because there is no prior paid tier and no existing
+   user to grandfather (`05` §6.6).
+6. **No gate sits between the user and content they have already entered.** A composer gate, if ever
+   enabled, checks when the editor opens, never on submit; drafts save regardless of entitlement.
 
 ---
 
@@ -1268,7 +1299,7 @@ XCTest + `XCTMetric`: cold launch to first frame; scroll a 500-post feed; open a
 
 ### 17.3 Crash reporting
 
-sentry-cocoa, initialised before anything renders, `enabled` iff not a debug build **and** the `allowErrorReporting` setting is not explicitly false (default true — opt-out, matching the original). App-hang tracking is **off** (it misfires against system permission prompts). User context is the Reddit username on login, cleared on logout. Breadcrumbs: route pushes, network failures, JSON decode failures with the response's first 512 bytes, player evictions. The privacy copy in Settings must state exactly what is sent.
+sentry-cocoa, initialised before anything renders, `enabled` iff not a debug build **and** the `privacy.errorReporting` setting is not false (default true — opt-out, matching the original). The toggle is read **reactively**, so turning it off disables the reporter at once with no restart (`error-reporting-default` in `08`). App-hang tracking is **off** (it misfires against system permission prompts). User context is the Reddit username on login, cleared on logout. Breadcrumbs: route pushes, network failures, JSON decode failures with the response's first 512 bytes, player evictions. The privacy copy in Settings must state exactly what is sent.
 
 ---
 
@@ -1329,7 +1360,7 @@ sentry-cocoa, initialised before anything renders, `enabled` iff not a debug bui
 | **Now Playing (iOS 27 framework)** | Player ownership is centralised, so a `MediaSessionRepresentable` has exactly one place to live |
 | **Navigation state persistence** | `Route` is `Codable` |
 | **Localization** | String Catalog from day one |
-| **Server-tuned feature matrix** | `FeatureMatrix` already loads from data |
+| **Server-tuned gate configuration** | `Feature.isGated` is a single table (§13.2); sourcing it from data instead of a literal is a one-file change |
 
 ---
 
@@ -1383,27 +1414,30 @@ Every item below is resolved in `08-decisions-and-drift.md`. Short names are the
 |---|---|
 | `min-ios` | Deployment floor of iOS 26.0 with an iOS 27 SDK build (§1.1) |
 | `app-name` / `bundle-id` | The `APPNAME` / `com.OWNER.appname` / `appname://` placeholders used throughout |
-| `snudown-renderer` / `swift-markdown` | Parse markdown source (chosen) rather than rendering Reddit's `body_html` (§9.1) |
-| `raw-json-param` | Send `raw_json=1` and delete all client-side entity decoding (§9.1, `03 §1.3`) |
+| `snudown-renderer` | Parse markdown source (chosen) rather than rendering Reddit's `body_html`, with one pipeline for fetched content and composer previews (§9.1) |
+| `raw-json-param` | Send `raw_json=1` on every read and delete all client-side entity decoding, `hls_url` included (§9.1, `03 §1.3`) |
 | `comment-tree-renderer` | `List` for the flattened comment tree, `LazyVStack` for the feed (§18.2) |
 | `nested-list-render-bug` | Correct nested-list numbering falls out of the AST (§9.2) |
 | `giant-emoji-bug` | Clamp emoji-only bodies to body size (§9.4) |
-| `theme-import-format-compat` | Accept the legacy import sentinel; emit ours, optionally both (§8.5) |
-| `theme-count` | Ship a new built-in theme catalogue plus an alias map for imported `extends` (§8.5) |
+| `theme-import-format-compat` | A new `::appname-theme::` base64url sentinel; the legacy format is neither emitted nor imported (§8.5) |
+| `theme-count` | Ship 6–8 new built-in themes with new palettes and a new comment-depth cycle (§8.5) |
 | `swipe-forward-gesture` | Keep the right-edge forward swipe; resolve its precedence against "swipe anywhere to navigate" (§5.8) |
-| `universal-links-absent` / `apple-app-site-association` | Register Associated Domains, or stay scheme-only (§5.7) |
+| `universal-links-absent` | Scheme-only: we cannot serve an `apple-app-site-association` file for `reddit.com`, so Associated Domains are not registered in v1 (§5.7) |
 | `postdetail-vote-not-reflected` | Propagate detail-screen votes back to the feed via the mutation bus (§6.3) |
 | `feed-focus-playback` | Focused-only playback, with geometry-based centre selection instead of the index midpoint (§10.4) |
 | `shared-player-registry` | One player per video, ref-counted, deferred release, cap 12 (§10.3) |
 | `gallery-mode-no-blur` | Apply NSFW/spoiler blur in gallery mode (the original does not) (§10.6) |
+| `no-video-longpress-menu` | Video tiles gain the Share / Save / Copy Link menu the original lacks (`04b` §7.4) |
+| `prefs-force-over18-on-login` | The silent `old.reddit.com/prefs` rewrite is dropped; a one-time banner replaces it (`03 §5.7`) |
+| `cookie-expiry-rewrite` | Rewrite the session cookie's expiry once per app session per account, not after every response (`03 §5.4`) |
 | `live-text-dead-setting` | Actually implement the Live Text setting the original never wired up (§10.7) |
 | `background-audio-pip` | Picture-in-Picture and background audio remain out of scope; the background mode is declared so it stays cheap (§14.7, §19) |
 | `push-removed` | No push; foreground poll plus badge only (§14.1) |
 | `unpruned-tables` | Leave `custom_themes`, `counter_stats` and `subreddit_visits` unpruned (§11.3) |
 | `guide-included-or-not` / `guide-prose-rewrite` | Ship the guide as bundled Markdown with on-device FTS5 search and new prose (§11.7) |
 | `self-hosted-server-row` | No first-party backend, so the self-hosted-server settings section disappears (§11.7, `03 §9.6`) |
-| `subscribe-nag-removed` | Does `APPNAME` ship an equivalent of the "join our subreddit" prompt? (§5.9) |
-| `poll-voting-stub` | Build real poll voting, or render read-only with results (§ `03 §4.13`) |
+| `subscribe-nag-removed` | No "join our subreddit" prompt of any kind ships (§5.9) |
+| `poll-voting-stub` | Polls render read-only with results; the fake Vote button is removed (`03 §4.13`) |
 | `pro-removed` / `ai-removed` | The paid tier, AI summaries and AI filters are out of scope; monetization is new work in `05` |
 | `gate-matrix` / `monetization-model` | The entitlement seam in §13 is what `05` plugs into |
 | `share-extension` / `shortcuts-intent` | Share extension plus an App Intent replacing the installed-Shortcut flow (§14.3, §14.4) |
@@ -1412,23 +1446,25 @@ Every item below is resolved in `08-decisions-and-drift.md`. Short names are the
 | `error-reporting-default` | Same setting's default (§17.3) |
 | `ipad-split-view-deferred` | iPad and split view deferred; §19 lists what keeps the door open |
 | `android-out-of-scope` | Out of scope |
-| `nav-bar-tap-guard` / `react-native-screens` | The nav-bar-vs-scroll-to-top gesture hazard, verified by a UI test rather than a patch (§18.4) |
+| `nav-bar-tap-guard` | The nav-bar-vs-scroll-to-top gesture hazard, verified by a UI test rather than pre-solved with a patch (§18.4) |
 | `startup-modals` | The single-slot modal plus priority-ordered startup queue (§5.9) |
 | `scroll-to-next-button` | The repositionable floating comment-nav button lives in `DesignSystem` (§3.1) |
-| `stats-obfuscation` | Stats are unobfuscated for everyone unless `05` says otherwise |
+| `stats-obfuscation` | Stats sit behind `gate.stats` with an honest locked screen; no fake asterisks, and counters keep incrementing while locked |
 
-### 21.2 New items raised by this document
+### 21.2 Items first raised by this document
 
-| Short name | Question |
+All of these now have numbered entries in `08-decisions-and-drift.md` §1.4; the ids are canonical.
+
+| Short name | What this document needs from it |
 |---|---|
-| `xcproj-format` **(new)** | Adopt the JSON `.xcproj` format once it ships GA? (§2.1) |
-| `persistence-wrapper` **(new)** | GRDB directly, or SQLiteData for `@Query`-like ergonomics over the same schema? (§3.4) |
-| `superscript-baseline` **(new)** | Render true superscript rather than merely-smaller text (§9.4) |
-| `quote-first-line` **(new)** | Fix the composer's quote-on-first-line no-op (§9.6) |
-| `tab-hide-on-scroll` **(new)** | Use the system `tabBarMinimizeBehavior` instead of the bespoke translate animation (§5.4) |
-| `tab-longpress-mechanism` **(new)** | Overlay gesture vs UIKit tab-bar interop for tab long-press (§5.4) |
-| `gallery-video-cap` **(new)** | Cap simultaneous gallery-grid players at 4 (§10.6) |
-| `background-inbox-refresh` **(new)** | Add a `BGAppRefreshTask` so the badge updates while backgrounded? (§14.1) |
-| `mark-seen-live` **(new)** | Make "mark as seen on scroll" take effect without a restart (§11.4) |
-| `op-mod-badges` **(new)** | Add text badges alongside OP/moderator colour coding, since colour alone is inaccessible (§15.1) |
-| `warnings-as-errors` **(new)** | Confirm warnings-as-errors in every configuration, with expiring exemptions (§1.4) |
+| `xcproj-format` | Stay on the classic `.pbxproj`; revisit the JSON `.xcproj` format once it ships GA (§2.1) |
+| `persistence-wrapper` | GRDB directly, with SQLiteData an acceptable substitute over the same schema (§3.4) |
+| `superscript-baseline` | Render true superscript with a real baseline offset rather than merely-smaller text (§9.4) |
+| `quote-first-line` | Fix the composer's quote-on-first-line no-op (§9.6) |
+| `tab-hide-on-scroll` | Use the system `tabBarMinimizeBehavior` instead of the bespoke translate animation (§5.4) |
+| `tab-longpress-mechanism` | Overlay gesture first, UIKit tab-bar interop as the fallback (§5.4) |
+| `gallery-video-cap` | Cap simultaneous gallery-grid players at 4 (§10.6) |
+| `background-inbox-refresh` | Not in v1; `InboxPoller.pollOnce()` is isolated so it stays cheap to add (§14.1) |
+| `mark-seen-live` | "Mark as seen on scroll" takes effect without a restart (§11.4) |
+| `op-mod-badges` | Add text badges alongside OP/moderator colour coding, since colour alone is inaccessible (§15.1) |
+| `warnings-as-errors` | Warnings are errors in every configuration, with expiring exemptions (§1.4) |

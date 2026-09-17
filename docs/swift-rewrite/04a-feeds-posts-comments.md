@@ -7,9 +7,9 @@ default `MainActor` isolation (off-main work marked `@concurrent`).
 `03-data-and-networking.md` (the `RedditAPI` actor, endpoint IDs, model types, GRDB schema),
 `04b-media.md` (fullscreen viewer, video, gallery mode, download/share),
 `04c-accounts-inbox-search-subs-settings.md` (accounts, inbox, search, sidebar, the settings tree),
-`05-monetization.md` (binds every `[GATE: …]` tag below to a paid/free matrix),
+`05-monetization.md` (binds every `[GATE: gate.*]` tag below to a paid/free matrix),
 `06-build-plan-and-acceptance.md`, `07-one-shot-prompt.md`, `08-decisions-and-drift.md` (resolves every
-`[DECISION: …]` tag below).
+`[DECISION: <id>]` tag below).
 
 This document is **clean-room**: it reproduces *behavior* observed in the original app's current
 code. UI label strings and error strings are quoted verbatim where the surveys quote them, because
@@ -18,7 +18,7 @@ they are functional copy. No original source, art or documentation prose is reus
 **Scope note — iPad.** iPhone only for v1. The original's iPad split-view feed/detail pane pairing is
 out of scope; do not build `NavigationSplitView`, the split-pane feed column, or the floating
 close/fullscreen pane controls. Every "tapping a post opens the detail pane" branch collapses to a
-plain `NavigationStack` push. `[DECISION: ipad-split-view]`
+plain `NavigationStack` push. `[DECISION: ipad-split-view-deferred]`
 
 ---
 
@@ -28,20 +28,20 @@ plain `NavigationStack` push. `[DECISION: ipad-split-view]`
 
 | Term | Meaning in this doc |
 |---|---|
-| `Route` | The per-tab typed navigation enum from `02-architecture.md`. Cases referenced here: `.subredditFeed(FeedTarget)`, `.postDetail(PostRef)`, `.user(UserTarget)`, `.subredditSearch(SubredditSearchTarget)`, `.sidebar(String)`, `.wiki(URL)`, `.gallery(FeedTarget)`, `.subreddits`, `.webview(URL)`, `.error(URL?)`. |
+| `Route` | The per-tab typed navigation enum from `02-architecture.md` §5.5. Cases referenced here, spelled exactly as that document declares them: `.subreddits`, `.home(FeedTarget)`, `.subredditFeed(FeedTarget)`, `.multiredditFeed(FeedTarget)`, `.userProfile(UserTarget)`, `.postDetail(PostTarget)`, `.subredditSearch(SubredditSearchTarget)`, `.sidebar(SubredditName)`, `.wiki(WikiTarget)`, `.gallery(FeedTarget)`, `.webView(WebViewTarget)`, `.unsupported(URL?)`. |
 | Store | An `@Observable final class` owned by a screen (or by the app, where noted), held in `@State` at the screen root and passed down by `@Environment` or plain property. |
 | `Settings` | The app-wide `@Observable` settings object with typed keys (`02-architecture.md`). Every key name in this document is the *typed key name*; persistence format is the architecture doc's concern. |
 | `Theme` | The `@Environment(\.theme)` value. Named color roles used below: `text`, `subtleText`, `verySubtleText`, `background`, `tint`, `divider`, `iconOrTextButton`, `iconPrimary`, `iconSecondary`, `buttonBg`, `buttonText`, `upvote`, `downvote`, `delete`, `showHide`, `reply`, `bookmark`, `share`, `collapse`, `moderator`, `commentDepthColors`. Full palettes: `04c` §Theme picker. |
 | `RedditAPI` | The `actor` from `03-data-and-networking.md`. Endpoint IDs (`P1`, `C1`, `V1`, …) are that document's IDs. |
-| `[GATE: x]` | A place where a paid/free boundary could be drawn. The call site must route through the `Entitlements` seam (`entitlements.isEnabled(.x)`); `05-monetization.md` decides the answer. Until then every gate returns `true`. |
-| `[DECISION: x]` | A place where the shipped code and the original's own documentation disagree, or where the code is a known stub/bug. This document specs the **code** behavior. `08-decisions-and-drift.md` lets the owner override. |
+| `[GATE: gate.*]` | A paid/free boundary. The call site routes through the `Entitlements` seam — `entitlements.isUnlocked(.<case>)`, or the `requiresEntitlement(_:style:)` view modifier. The gate ids are **exactly** the eleven `gate.*` identifiers defined in `05-monetization.md` §4; nothing else is a gate. Before Phase 8, `FreeEverythingProvider` makes every gate return `true` (`02-architecture.md` §13.4). |
+| `[DECISION: <id>]` | A place where the shipped code and the original's own documentation disagree, or where the code is a known stub/bug. The id is the canonical id of a numbered entry in `08-decisions-and-drift.md` §1/§2 (or of a row of its §3 drift table), and **that register's "Default (assumed)" column is what this document specs** — where the two ever read differently, the register wins. |
 
 ### 1.2 Products explicitly not built
 
 AI post summaries, AI comment summaries, AI ("smart") post filters, and push notifications are **not
 specified anywhere** in this document set. They were removed by the owner. The original's dead
 settings for them (`showPostSummary`, `showCommentSummary`) are not carried forward.
-`[DECISION: dead-setting-post-summary]` `[DECISION: dead-setting-comment-summary]`
+`[DECISION: post-summary-dead-setting]` `[DECISION: comment-summary-dead-setting]`
 
 A subscription paywall **entry point** does exist (a Settings row and a presentable
 `PaywallView` placeholder) — see `04c` §Settings root and `05-monetization.md`. Nothing in this
@@ -105,7 +105,7 @@ variants, in-subreddit search results, gallery mode — is backed by one generic
       `after = unfilteredCursor`. On the very first page for a feed, `after` is the **empty string**
       (feeds always send the parameter); for non-feed endpoints it is omitted.
    b. Set `unfilteredCursor` to the **last raw item's own fullname** — not the listing envelope's
-      `after`. `[DECISION: pagination-cursor-fullname]`
+      `after`. `[DECISION: pagination-cursor]`
    c. If the raw page is empty → `fullyLoaded = true`; stop the loop entirely.
    d. Apply, in order: de-duplication against already-loaded items (match on `id` **and** `kind`),
       then every rule in `filterRules`.
@@ -339,14 +339,15 @@ Compact mode renders **no** inline media, **no** self-text preview, and never mo
   current data mode is `.normal`. In low-data mode nothing at all is drawn — not a placeholder.
   If the subreddit has no icon URL, draw the generic snoo glyph instead of a remote image.
 - Sticky posts prefix the row with a pin glyph in `theme.moderator`.
-- Author name: bold, 14 pt, tappable → `Route.user(.overview(name:))`. Color `theme.moderator` when
+- Author name: bold, 14 pt, tappable → `Route.userProfile(.overview(name:))`. Color `theme.moderator` when
   `post.isModerator`, else `theme.subtleText`.
 - There is **no** lock or archived badge on the feed card. `post.interactionDisabledStatus` exists on
   the model but is surfaced only on the detail screen.
 
 ### 4.4 Title and flair chip
 
-- Title: `.lineLimit(settings.postTitleLength == 0 ? nil : settings.postTitleLength)`, default 2.
+- Title: `.lineLimit(settings.postTitleLength)`, range 1–10, default 2 (the setting has no `0` case;
+  `03` §8.1).
   17 pt normal / 16 pt compact, whitespace-trimmed.
 - Flair chip: shown only when `Settings.showPostFlair` **and** `post.postFlair != nil`. The model
   only populates `postFlair` when Reddit returned **both** `link_flair_template_id` and
@@ -373,7 +374,7 @@ images.
 
 Embedded-theme extraction: before rendering any body text, run `extractThemeTokens(from:)` (see
 `04c` §Theme share/import). Matched tokens are stripped from the displayed text and each yields a
-`ThemeImportChip` rendered inline. `[GATE: custom-themes]`
+`ThemeImportChip` rendered inline. `[GATE: gate.customThemes]`
 
 **NSFW / spoiler blur.** When `(settings.blurNSFW && post.isNSFW) || (settings.blurSpoilers &&
 post.isSpoiler)`, overlay the whole media block with a `.thickMaterial`-equivalent blur plus a
@@ -507,7 +508,7 @@ Both formatters must be reimplemented literally; `RelativeDateTimeFormatter` and
 
 Pluralization is `n == 1 ? "" : "s"`. Post/comment timestamps append `" ago"`; account/subreddit ages
 append `" old"`. **Known seam:** a 360–364-day-old item falls through to the years branch and reports
-`"0 years"`. Reproduce. `[DECISION: time-format-12mo-seam]`
+`"0 years"`. Reproduce. `[DECISION: time-format-parity]`
 
 `prettyNum(_:)` — strictly-greater-than thresholds, always exactly one decimal:
 `> 1e9 → "<x>B"`, `> 1e6 → "<x>M"`, `> 1e3 → "<x>K"`, else the raw integer with no grouping.
@@ -519,9 +520,9 @@ Exactly 1000 prints `"1000"`.
 
 | Target | Action | Marks seen? |
 |---|---|---|
-| Card body | Push `Route.postDetail(post.ref)` | **yes**, synchronously before navigating |
+| Card body | Push `Route.postDetail(PostTarget(post))` | **yes**, synchronously before navigating |
 | Subreddit icon / name | Push `Route.subredditFeed(.subreddit(name))` | no |
-| Author name | Push `Route.user(.overview(name))` | no |
+| Author name | Push `Route.userProfile(.overview(name))` | no |
 | Inline image / video / link | Open viewer or link, and `interactedWithPost()` | **yes** |
 | Poll option / Vote | Local only | no |
 | NSFW/spoiler cover | Reveal | no |
@@ -645,7 +646,7 @@ OpenGraph description.**
 Comment haystack: **comment text + author.**
 
 The rule is always in the chain; an empty list produces an empty trie that trivially passes. There is
-no separate on/off toggle. `[GATE: text-filters]`
+no separate on/off toggle. `[GATE: gate.filters]`
 
 ### 7.4 Voting
 
@@ -653,27 +654,31 @@ One shared call for posts and comments (endpoint V1).
 
 - If the requested direction equals the item's current vote, send direction `0` (retract). Tapping or
   swiping the same direction twice always undoes.
-- On success, apply exactly:
+- Apply exactly:
   `upvotes = upvotes − oldUserVote + newResult; userVote = newResult`.
   This single expression handles up→down, down→up and either→none correctly.
-- The update is applied **after** the call resolves. The original implements no optimistic-then-
-  rollback path; a failing request simply leaves the card unchanged. Reproduce this — but wrap the
-  call in a `do/catch` that swallows and logs rather than letting the error escape unhandled.
-  `[DECISION: vote-no-optimistic-rollback]`
+- **Fix forward: the update is optimistic.** Apply the new state immediately, issue V1, and on failure
+  **roll back** to the captured previous `(score, userVote)` and surface a transient, non-modal error
+  (a brief inline toast on the row). The original applied nothing until the call resolved, so a slow
+  network made every vote feel broken, and a failure was swallowed silently. No error ever escapes
+  unhandled. `[DECISION: vote-no-optimistic-rollback]`
 - A non-neutral outcome increments the local stat counter `post_upvotes` / `post_downvotes` (or
   `comment_upvotes` / `comment_downvotes`) by 1. Retracting decrements nothing.
 - Colors: `theme.upvote` / `theme.downvote` / `theme.subtleText`, computed once per render and
   applied to both the glyph and the number.
 
-**Known drift:** voting inside post details is not reflected back into the feed list behind it. The
-original tracks this as an open bug and explicitly keeps it out of scope. Ship the same behavior
-unless `08` says otherwise. `[DECISION: detail-vote-not-in-feed]`
+**Cross-surface propagation (fix forward).** Vote (and save) state is owned by a single store keyed
+by `Fullname`, and every surface observes it through the `FeedMutationBus` from
+`02-architecture.md` §6.3. A vote cast on the post-detail screen therefore **patches the feed row
+behind it** with no refetch. The original failed to do this and tracked it as an open bug.
+`[DECISION: postdetail-vote-not-reflected]`
 
 ### 7.5 Save
 
-Endpoint V2 with the item's fullname. Flip `saved` locally after the call resolves. There is no
-offline queue. A failure leaves the bookmark unchanged and must be caught and logged (the original
-leaks the rejection). `[DECISION: unhandled-save-failure]`
+Endpoint V2 with the item's fullname. **Fix forward, same shape as voting:** flip `saved`
+optimistically, issue the call, and **roll back with a transient error** on failure. There is no
+offline queue. The original leaked the rejection entirely.
+`[DECISION: unhandled-save-failure]`
 
 ### 7.6 Hiding posts (local only)
 
@@ -682,7 +687,9 @@ Hiding never calls Reddit's own hide endpoint. `hidePost(_:)` upserts a row keye
 hidden posts without a network call. `isHidden` treats an expired-but-not-yet-swept row as **not
 hidden**. Unhiding deletes the row outright. `maintainHiddenPosts()` hard-deletes expired rows at
 each cold start. The hidden filter rule is always in the chain, unconditionally. The management
-surface lives in Settings → Filters (`04c`).
+surface lives in Settings → Filters (`04c` §16.3). `[GATE: gate.filters]` — while locked, "Hide Post"
+in the long-press menu opens the paywall and existing `hidden_posts` rows are preserved but not
+applied.
 
 ### 7.7 Seen tracking
 
@@ -697,11 +704,11 @@ surface lives in Settings → Filters (`04c`).
    `.onScrollTargetVisibilityChange(idType: Post.ID.self)`, tracking the previous visible set and the
    running max index.
 
-Toggling `autoMarkAsSeen` presents an alert: `"Restart the app for this change to take effect."` and,
-when the new value is `true` **and** hide-seen is also on, appends: `"You may notice slower loads
-with this setting enabled because all the hidden posts still have to be loaded in the background."`
-`[DECISION: mark-seen-restart]` — in a native rewrite this can simply take effect immediately; keep
-the alert only if `08` says to preserve parity.
+Toggling `filters.markSeenOnScroll` **takes effect immediately** — the feed reads the setting
+reactively, so there is **no restart alert**. When the new value is `true` **and** hide-seen is also
+on, show a non-blocking informational note: `"You may notice slower loads with this setting enabled
+because all the hidden posts still have to be loaded in the background."`
+`[DECISION: mark-seen-live]`
 
 **Rendering.** Each row reads its own seen state on init (not `onAppear` — the 2026 lazy-stack
 guidance) and subscribes to a per-post-id change publisher so that marking a post seen elsewhere
@@ -723,13 +730,18 @@ ordering is load-bearing and is one of the few things the original has a test fo
 - The context menu item `Show Seen Posts` / `Hide Seen Posts` toggles the override for the current
   base page, **deleting** the key entirely when the new value would equal the global default (so the
   map only ever stores genuine exceptions), then replaces the current route to force a refetch.
+- `[GATE: gate.filters]` — *filtering by* seen state is gated (global and per-page). Seen **tracking**
+  and the 0.75-opacity dimming stay free, as does `Mark as Read` / `Mark as Unread`
+  (`05-monetization.md` §3.1 row P).
 
 ### 7.8 Subreddit filters
 
 `Settings.filteredSubreddits`: subreddit name → either `true` (forever) or an epoch-ms expiry. The
 rule is added only on combined feeds. A post is dropped when its subreddit's entry is `true` or a
 future timestamp. An expired entry simply stops having effect; it is **not** actively cleaned up.
-The management surface (view/remove) is Settings → Filters (`04c`).
+The management surface (view/remove) is Settings → Filters (`04c` §16.3). `[GATE: gate.filters]` —
+while locked, "Filter Subreddit" and its duration submenu open the paywall, and existing entries are
+preserved but not applied.
 
 ---
 
@@ -786,6 +798,13 @@ explicitly recommends it over scroll-geometry math for exactly this purpose. Mai
 (0.7 for item-visibility and a viewport-coverage computation for tall items) and union the candidate
 sets.
 
+`[GATE: gate.videoAutoplay]` — **OWNER row, default OFF (free).** If the owner flips it on, the gate
+covers inline feed video autoplay and the feed-audio FAB: locked users get the poster + play glyph
+everywhere in the feed and the audio FAB is replaced by a Plus-badged control that opens the paywall.
+Tapping a poster to open the fullscreen viewer stays free either way. The default is off because
+gating it makes the feed feel broken and interacts badly with low-data mode
+(`05-monetization.md` §3.1 rows A/D, §4).
+
 **FABs** (`FeedVideoFABs`), two 44×44 circular, semi-translucent, bordered, shadowed buttons stacked
 bottom-right, positioned just above the tab bar:
 
@@ -803,7 +822,7 @@ Each press fires `hapticSelection()`. Both expose `accessibilityRole` switch sem
 
 After a feed load completes, offer gallery mode when **all** hold:
 
-1. `Settings.hasOfferedGalleryMode` is false (one-time, ever, app-wide).
+1. `flags.galleryModeOffered` is false (one-time, ever, app-wide; set on **either** answer).
 2. `store.items.count >= 100`.
 3. The feed is **not** a combined feed (single subreddit, multireddit or user page only).
 4. `≥ 85 %` of the loaded posts have at least one image or video.
@@ -811,12 +830,14 @@ After a feed load completes, offer gallery mode when **all** hold:
 Present `.alert("Try Gallery Mode?", …)` with body `"Media heavy subreddits look great in gallery
 mode. Would you like to try it out?"` and buttons `Cancel` / `Open`.
 
-- **Open** sets the flag permanently, pushes `Route.gallery(currentTarget)`, then presents a second
-  one-time informational alert titled `"Gallery Mode"` with body `"You can open gallery mode any time
-  with the ... menu button in the top right corner of subreddit pages."`
-- **Cancel** sets nothing. Because the flag is only written on Open, declining does not permanently
-  suppress the prompt — it can reappear on a different qualifying feed later. Reproduce.
-  `[DECISION: gallery-offer-cancel]` `[GATE: gallery-mode]`
+- **Open** sets the flag, pushes `Route.gallery(currentTarget)`, then presents a second one-time
+  informational alert titled `"Gallery Mode"` with body `"You can open gallery mode any time with the
+  … menu button in the top right corner of subreddit pages."`
+- **Cancel** **also sets the flag.** Fix forward: the one-time offer is one-time on *either* answer.
+  The original wrote the flag only on Open, so declining let the prompt reappear on a different
+  qualifying feed — a nag the user already said no to. `[DECISION: gallery-offer-cancel]`
+- The offer itself is free; `[GATE: gate.galleryMode]` applies to Gallery Mode's own 100-item limit
+  (`04b` §10.1), not to the prompt.
 
 ---
 
@@ -872,8 +893,8 @@ own feed "…" menu.
 | Favorite / Unfavorite | Purely local, per-account (keyed by Reddit user id), never synced to Reddit. Requires being logged in (`"You must be logged in to favorite subreddits"`) **and** already subscribed (`"You must be subscribed to a subreddit to favorite it"`). |
 | Add to Multireddit | Zero multireddits → alert `"You have no multireddits created yet. Please create one first."` and stop. Otherwise a menu of multi names; picking one calls M4, reloads multis, and confirms `Added <subreddit> to <multi>`. Failure: `Something went wrong: <error>`. |
 | New Post | Presents `NewPostSheet` pre-targeted at this subreddit (§16.5). |
-| Sidebar / Wiki | Push `Route.sidebar(name)` / `Route.wiki(url)`. |
-| Open in Gallery Mode | Push `Route.gallery(currentTarget)`. Present on Home, subreddit and multireddit menus. `[GATE: gallery-mode]` |
+| Sidebar / Wiki | Push `Route.sidebar(name)` / `Route.wiki(WikiTarget(subreddit: name, path: "index"))`. |
+| Open in Gallery Mode | Push `Route.gallery(currentTarget)`. Present on Home, subreddit and multireddit menus. `[GATE: gate.galleryMode]` |
 | Show/Hide Seen Posts | §7.7. |
 | Share | Share sheet with the page URL. |
 
@@ -898,7 +919,7 @@ One `List` (**not** `LazyVStack` — the 2026 baseline's `List`-vs-`LazyVStack` 
 for 1 000+-row comment trees, which actively recycle rows).
 
 ```
-PostDetailScreen(ref: PostRef)
+PostDetailScreen(target: PostTarget)
 └─ List {
      Section { PostHeaderView(detail) }           // .id(detail.id) so it resets on a new post
      ForEach(flatRows, id: \.rowKey) { row in
@@ -1002,7 +1023,7 @@ The header's own "…" menu is not part of this view; it lives in the navigation
 `Edit` (only if the current user authored it **and** it has text, i.e. a self post), `Delete` (only
 if authored by the current user), then always `Report`, `Select Text`, `Share`.
 `Report` navigates to a **generic** in-app web view at `https://www.reddit.com/report` — it is not
-wired to the specific post id. `[DECISION: report-generic-webview]`
+wired to the specific post id. `[DECISION: report-webview]`
 `Select Text` opens the text-selection sheet (§17) with the post's raw markdown.
 `Delete` confirms, calls V3, then pops the screen.
 
@@ -1080,8 +1101,17 @@ CommentRow(comment)
 The top bar's bottom margin is `0` when the comment is collapsed **and** `collapseChildrenOnly` is
 off (nothing follows), else `8`.
 
-**Body:** rendered when `collapseChildrenOnly || !comment.collapsed`. Content is Reddit's own
-server-rendered HTML (entity-decoded), fed to the renderer in §18 — never re-derived from markdown.
+**Body:** rendered when `collapseChildrenOnly || !comment.collapsed`. Content is `comment.body` —
+Reddit's **markdown source** — parsed by `RedditMarkdown` into a `MarkdownDocument` and rendered from
+that AST (§18, `02-architecture.md` §9). `body_html` is retained on the model only as an emergency
+fallback source and is not the rendering path. Because `raw_json=1` is sent on every read
+(`03-data-and-networking.md` §1.3), there is **no client-side HTML-entity decoding step** anywhere.
+`[DECISION: raw-json-param]` `[DECISION: snudown-renderer]`
+
+**Inline text selection is disabled** on comment bodies (and on post bodies), because the iOS 27
+selection gesture on `Text` + `.textSelection(.enabled)` collides head-on with tap-to-collapse.
+Selection is reached through the explicit **Select Text** action instead (§17,
+`02-architecture.md` §9.5).
 
 **Save notch:** a 15×15 `theme.bookmark` triangle pinned bottom-right, same as post cards. (The post
 header has no notch; its saved state is the filled bookmark in the action bar.)
@@ -1112,9 +1142,11 @@ are appended into the parent's children at `childStartIndex = parent.children.co
 ids are removed from `childIds`. If more than 10 remain, the row persists with a decremented count,
 requiring repeated taps. A "500 more replies" stub therefore takes 50 taps.
 
-Reddit's "continue this thread" stubs (a `more` with `count: 0` and no child ids) are **not**
-distinguished: such a row renders `"0 more replies"` and tapping it fetches nothing. Reproduce.
-`[DECISION: continue-thread-stub]`
+Reddit's "continue this thread" stubs (a `more` with `count: 0` and no child ids) **are**
+distinguished, via `MoreStub.isContinueThread` (`03-data-and-networking.md` §4.6). Such a row renders
+**`"Continue this thread →"`** and tapping it pushes the parent comment's permalink. The original
+rendered `"0 more replies"` and fetched nothing when tapped, which is simply broken.
+`[DECISION: more-stub-count-zero]`
 
 **`CollapsedRepliesRow`** — reads `` "\(comment.children.count) more replies" ``; tapping expands
 (sets `collapsed = false`).
@@ -1201,8 +1233,8 @@ to the last confirmed position. The overlay fades back out on release.
 | 2 | `Downvote` | always | V1 |
 | 3 | `Collapse` / `Expand` (label flips) | not `displayInList` | toggles `collapsed` |
 | 4 | `Collapse Thread` | not `displayInList` | §15.2 |
-| 5 | `Copy Text` | always | copies `comment.text` (**raw markdown**, not rendered HTML) to the pasteboard; no toast |
-| 6 | `Select Text` | always | opens the selection sheet (§17) with `comment.text` |
+| 5 | `Copy Text` | always | copies `comment.body` (**raw markdown**) to the pasteboard; no toast |
+| 6 | `Select Text` | always | opens the selection sheet (§17) with `comment.body` |
 | 7 | `Reply` | always | presents `NewCommentSheet(parent: comment)`, gated by `interactionDisabledStatus` exactly like the post-level reply button; on success reloads **only this comment** (endpoint C3) after a flat 5 s delay and re-merges it in place |
 | 8 | `Save` / `Unsave` | always | V2 |
 | 9 | `Edit`, `Delete` | **only** when `currentUser.userName == comment.author` | Edit presents `EditCommentSheet`; Delete is marked destructive and additionally confirms via `.alert("Delete Comment", "Are you sure...", [Cancel, Delete])` before calling V3 and removing the node locally |
@@ -1213,7 +1245,7 @@ parent" item; the nearest equivalent is `displayInList` mode's row tap, which de
 comment's permalink with `context=10`.
 
 Note the original's own documentation omits `Copy Text` from this list; the code has it. Ship the
-code's list. `[DECISION: comment-menu-copy-text]`
+code's list — nine items. `[DECISION: comment-menu-copy-text]`
 
 ### 16.2 Comment swipes
 
@@ -1252,9 +1284,21 @@ Whenever the user changes a sort through the UI, and per-subreddit remembering i
 type, write the new choice (lowercased) back into that subreddit's key — plus the Top window when
 applicable. Remembering is captured opportunistically on every manual change, not only read.
 
-The bulk-clear buttons ("Clear custom post sorts (N subs)") live in Settings → Sorting (`04c`).
+The bulk-clear buttons ("Clear custom post sorts (N subs)") live in Settings → Sorting (`04c` §16.2).
+
+`[GATE: gate.sortMemory]` — **OWNER row, default gated.** Changing sort on any page is free forever;
+what the gate protects is *persisting* a sort preference: the global default post sort, the default
+Top range, the default comment sort, "apply sort to home", and both kinds of remember-per-subreddit.
+While locked, `applyPreferredSorts(to:)` behaves as if every one of those settings were at its
+default, so routes carry no rewritten sort (`05-monetization.md` §3.1 row O, §4).
 
 ### 16.5 Compose and edit sheets
+
+`[GATE: gate.compose]` — **OWNER row, default OFF (free), and strongly recommended to stay off.**
+Creating posts, comments and messages is Reddit's own functionality; gating it makes the free tier
+read-only, which reads as crippleware. The gate exists only so the owner can flip one table entry. If
+it is ever turned on, the check runs **when the composer is opened, never on submit**, and drafts are
+saved regardless of entitlement (`05-monetization.md` §3.3, §5.10 rule 4).
 
 Four sheets share one shell. Present each as a `.fullScreenCover` (the original is a full-screen
 overlay, not a native sheet).
@@ -1271,9 +1315,11 @@ ComposerShell
    .safeAreaInset(.bottom) { keyboard spacer }   // plain keyboard avoidance
 ```
 
-- **Cancel** closes immediately with **no** "discard changes?" confirmation, even with unsaved edits.
-  New-comment and new-post content survives through the draft table; in-progress **edits** to
-  existing content have no persistence and are silently lost.
+- **Cancel** on `NewComment` / `NewPost` closes immediately with no confirmation — their content
+  survives through the draft table, so there is nothing to lose. **Cancel on `EditPost` /
+  `EditComment` with unsaved changes first presents** `.alert("Discard changes?", "Your edits to this
+  <post|comment> will be lost.", [Keep Editing, Discard(destructive)])`, because edits are not
+  draft-persisted (`03-data-and-networking.md` §7.5) and the original lost them silently.
   `[DECISION: composer-no-discard-confirm]`
 - **Submit** replaces itself with a `ProgressView` while in flight (visually disabling it). Cancel
   stays tappable throughout; tapping it mid-submit abandons the UI wait without cancelling the
@@ -1293,7 +1339,7 @@ non-observed box so cursor movement doesn't re-render):
 | **Quote** | quote | **three-way**, see below |
 | Strikethrough | strikethrough | wraps in `~~…~~` |
 | Spoiler | eye.slash | wraps in `>!…!<` |
-| Attach Theme | paintbrush | only when the caller passes `showCustomThemeOption` (computed from the target subreddit — see `04c` §Theme sharing). Presents a list of the user's saved custom themes; selecting one confirms via `.alert("Do you want to attach the \"<name>\" theme to your text?", [Cancel, Attach])`, and Attach inserts a newline-wrapped theme token at the selection. `[GATE: custom-themes]` |
+| Attach Theme | paintbrush | only when the caller passes `showCustomThemeOption` (computed from the target subreddit — see `04c` §Theme sharing). Presents a list of the user's saved custom themes; selecting one confirms via `.alert("Do you want to attach the \"<name>\" theme to your text?", [Cancel, Attach])`, and Attach inserts a newline-wrapped theme token at the selection. `[GATE: gate.customThemes]` |
 
 **Quote's three behaviors, in order:**
 1. Editor text is completely empty → set the whole text to literally `"> "`.
@@ -1328,20 +1374,24 @@ Backed by the GRDB `drafts` table (`key` unique, `text`). Saved on **every keyst
 debounce — in Swift, coalesce to at most one write per ~250 ms if profiling demands it, but the
 observable behavior must be "never lose a keystroke on kill").
 
+Key formats are normative in `03-data-and-networking.md` §7.5; repeated here for convenience:
+
 | Composer | Key(s) |
 |---|---|
-| New comment | `newCommentDraft-<parentId>` — one per reply target, so replying to the same comment/post again always restores what you left |
-| New post | `newPostDraft-title-<subreddit>` **and** `newPostDraft-text-<subreddit>` — **one post draft per subreddit**; starting a second in the same subreddit silently overwrites the first |
-| Edit comment / Edit post | **none** — edits are seeded from existing content and never persisted |
-| New message / Reply to message | see `04c` §Messages |
+| New comment | `comment.<parentFullname>` — one per reply target, so replying to the same comment/post again always restores what you left |
+| New post | `post.title.<subreddit-lowercased>` **and** `post.body.<subreddit-lowercased>` — **one post draft per subreddit**; starting a second in the same subreddit silently overwrites the first. The body key is per post kind, so a link draft and a text draft do not collide (§16.5.4) |
+| Edit comment / Edit post | **none** — edits are seeded from existing content and never persisted; cancelling confirms first |
+| New message / Reply to message | `message.subject.<recipient>`, `message.body.<recipient>`, `messageReply.<previousAuthor>` — see `04c` §5 |
 
 Drafts are read once at sheet init (`getDraft(key) ?? ""`) and cleared **only on a successful
 submit**. A failed submit deliberately leaves the draft intact. `maintainDrafts()` caps the table at
 **100** rows globally, deleting the oldest by insertion order at each cold start.
 
-**Quirk to reproduce:** switching the post-type pill (Text/Link/Image) does **not** clear the shared
-`text` field, so switching Link→Text leaves the URL sitting in the body editor.
-`[DECISION: newpost-type-switch-shares-text]`
+**Fix forward:** the composer keeps a **separate field per post kind** (`selfText`, `linkURL`,
+`imageURL`), and switching the post-type pill switches which field is bound. A URL never ends up in
+the body editor and a body never ends up in the URL field. Drafts are keyed per kind accordingly. The
+original shared one `text` field across all three kinds, which is a latent state-mixing bug.
+`[DECISION: newpost-type-switch-keeps-text]`
 
 #### 16.5.4 `NewPostSheet` specifics
 
@@ -1371,7 +1421,7 @@ submit**. A failed submit deliberately leaves the draft intact. `maintainDrafts(
 |---|---|
 | `errors[0][0] == "BAD_CAPTCHA"` | `.alert` offering to retry inside an embedded `WebView` pointed at `https://new.reddit.com/r/<sub>/submit/?type=<kind>` with shared cookies. The web view **replaces the sheet's body**; the Post button disappears and only Cancel remains, since submission then happens inside the page. For a text post, also copy the body to the pasteboard and tell the user, because the web form starts empty. |
 | `errors[0][1]` is a string | `.alert("Failed to submit post", <that string verbatim>)` |
-| anything else | `.alert("Failed to submit post", "Unknown error")`. The original *also* re-throws after alerting, which surfaces as an unhandled error upstream — **do not** reproduce the re-throw. `[DECISION: newpost-unknown-error-rethrow]` |
+| anything else | `.alert("Failed to submit post", "Unknown error")`. The original *also* re-throws after alerting, which surfaces as an unhandled error upstream — **do not** reproduce the re-throw. `[DECISION: unknown-error-rethrow]` |
 | success with no returned URL (what image submissions do) | `.alert("Submitted post successfully", "Post is being processed")` |
 | image upload returned nothing / threw | `.alert("Failed to upload image", "Please try again later.")` |
 
@@ -1386,8 +1436,10 @@ button reads **"Save"** rather than "Post". Tabs are Preview / Old Version. No d
 
 ## 17. Text selection sheet
 
-Presented from the comment menu's `Select Text` (raw `comment.text`) and the post "…" menu's
-`Select Text` (raw post `text`).
+Presented from the comment menu's `Select Text` (raw `comment.body` markdown) and the post "…"
+menu's `Select Text` (raw `post.selfText` markdown). This sheet is the **only** place a body's text is
+selectable, because inline selection on comment and post bodies is disabled so tap-to-collapse keeps
+the row's tap (`02-architecture.md` §9.5).
 
 A bottom-anchored panel: **65 % of screen height**, 30 pt rounded top corners, 3 pt border,
 `theme.tint` background, sliding up over a full-screen black scrim at **0.7** opacity. Tapping the
@@ -1402,84 +1454,102 @@ custom copy button** in the panel; copying relies entirely on the system menu.
 
 ---
 
-## 18. Markdown / HTML rendering
+## 18. Markdown rendering
 
-Reddit returns pre-rendered HTML in `body_html` / `selftext_html`. The model layer entity-decodes it.
-The renderer parses that HTML into a DOM and walks it into SwiftUI views — **not** a web view, and
-**not** `AttributedString(markdown:)` (which is inline-only and cannot render the block constructs
-Reddit comments are full of).
+**One pipeline, one dialect.** Reddit returns both the markdown source (`selftext`, `body`) and its own
+server-rendered HTML (`selftext_html`, `body_html`). `APPNAME` parses the **markdown source** with the
+first-party Reddit-flavored parser in the `RedditMarkdown` package and renders from the typed
+`MarkdownDocument` AST — for fetched content **and** for composer previews, so the preview *is* the
+render by construction (`02-architecture.md` §9.1, `[DECISION: snudown-renderer]`). It is **not** a
+web view and **not** `AttributedString(markdown:)`, which is inline-only and cannot express the block
+constructs Reddit comments are full of.
 
-Recommended pipeline: an HTML parser (SwiftSoup or a small hand-rolled tokenizer) → an intermediate
-block/inline tree → a SwiftUI block renderer. Inline runs within one block coalesce into a single
-`Text` built from `AttributedString` so that line-breaking and selection work; block elements become
-separate views.
+Two consequences for this section:
+
+- **There is no HTML-entity decoding step.** `raw_json=1` is sent on every read
+  (`03-data-and-networking.md` §1.3), so text arrives unescaped everywhere, including
+  `reddit_video.hls_url`, which the original inconsistently left encoded.
+  `[DECISION: raw-json-param]`
+- **`body_html` / `selftext_html` are retained on the model but are not the rendering path.**
+  `MarkdownDocument` can be built from HTML (`MarkdownSource.html`) as an emergency parity valve, and
+  that branch is also what renders the two fields Reddit exposes *only* as HTML: a subreddit's sidebar
+  description and its rules (`03-data-and-networking.md` §4.8).
+
+Pipeline: `swift-cmark-gfm` for CommonMark + GFM, plus Reddit's dialect as a pre-pass over the source
+and a post-pass over the node tree (`02-architecture.md` §9.2) → `[Block]` / `[Inline]` → a SwiftUI
+block renderer. Inline runs within one block coalesce into a single `Text` built from an
+`AttributedString`, so a paragraph is one layout pass; block elements become separate views.
+Fidelity is held by the golden-file corpus in `02-architecture.md` §9.1.
 
 ### 18.1 Construct → rendering table
 
-| HTML input | Rendering |
+The left column names the AST node (`02-architecture.md` §9.3); the HTML tag Reddit would emit for the
+same construct is given in parentheses purely as an identification aid.
+
+| AST node (HTML equivalent) | Rendering |
 |---|---|
-| `<p>` | A text block with 5 pt vertical margin. |
-| `<p>` whose **sole** child is an `<a>` with a single text child whose `href` classifies as an image URL | Redirected out of text rendering into an inline image preview: fixed 150×200 container, 16:9 aspect, centered. This is how "a raw image URL on its own line" becomes an inline image. |
-| `class="md-spoiler-text"` (Reddit's `>!…!<`) | Tappable text. Hidden: text colored `theme.tint` on a `theme.tint` background (invisible), 2/5 pt padding. Tapped: text becomes `theme.subtleText`; the background block persists. Per-element local state — each spoiler toggles independently and resets when the row is rebuilt. |
-| An element carrying a `header` attribute (a Reddit quirk, distinct from `h1`–`h3`) | Text, 24 pt, 10 pt top / 4 pt bottom margin. |
-| `<div>` | Container view, 5 pt vertical margin. |
-| `<pre>` (code block) | A **horizontally scrolling** container (no vertical scroll), 10 pt padding, `theme.tint` background. Touches inside must not be stolen by enclosing tap targets. No syntax highlighting. |
-| `<hr>` | 1 pt bottom border in `theme.tint`, 8 pt vertical margin. |
-| `<h1>` / `<h2>` / `<h3>` | A **container** (not a text node itself) that pushes `fontSize`/`lineHeight` of 32/24/20 (line height = `floor(size × 1.3)`) onto inherited styles, picked up by descendant text nodes. |
-| `<blockquote>` | Container, `theme.tint` background, 2 pt leading border in `theme.subtleText`, 5/8 pt margin/padding-left, 2 pt vertical margin. **No nested-indent stacking** — deeply nested quotes just re-apply the same single-level styling at each level. |
-| `<span>` | Text, 5 pt vertical margin. |
-| `<table>` | Horizontally scrolling container, `maxWidth: 100%`, 5 pt vertical margin. |
-| `<thead>` | Column container with bold inherited weight. |
-| `<tbody>` | Column container. |
-| `<tr>` | Row container. |
-| `<th>` / `<td>` | Cell: 1 pt `theme.tint` border, 2 pt padding. **Column width** = `(screenWidth − 30) / siblingCount` when there are fewer than 4 sibling cells, else a fixed **100 pt** (so wide tables scroll rather than squeeze). |
-| `<strong>` | Bold text. |
-| `<em>` | Italic text. |
-| `<del>` | Strikethrough (solid). |
-| `<code>` (inline) | Monospace text on a `theme.tint` background, inline within its paragraph. No highlighting. |
-| `<sup>` | Rendered as a **container with font size 11, no baseline shift**, zero margin/padding — i.e. Reddit superscript comes out as merely-smaller inline-ish text, not true superscript. Reproduce. `[DECISION: markdown-sup-no-baseline]` |
-| `<a href*="giphy.com">` | Intercepted entirely — the link is never followed. Read the **5th path segment** as a Giphy id and render `https://i.giphy.com/<id>.webp` inline with the same 16:9 image treatment. |
-| `<a>` wrapping only text | Text colored `theme.iconOrTextButton`. On tap: parse the href. If it resolves to a known page type, **or** is a short link (`redd.it/<id>`, `/s/<id>` — these only acquire a page type once resolved asynchronously, so treat them as navigable even though classification alone says unknown), push it in-app. Otherwise strip stray `%5C` escape sequences from the URL (a workaround for Reddit's own broken autolinking of URLs containing underscores) and open it externally. |
-| `<a>` wrapping an `<img>` | Rendered as an essentially empty container (`minWidth: 100%`, no visible content) — effectively suppressed, because Reddit already emits the visible image via a bare `<img>` elsewhere in the same HTML. |
-| `<ol>` / `<ul>` | Plain container; no indent beyond each `<li>`'s own. |
-| `<li>` | A row: a small bullet/number column (`"• "` for `ul`, `"<index+1>. "` for `ol`, where index is the DOM child position and any `start`/`value` attribute is ignored) plus a flexible content column. **Known bug:** a nested list re-numbers/re-bullets from its own local index without inheriting outer numbering. `[DECISION: nested-list-numbering]` |
-| bare `<img>` | A container wrapping an inline image (150×200 container, 16:9) plus any children below it; 10 pt vertical margin, centered. |
-| Whitespace-only text nodes between tags (`"\n"`, `"\n\n"`) | **Filtered out** of every element's children before rendering, so Reddit HTML never introduces blank lines. (A *lone* newline text node rendered outside any filtered parent — reachable only from the Guide's own documents — instead becomes a 10 pt spacer.) |
-| Embedded theme token in a text node | Stripped from the displayed text; each match renders a `ThemeImportChip` inline (`04c` §Theme share/import). `[GATE: custom-themes]` |
-| Emoji-only comment bodies | The original renders these oversized (a known open bug with no clamp in the renderer). **Recommendation: normalize emoji runs to body text size.** Flag as a deliberate deviation. `[DECISION: giant-emoji]` |
+| `.paragraph([Inline])` (`<p>`) | A text block with 5 pt vertical margin. |
+| `.inlineImage(url:caption:)` — a paragraph whose **sole** content is a link or bare URL that `RedditLink` classifies as `.image` | Rendered as an inline image preview instead of text: fixed 150×200 container, 16:9 aspect, centered. This is how "a raw image URL on its own line" becomes an inline image. |
+| `.spoiler([Inline])` (Reddit's `>!…!<`, `class="md-spoiler-text"`) | Tappable run. Hidden: foreground `theme.tint` on a `theme.tint` background (invisible), 2/5 pt padding. Revealed: foreground `theme.subtleText`; the background block persists. Reveal state is keyed by (row id, spoiler index) **in the screen model, not in the leaf view**, so a recycled row never inherits another row's revealed state (`02-architecture.md` §18.3 rule 3). |
+| `.heading(level:[Inline])` (`<h1>`–`<h6>`, and Reddit's `header`-attribute quirk) | Font sizes 32 / 24 / 20 for levels 1–3, level 4+ clamped to 20; line height `floor(size × 1.3)`; 10 pt top / 4 pt bottom margin. |
+| `.codeBlock(language:code:)` (`<pre>`) | A **horizontally scrolling** container (no vertical scroll), 10 pt padding, `theme.tint` background. Touches inside must not be stolen by enclosing tap targets. No syntax highlighting. |
+| `.thematicBreak` (`<hr>`) | 1 pt bottom border in `theme.tint`, 8 pt vertical margin. |
+| `.blockquote([Block])` | Container, `theme.tint` background, 2 pt leading rule in `theme.subtleText`, 5/8 pt margin/padding-left, 2 pt vertical margin. Nested quotes re-apply the same single-level styling at each level; there is no compounding indent. |
+| `.table(header:alignments:rows:)` | Horizontally scrolling container, `maxWidth: 100%`, 5 pt vertical margin. Header row carries bold weight. Cell: 1 pt `theme.tint` border, 2 pt padding. **Column width** = `(screenWidth − 30) / columnCount` when there are fewer than 4 columns, else a fixed **100 pt**, so wide tables scroll rather than squeeze. GFM column alignments are honoured. |
+| `.strong([Inline])` (`<strong>`) | Bold text. |
+| `.emphasis([Inline])` (`<em>`) | Italic text. |
+| `.strikethrough([Inline])` (`<del>`) | Strikethrough (solid). |
+| `.code(String)` (inline `<code>`) | Monospace (`.system(.body, design: .monospaced)`) on a `theme.tint` background, inline within its paragraph. No highlighting. |
+| `.superscript([Inline])` (`<sup>`) | Rendered at a reduced font size (11 pt at body size) **and with a real baseline offset**, so it reads as true superscript. The original rendered it as merely-smaller text with no offset; that is a rendering defect, not a style. Nesting depth compounds the size reduction. `[DECISION: superscript-baseline]` |
+| `.giphy(id:)` (a `giphy.com` link) | Intercepted entirely — the link is never followed. The id is the **5th path segment**; render `https://i.giphy.com/<id>.webp` inline with the same 16:9 image treatment. |
+| `.link(destination:children:)` | Text coloured `theme.iconOrTextButton`. Tap routing follows `LinkDestination` (`02-architecture.md` §9.3): `.route` pushes; `.reddit` resolves the short link (`redd.it/<id>`, `/s/<id>` — navigable even though classification alone says unknown until resolved) then pushes; `.media` presents the viewer; `.external` goes to the external-link handler after stripping stray `\` / `%5C` escapes Reddit's own linkifier leaves in URLs containing underscores. |
+| A link whose only child is an image | Rendered as the image alone; the wrapping link contributes its destination as the image's tap target. (The original emitted an empty container here and relied on Reddit duplicating the image elsewhere in the HTML.) |
+| `.list(ordered:start:tight:items:)` (`<ol>` / `<ul>`) | A container; each item is a row of a marker column plus a flexible content column. Ordered lists **honour `start`**, and each item's ordinal continues correctly; unordered lists use a depth-appropriate marker (`•`, `◦`, `▪` cycling by depth). **Nesting is tracked**, so a nested ordered list numbers from its own `start` while the outer list continues from where it left off — the original re-numbered from a local DOM index and got both wrong. Correct numbering falls out of the AST for free. `[DECISION: nested-list-render-bug]` |
+| `.inlineImage(url:caption:)` (bare image) | An inline image (150×200 container, 16:9), 10 pt vertical margin, centered, with its caption below when present. |
+| `.softBreak` / `.lineBreak` | A soft break joins with a space; a hard break starts a new line. Blank lines between blocks come from the AST's block structure, so no whitespace-stripping pass is needed — the original had to filter whitespace-only text nodes out of the HTML DOM. |
+| `.themeChip(CustomTheme)` (the `::appname-theme::` sentinel) | Extracted by the pre-pass, stripped from the displayed text, and rendered inline as a `ThemeImportChip` (`04c` §18.5). `[GATE: gate.customThemes]` |
+| Emoji-only bodies | **Clamped to body text size.** The original renders standalone emoji runs oversized because nothing clamps them; that is a bug and is not reproduced. `[DECISION: giant-emoji-bug]` |
+
+`/r/name` and `/u/name` mentions **are** autolinked, by the post-pass autolinker in
+`02-architecture.md` §9.2 (word-boundary anchored, skipped inside code spans and existing links), and
+resolve through the same `.link` path above.
 
 Reddit-internal `/r/…` and `/u/…` mentions are **not** special-cased; they flow through the generic
 link path above and navigate in-app when recognized.
 
-### 18.2 Composer preview renderer
+### 18.2 Composer preview
 
-The compose/edit previews are the **only** place the app converts markdown → HTML itself; already-
-fetched Reddit content is never re-rendered from markdown. The preview must use a Reddit-dialect
-markdown compiler, not CommonMark, because the dialect differs (notably `>!spoiler!<` and Reddit's
-superscript/table extensions). Options, in order of preference:
+The composer preview uses **the same parser and the same renderer** as fetched content —
+`MarkdownView(document: parseRedditMarkdown(text))` — so there is no second dialect, no HTML
+round-trip and no inter-tag-whitespace hack. The original ran a separate WASM snudown build for
+previews and needed a `>\s+<` → `><` collapse because its two paths disagreed; neither exists here.
+`[DECISION: snudown-renderer]`
 
-1. Compile Reddit's own snudown C sources into a Swift package and expose `markdown(_:) -> String`.
-2. Use cmark-gfm plus custom extensions for spoilers and superscript.
-
-Whichever is chosen, collapse inter-tag whitespace (`>\s+<` → `><`) on the produced HTML before
-handing it to the renderer, exactly as the original does, to avoid stray blank-line artifacts.
-
-Supported constructs the preview must handle: bold, italic, strikethrough, links, images (bare and
-linked), spoilers, block quotes (including multi-line), headers, ordered/unordered lists (including
-nesting, with the numbering bug above), horizontal rules, inline and block code, tables, superscript.
+- The preview recompute is **debounced at 150 ms**. The original reparsed on every keystroke.
+- Constructs the preview must handle, i.e. all of them: bold, italic, strikethrough, links, images
+  (bare and linked), spoilers, blockquotes (including nested), headings, ordered and unordered lists
+  (including nesting, numbered **correctly**), horizontal rules, inline and fenced code, tables,
+  superscript, `/r/` and `/u/` autolinks, and the theme-attach sentinel.
+- Accept ~95 % fidelity against Reddit's own snudown for exotic markdown; divergences found by the
+  golden-file corpus become parser bugs with a failing test (`02-architecture.md` §9.1).
 
 ### 18.3 Paragraph height repair
 
 The original works around a text-layout bug by measuring each paragraph's laid-out height and, when
-it is non-integral, re-rendering once with `round(h) + 1` pinned. This is an RN-layout artifact and
-should **not** be ported. Flag as an intentional omission. `[DECISION: text-height-repair-omit]`
+it is non-integral, re-rendering once with `round(h) + 1` pinned. That is a React Native layout
+artefact with no SwiftUI equivalent and is **not** ported. `[DECISION: text-height-repair-omit]`
 
 ---
 
 ## 19. Settings that affect these screens
 
-All read through the typed `Settings` object. Effects are as specified above; this table is the
-index. Full settings-tree UI (labels, sections, order, pickers) is in `04c`.
+All read through the typed `SettingsStore`. Effects are as specified above; this table is the index.
+Full settings-tree UI (labels, sections, order, pickers) is in `04c` §§14–20.
+
+**Key names.** The names in the left column are the original's flat keys, i.e. the "Legacy key" column
+of `03-data-and-networking.md` §8.1. **`03` §8.1 is the single normative source for key names, types
+and defaults**; its namespaced `APPNAME` equivalents (`post.compactMode`, `filters.hideSeenPosts`,
+`sorting.defaultPost`, …) are what the code declares. `[DECISION: settings-key-rename]`
 
 | Key | Type | Default | Effect on this document's screens |
 |---|---|---|---|
@@ -1487,7 +1557,7 @@ index. Full settings-tree UI (labels, sections, order, pickers) is in `04c`.
 | `showThumbnailsOnRightSide` | Bool | `false` | Compact thumbnail side; row becomes space-between |
 | `subredditAtTop` | Bool | `false` | Subreddit row above title vs inline in metadata |
 | `showSubredditIcon` | Bool | `true` | Draw subreddit icons (also suppressed in low-data) |
-| `postTitleLength` | Int (1–10) | `2` | Title line clamp; `0` = unlimited |
+| `postTitleLength` | Int (1–10) | `2` | Title line clamp |
 | `postTextLength` | Int (0–10) | `3` | Self-text preview clamp; `0` hides the block |
 | `linkDescriptionLength` | Int (0–30) | `10` | Link-card OG description clamp; `0` hides it |
 | `showPostFlair` | Bool | `true` | Flair chip on post cards |
@@ -1499,7 +1569,7 @@ index. Full settings-tree UI (labels, sections, order, pickers) is in `04c`.
 | `filterSeenPosts` | Bool | `false` | Global hide-seen |
 | `hideSeenURLs` | [String: Bool] | `[:]` | Per-base-page hide-seen override |
 | `filteredSubreddits` | [String: FilterExpiry] | `[:]` | Subreddit filter map |
-| `autoMarkAsSeen` | Bool | `false` | Mark seen on scroll-past (+ restart alert) |
+| `autoMarkAsSeen` | Bool | `false` | Mark seen on scroll-past; live, no restart |
 | `filterText` | String | `""` | Whole-word text filter list |
 | `swipeAnywhereToNavigate` | Bool | `false` | Kills right-side swipe actions; enables anywhere-back |
 | `postSwipeOptions` | 4-slot map | right=upvote, farRight=downvote, left=hide, farLeft=bookmark | Post swipe mapping |
@@ -1520,8 +1590,8 @@ index. Full settings-tree UI (labels, sections, order, pickers) is in `04c`.
 | `collapseChildrenOnly` | Bool | `false` | Collapsing shows an "N more replies" stub |
 | `scrollToNextButtonPosition` | enum (10 slots) | `.bottomRight` | Floating button dock |
 | `dataMode.wifi` / `.cellular` | enum | `.normal` / `.normal` | Low-data media behavior (§4.5, §4.8, §9) |
-| `hasOfferedGalleryMode` | Bool | `false` | One-time gallery-mode offer |
-| `hideTabsOnScroll` | Bool | `false` | Tab bar hides on downward scroll past 50 pt with ≥5 pt deltas; 200 ms animation. On iOS 26+ prefer `tabBarMinimizeBehavior(.onScrollDown)`. |
+| `has_already_offered_gallery_mode` (`flags.galleryModeOffered`) | Bool | `false` | One-time gallery-mode offer; set on either answer |
+| `hideTabsOnScroll` | Bool | `false` | Maps to `tabBarMinimizeBehavior(.onScrollDown)` — the platform behaviour, **not** the original's hand-rolled 50 pt / 5 pt-delta / 200 ms translate. `[DECISION: tab-hide-on-scroll]` |
 | `showUsername` | Bool | `true` | Account tab label shows the username |
 
 ---
@@ -1653,8 +1723,8 @@ Write these as `@Test` functions in Swift Testing (new tests; XCTest reserved fo
 | `quoteWithMultiLineSelection` | Every selected line gains `"> "`. |
 | `wrapHelpers` | Bold/italic/strike/spoiler wrap the selection, and insert empty delimiters when nothing is selected. |
 | `linkInsertWithNoSelection` | Produces `[](url)`. |
-| `draftKeyShapes` | Comment/post/title key strings match the documented formats. |
-| `postTypeSwitchKeepsText` | Documents the shared-`text` quirk. |
+| `draftKeyShapes` | Comment/post/title/message key strings match `03` §7.5 exactly. |
+| `postTypeSwitchKeepsFieldsSeparate` | Typing a URL as a Link post, switching to Text, and back leaves both fields intact and neither contaminated. |
 | `modOnlyFlairsFilteredOut` | A mod-only flair never appears in the picker. |
 
 ### 20.10 Gallery-mode offer
@@ -1664,7 +1734,7 @@ Write these as `@Test` functions in Swift Testing (new tests; XCTest reserved fo
 | `offerRequiresAllFourConditions` | Dropping any one suppresses the offer. |
 | `combinedFeedsNeverOffer` | Home / all / popular. |
 | `ratioBoundary` | 84 % → no offer; 85 % → offer. |
-| `openSetsFlagCancelDoesNot` | Documents the re-prompt behavior. |
+| `bothAnswersSetTheFlag` | Open and Cancel both write `flags.galleryModeOffered`; the offer never reappears. |
 
 ### 20.11 Markdown rendering
 
@@ -1703,39 +1773,59 @@ Write these as `@Test` functions in Swift Testing (new tests; XCTest reserved fo
 | `09-persistence-pro-utils.md` §1.2 (seen/hidden/drafts tables), §1.3 (maintenance), §6.1 (Slideable), §6.4 (action catalog), §7.1–7.2 (formatters) | persistence + interaction primitives | §7.1, §7.6–7.7, §16.5.3, §5 |
 | `10-swiftui-2026-baseline.md` A3 (List vs LazyVStack, `onScrollTargetVisibilityChange`, `contextMenu` icons, selectable `Text` on iOS 27, `sensoryFeedback`, `swipeActions` outside `List`, markdown limits) | API choices | §2.1, §7.1, §7.2, §9, §12.1, §17, §18 |
 
-### 21.2 `[DECISION:]` tags used in this document
+### 21.2 Decision tags used in this document
+
+Every id below is the canonical id of a numbered entry in `08-decisions-and-drift.md` §1/§2. There are
+no aliases, and the register's "Default (assumed)" column is what this document specs.
 
 | Tag | Subject |
 |---|---|
-| `ipad-split-view` | iPad split view omitted in v1 |
-| `dead-setting-post-summary` | `showPostSummary` dropped |
-| `dead-setting-comment-summary` | `showCommentSummary` dropped |
-| `poll-voting-stub` | Poll vote does nothing; no results shown; no poll post type |
+| `ipad-split-view-deferred` | iPad split view omitted in v1 |
+| `post-summary-dead-setting` | `showPostSummary` dropped |
+| `comment-summary-dead-setting` | `showCommentSummary` dropped |
+| `poll-voting-stub` | Polls render read-only with results; no fake Vote button; no poll post type |
 | `crosspost-longpress` | Crosspost card has no long-press menu of its own |
-| `pagination-cursor-fullname` | Cursor is the last item's fullname, not the listing `after` |
-| `time-format-12mo-seam` | 360–364 days reports "0 years" |
-| `vote-no-optimistic-rollback` | Vote applies only after the call resolves |
-| `detail-vote-not-in-feed` | Voting in detail is not reflected in the feed behind it |
-| `unhandled-save-failure` | Save failures are silent in the original |
-| `mark-seen-restart` | "Restart the app" alert on toggling auto-mark-as-seen |
-| `gallery-offer-cancel` | Declining the gallery offer does not suppress it permanently |
-| `report-generic-webview` | Report opens a generic reddit.com/report page, not item-specific |
+| `pagination-cursor` | Cursor is the last item's own fullname, not the listing `after` |
+| `time-format-parity` | Reproduce the bucket arithmetic; the 360–364-day seam is `time-year-seam` |
+| `time-year-seam` | A 360–364-day-old item must not report "0 years" |
+| `number-format-parity` | Two separate formatters; feed cards abbreviate score and comment count |
+| `vote-no-optimistic-rollback` | Votes apply optimistically and roll back on failure |
+| `postdetail-vote-not-reflected` | A vote in post detail patches the feed row behind it |
+| `unhandled-save-failure` | Save applies optimistically, rolls back, never leaks a rejection |
+| `mark-seen-live` | "Mark as seen on scroll" takes effect immediately; no restart alert |
+| `gallery-offer-cancel` | The one-time gallery offer is suppressed on **either** answer |
+| `report-webview` | Report opens a generic reddit.com/report page, not item-specific |
 | `context-no-highlight` | Comment permalinks get no highlight/scroll-to affordance |
-| `comment-menu-copy-text` | Code has "Copy Text"; original docs omit it |
-| `comment-sort-six` | Six comment sorts in code vs seven in the original docs |
-| `continue-thread-stub` | `more` stubs with zero children render "0 more replies" |
-| `composer-no-discard-confirm` | Cancel discards edits with no confirmation |
-| `newpost-type-switch-shares-text` | Switching post type keeps the body text |
-| `newpost-unknown-error-rethrow` | Original re-throws after alerting; we do not |
-| `markdown-sup-no-baseline` | `<sup>` renders small, not raised |
-| `nested-list-numbering` | Nested lists renumber from their own index |
-| `giant-emoji` | Emoji-only bodies render oversized; recommend normalizing |
-| `text-height-repair-omit` | RN paragraph-height workaround not ported |
+| `comment-menu-copy-text` | The comment menu has nine items, including the undocumented Copy Text |
+| `comment-sort-six` | Six real comment sorts in the in-post menu |
+| `comment-tree-renderer` | Flatten to rows and render in a recycling `List` |
+| `more-stub-count-zero` | A `more` stub with `count: 0` renders "Continue this thread →" |
+| `composer-no-discard-confirm` | Cancelling an **edit** with unsaved changes confirms first |
+| `newpost-type-switch-keeps-text` | Separate text fields per post kind |
+| `unknown-error-rethrow` | Alert once on an unknown submit error; never re-throw |
+| `superscript-baseline` | `<sup>` renders raised, not merely smaller |
+| `nested-list-render-bug` | Nested lists number correctly |
+| `giant-emoji-bug` | Emoji-only bodies clamp to body size |
+| `text-height-repair-omit` | The RN paragraph-height workaround is not ported |
+| `raw-json-param` | `raw_json=1` on every read; no client-side entity decoding |
+| `snudown-renderer` | One first-party markdown pipeline for fetched content and previews |
+| `quote-first-line` | The composer's quote-on-first-line no-op is fixed |
+| `scroll-to-next-button` | The floating comment-nav button, with "previous" as a long-press |
+| `hidden-posts-local` | Hiding stays local; Reddit's hide endpoint is never called |
+| `swipe-forward-gesture` | The right-edge forward swipe is dropped in v1 |
+| `nav-bar-tap-guard` | Verify the switcher title is not swallowed by scroll-to-top |
+| `ai-removed` | No AI summaries, no AI filters |
 
-### 21.3 `[GATE:]` tags used in this document
+### 21.3 Gate tags used in this document
 
-| Tag | Where |
+| Gate id | Where |
 |---|---|
-| `custom-themes` | Theme import chips in rendered bodies (§4.5, §18.1); composer "Attach Theme" (§16.5.1) |
-| `gallery-mode` | Gallery-mode offer (§10) and the "Open in Gallery Mode" menu item (§11.1) |
-| `text-filters` | Text filter rule (§7.3) |
+| `gate.customThemes` | Theme-import chips in rendered bodies (§4.5, §18.1); the composer's "Attach Theme" action (§16.5.1) |
+| `gate.galleryMode` | Gallery Mode's 100-item limit, reached from the one-time offer (§10) and the "Open in Gallery Mode" menu item (§11.1) |
+| `gate.filters` | The text filter (§7.3), hidden posts (§7.6), hide-seen global and per-page (§7.7), subreddit filters (§7.8) |
+| `gate.sortMemory` | Persisting a sort preference — default sorts, default Top range, apply-to-home, per-subreddit memory (§16.4). **OWNER, default gated** |
+| `gate.videoAutoplay` | Inline feed autoplay and the feed-audio FAB (§9). **OWNER, default free** |
+| `gate.compose` | Opening any composer (§16.5). **OWNER, default free** |
+
+Gates declared in the companion documents and referenced from here: `gate.multiAccount`,
+`gate.gestures`, `gate.appIcons`, `gate.stats` (`04c`), and `gate.downloads` (`04b`).

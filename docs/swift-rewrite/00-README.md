@@ -20,7 +20,7 @@ one pass from these documents alone, without consulting this codebase.
 | 05 | `05-monetization.md` | StoreKit 2 subscription design, free/paid feature matrix, entitlement seam, paywall, compliance | Phase 8 |
 | 06 | `06-build-plan-and-acceptance.md` | New-repo bootstrap, CI, phased build order with gates, the full acceptance checklist, risks | Throughout |
 | 07 | `07-one-shot-prompt.md` | The prompt to hand a coding agent in the new empty repo | Kickoff |
-| 08 | `08-decisions-and-drift.md` | Every decision the owner should confirm, with the default the plan assumes | Before kickoff |
+| 08 | `08-decisions-and-drift.md` | The decision register: 95 numbered decisions with the default the plan assumes, 16 original-app bugs fixed forward, 20 doc-vs-code drift rows | Before kickoff |
 | spec/01–09 | `spec/*.md` | The raw behavioral surveys of the current app, area by area (~88k words). Normative where 02–05 are silent. | As reference |
 | spec/10 | `spec/10-swiftui-2026-baseline.md` | Verified platform baseline as of 2026-09-17 with citations | Before 02 |
 
@@ -45,13 +45,21 @@ one pass from these documents alone, without consulting this codebase.
    these without re-verifying.
 5. **Monetized, cheaply.** The new app ships with a StoreKit 2 auto-renewable
    subscription at roughly $1/month that unlocks most features, with a free tier
-   that remains a genuinely usable reader. `05-monetization.md` proposes the
-   matrix; every gated feature is tagged `[GATE: …]` in the 04 docs so the
-   matrix can change without touching feature code.
+   that remains a genuinely usable reader. `05-monetization.md` defines the
+   matrix and the **eleven** canonical gate ids (`gate.multiAccount`,
+   `gate.customThemes`, `gate.gestures`, `gate.filters`, `gate.galleryMode`,
+   `gate.downloads`, `gate.stats`, `gate.appIcons`, `gate.sortMemory`,
+   `gate.videoAutoplay`, `gate.compose`); every gated feature is tagged
+   `[GATE: gate.*]` in the 04 docs, so the matrix can change without touching
+   feature code.
 6. **No AI features, no push notifications in v1.** Inbox uses the same
    60-second foreground poll and app badge as the current app.
 7. **Fix-forward on known bugs.** Bugs the surveys found in the current app
-   (listed in 08) are not reproduced unless the owner says otherwise.
+   (listed in `08` §2) are not reproduced unless the owner says otherwise.
+8. **One vocabulary.** Every `[GATE: gate.*]` tag names one of the eleven gate ids in
+   `05` §4, and every `[DECISION: <id>]` tag names a numbered entry in `08` §1
+   (#1–#95), a bug id in `08` §2, or a drift row `D1`–`D20` in `08` §3. There are
+   no aliases and no placeholder tags anywhere in the set.
 
 ## Owner decisions already made
 
@@ -73,6 +81,9 @@ one pass from these documents alone, without consulting this codebase.
   from first-party sources (`spec/10`).
 - Three architecture and planning agents wrote `02`–`08` from the surveys, and a
   reviewer cross-checked them against the inventory for gaps and contradictions.
+  The cross-document reconciliation that followed — one gate vocabulary, one
+  decision vocabulary, and every behavioural contradiction resolved — is logged in
+  `spec/REVIEW-consistency.md`.
 
 ## Using the plan
 

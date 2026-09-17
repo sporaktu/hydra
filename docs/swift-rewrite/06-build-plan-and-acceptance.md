@@ -35,7 +35,7 @@ appname-ios/
 ├── APPNAME/                          # app target — thin shell only
 │   ├── APPNAMEApp.swift              # @main, scene lifecycle (required by the iOS 27 SDK)
 │   ├── RootView.swift                # TabView + 5 tab roots
-│   ├── AppEnvironment.swift          # composition root: wires stores into @Environment
+│   ├── AppEnvironment.swift          # AppGraph composition root: wires stores into @Environment
 │   ├── Info.plist                    # UILaunchScreen (required), URL types, usage strings
 │   ├── APPNAME.entitlements
 │   └── Resources/
@@ -45,22 +45,26 @@ appname-ios/
 ├── ShareExtension/                   # NSExtensionActivationSupportsWebURLWithMaxCount = 1
 │   ├── ShareViewController.swift
 │   └── Info.plist
-├── Packages/
-│   ├── Core/                         # Theme, Route enums, design tokens, formatters, haptics
-│   ├── RedditKit/                    # RedditAPI actor, models, URL parsing, auth, cookies
-│   ├── Persistence/                  # GRDB stack, schema, seen/hidden/drafts/themes/stats
-│   ├── DesignSystem/                 # shared SwiftUI components, Liquid Glass usage, list rows
-│   ├── MarkdownRender/               # Reddit HTML → SwiftUI; composer markdown preview
+├── Packages/                         # the 18 packages of 02-architecture.md §2.2/§3.1, verbatim
+│   ├── AppCore/                      # domain values, RedditLink, formatters, Feature, filters
+│   ├── RedditAPI/                    # RedditClient actor, endpoint catalog, SessionStore, Redgifs
+│   ├── Persistence/                  # GRDB stack, schema, seen/hidden/drafts/themes/stats, settings
+│   ├── RedditMarkdown/               # Reddit-flavored markdown → AST → SwiftUI; composer preview
+│   ├── Theming/                      # Theme model, ThemeStore, import/export codec, glass rules
+│   ├── Entitlements/                 # StoreKit 2, Feature enum, paywall (05-monetization.md)
 │   ├── MediaKit/                     # image pipeline, player registry, focus engine, viewer
-│   ├── Feature/Feeds/
-│   ├── Feature/PostDetail/
-│   ├── Feature/Accounts/
-│   ├── Feature/Inbox/
-│   ├── Feature/Search/
-│   ├── Feature/Subreddits/
-│   ├── Feature/Compose/
-│   ├── Feature/Settings/
-│   └── Entitlements/                 # StoreKit 2, Feature enum, paywall (05-monetization.md)
+│   ├── AppRouting/                   # Route enum, per-tab Router, RouteResolver, LinkIntake, modals
+│   ├── DesignSystem/                 # shared SwiftUI primitives, swipe row, haptics facade
+│   └── Features/
+│       ├── FeedFeature/
+│       ├── PostDetailFeature/
+│       ├── ComposerFeature/
+│       ├── MediaFeature/
+│       ├── AccountsFeature/
+│       ├── InboxFeature/
+│       ├── SearchFeature/
+│       ├── SubredditsFeature/
+│       └── SettingsFeature/
 ├── Tests/
 │   ├── UITests/                      # XCUITest smoke only (Swift Testing can't drive UI)
 │   └── Fixtures/                     # recorded Reddit JSON, see §1.7
@@ -107,7 +111,7 @@ Build settings that are not optional:
 | Setting | Value | Source |
 |---|---|---|
 | `IPHONEOS_DEPLOYMENT_TARGET` | `26.0` | `[DECISION: min-ios]` |
-| `SWIFT_VERSION` | `6.4` | `spec/10` §A1 |
+| `SWIFT_VERSION` | `6.0` — this build setting is the **language mode**, not the toolchain. The toolchain is Swift **6.4**, shipped in Xcode 27, and each `Package.swift` declares `swift-tools-version: 6.4` | `02-architecture.md` §1.4; `spec/10` §A1 |
 | `SWIFT_STRICT_CONCURRENCY` | `complete` | `spec/10` §A3 |
 | `SWIFT_APPROACHABLE_CONCURRENCY` | `YES` | `spec/10` §A3 |
 | `SWIFT_DEFAULT_ACTOR_ISOLATION` | `MainActor` | SE-0466; `spec/10` §A3 |
@@ -129,7 +133,7 @@ Nothing outside this list without an explicit owner decision. Pin exact versions
 |---|---|---|
 | `GRDB.swift` | Local database | `spec/10` §A3 storage recommendation; `[DECISION: unpruned-tables]` |
 | `Nuke` | Feed + viewer image pipeline | `spec/10` §A3 images: `AsyncImage` + `asyncImageURLSession` for avatars/icons, Nuke for the feed. Pin before moving Xcode versions |
-| `swift-markdown` (or `cmark-gfm`) | Composer preview only | `[DECISION: snudown-renderer]` |
+| `swift-cmark-gfm` (or `swift-markdown`, which vends the same core) | **The whole markdown pipeline** — fetched post/comment bodies *and* composer previews, one parser and one renderer (`02-architecture.md` §9) | `[DECISION: snudown-renderer]` |
 | `sentry-cocoa` | Crash reporting | **Only if** `[DECISION: sentry-or-not]` resolves to "include" |
 
 Deliberately **not** used: any purchase SDK (StoreKit 2 direct), any networking library
@@ -160,7 +164,7 @@ Deliberately **not** used: any purchase SDK (StoreKit 2 direct), any networking 
 | `lint` | checkout → `Scripts/lint.sh` |
 | `test` | checkout → select Xcode 27 (`sudo xcode-select -s /Applications/Xcode_27.app`) → cache `~/Library/Developer/Xcode/DerivedData` and `.build` → `swift test` in each `Packages/*` → `xcodebuild test -scheme APPNAME -destination 'platform=iOS Simulator,name=iPhone 17,OS=27.0' -resultBundlePath Results.xcresult` → upload the result bundle |
 | `ui-smoke` | same setup → `xcodebuild test -scheme APPNAMEUITests -only-testing:UITests/SmokeTests` (launch, tab through all five tabs, open a post from a fixture-backed feed, open settings, dismiss) |
-| `fixtures` | `Scripts/replay-fixtures.sh` — decodes every committed fixture through `RedditKit`'s parsers and asserts no throw and no field regressions (§3.3) |
+| `fixtures` | `Scripts/replay-fixtures.sh` — decodes every committed fixture through `RedditAPI`'s parsers and asserts no throw and no field regressions (§3.3) |
 
 `.github/workflows/release.yml` — on a `v*` tag:
 checkout → Xcode 27 → decode the App Store Connect API key from a base64 secret →
@@ -214,7 +218,7 @@ personal identifiers:
 | Paywall review screenshot | One capture of the paywall sheet per IAP product, uploaded in App Store Connect |
 | App Store screenshots | 6.9" and 6.5" classes; produced with `fastlane snapshot` against the fixture-backed UI tests so they are reproducible |
 | Fonts | **None.** System font only. The original bundled a monospace face for code blocks; `.monospaced` design covers that |
-| Colours | Defined as semantic tokens in `Core`, not as asset-catalogue colours, because themes are runtime data (`[DECISION: theme-count]`) |
+| Colours | Defined as semantic tokens in `Theming`/`DesignSystem`, not as asset-catalogue colours, because themes are runtime data (`[DECISION: theme-count]`) |
 
 ---
 
@@ -230,41 +234,46 @@ not depend on it.
 ### Phase 0 — Skeleton
 
 - **Inputs:** `02-architecture.md`; `spec/01` §§1–4, §16; `spec/10` §§A1–A3; this doc §1.
-- **Deliverables:** repo, `.xcodeproj`, all package stubs with `Package.swift`, app target with
-  scene lifecycle and launch screen, `Core` package containing the `Theme` model (19 colour roles +
-  mode/status-bar flags), a `ThemeStore` in `@Environment`, two starter themes, the design-token
-  layer, `Route` enums per tab, five `NavigationStack`s inside a `TabView` with the five tabs
-  (Posts / Inbox / Account / Search / Settings) and the tab-retap and tab-long-press hooks stubbed,
-  an empty Settings root list, SwiftLint/swift-format configs, `Scripts/*`, both CI workflows,
-  `PROGRESS.md` seeded with every checklist item from §3 marked `TODO`.
+- **Deliverables:** repo, `.xcodeproj`, all 18 package stubs with `Package.swift`, app target with
+  scene lifecycle and launch screen; `AppCore` with the domain value types and the `Feature` enum;
+  `Theming` with the `Theme` model (19 colour roles × 4 renditions + mode/status-bar flags) and a
+  `ThemeStore` in `@Environment`, plus two of the new starter themes; `DesignSystem`'s token layer;
+  `AppRouting`'s `Route` enum and per-tab `Router`; five `NavigationStack`s inside a `TabView` with
+  the five tabs (Posts / Inbox / Account / Search / Settings) and the tab-retap and tab-long-press
+  hooks stubbed; an empty Settings root list; SwiftLint/swift-format configs, `Scripts/*`, both CI
+  workflows; `PROGRESS.md` seeded with every checklist item from §4 marked `TODO`.
 - **DoD:** app launches in the simulator to a five-tab shell; switching tabs preserves each stack;
   theme switch visibly repaints; CI green on a pushed branch.
-- **Tests:** `Core` — theme merge/resolution (custom over base), colour token validation
-  (including the fixed `validateHex-bug` rules), `Route` round-trips.
+- **Tests:** `Theming` — theme merge/resolution (custom over base), colour-token validation
+  (including the fixed `validateHex-bug` rules, i.e. an anchored validator and a `hexToRgb` that
+  handles the 3-, 6- and 8-digit forms); `AppRouting` — `Route` round-trips.
 - **Smoke:** launch; tap each tab; rotate (stays portrait); toggle system dark mode (theme follows
   when the light/dark pairing is on); background and foreground.
 
-### Phase 1 — RedditKit: networking, models, auth
+### Phase 1 — RedditAPI: networking, models, auth
 
 - **Inputs:** `03-data-and-networking.md`; `spec/02` in full; `spec/09` §2.2.
-- **Deliverables:** `RedditAPI` actor over `URLSession` (10 s timeout, no status-code throwing in
-  the legacy sense but **with** the new explicit status handling from `[DECISION: no-429-handling]`,
-  cookie-enabled session, one randomized Safari UA per launch, form-encoded writes, `X-Modhash`
-  header, `sr_detail=true` on listings, depagination); `RedditURL` value type reproducing the
-  normalization table, the 14-row page-type ladder, sort read/write, short-link resolution
-  (HEAD→GET), and `applyPreferredSorts`; all model types with `Decodable` conformances and
-  HTML-entity decoding; the error taxonomy (banned/private/quarantined/gated/multireddit-
+- **Deliverables:** `RedditClient` actor over `URLSession` (10 s timeout, body-shape error
+  classification **plus** the new explicit status handling from `[DECISION: no-429-handling]`,
+  cookie-enabled session, one well-formed randomized Safari UA per launch
+  (`[DECISION: user-agent-string]`), form-encoded writes, `X-Modhash` header, `raw_json=1` and
+  `sr_detail=true` on every listing (`[DECISION: raw-json-param]` — **no client-side entity
+  decoding anywhere**), depagination); the `RedditLink` value type reproducing the normalization
+  table, the 17-row page-type ladder, sort read/write, short-link resolution (HEAD→GET), and
+  `applyPreferredSorts`; all model types with `Decodable` conformances; the error taxonomy (banned/private/quarantined/gated/multireddit-
   unavailable/user-404/user-banned/listing/filter-limit/offline/rate-limited); cookie + Keychain
-  session storage with the expiry rewrite and the pre-expire-then-clear logout ordering; the
-  `AccountStore` with modhash lifecycle and multi-account switching; the fixtures from §1.7.
+  session storage with the expiry rewrite (**once per app session per account**,
+  `[DECISION: cookie-expiry-rewrite]`) and the pre-expire-then-clear logout ordering; the
+  `AccountsStore` with modhash lifecycle and multi-account switching; the fixtures from §1.7.
+  **Not built:** the `old.reddit.com/prefs` scrape and rewrite (`[DECISION: prefs-force-over18-on-login]`).
 - **DoD:** every fixture decodes; every model field in `spec/02` §4 is populated and asserted; the
   page-type ladder matches the table row for row.
 - **Tests (Swift Testing, no network):** URL normalization and page-type table-driven tests
   (one case per row, plus the spoof cases like `redd.it.evil.com`); `jsonify()` examples; sort
   parse/rewrite per page type; post media classification ladder (all 8 rules) against fixtures;
-  comment tree building including `more` stubs and `count: 0`; entity decoding; time and number
-  formatters (including the fixed year seam); error-envelope mapping; pagination cursor selection;
-  cookie expiry-rewrite logic.
+  comment tree building including `more` stubs and `count: 0`; time and number formatters (including
+  the fixed year seam and the abbreviated feed counts, `[DECISION: number-format-parity]`);
+  error-envelope mapping; pagination cursor selection; cookie expiry-rewrite frequency.
 - **Smoke:** none (no UI yet) — run `Scripts/replay-fixtures.sh`.
 
 ### Phase 2 — Feeds
@@ -275,7 +284,7 @@ not depend on it.
   `10,20,40,70,100` limit ramp, `fullyLoaded`, `hitFilterLimit`, refresh semantics, 2-screen
   load-more threshold); post card in normal and compact layouts with every appearance setting
   wired; metadata footer; saved notch; seen dimming and the per-post seen pub/sub; swipe actions
-  via `Slideable`-equivalent (75/130 pt bands, one haptic per band transition, action on release,
+  via `DesignSystem.SwipeActionsRow` (75/130 pt bands, one haptic per band transition, action on release,
   scroll lock) — `[GATE: gate.gestures]` on reassignment only; long-press context menu with the
   full ordered action list; sorting UI including the two-step Top picker; filters (text trie with
   whole-word matching, subreddit filters with durations, hidden posts, hide-seen with per-page
@@ -298,16 +307,20 @@ not depend on it.
   (`[DECISION: comment-tree-renderer]`) with depth indentation and the depth-colour rail;
   collapse / collapse-children-only / collapse-thread; load-more (10 ids in parallel);
   AutoMod auto-collapse; comment swipe actions and context menu (9 items incl. Copy Text);
-  comment sorting (six options); scroll-to-next/previous floating button with the 10 snap
-  positions; the HTML→SwiftUI renderer covering every tag in `spec/04` §6.1 including spoilers,
-  tables, code blocks, blockquotes, `li` with correct nested numbering, inline images, Giphy
-  interception, and the link-tap routing rules; text selection sheet; read-only polls.
+  comment sorting (six options in the in-post menu); scroll-to-next/previous floating button with
+  the 10 snap positions; the **markdown → AST → SwiftUI** renderer in `RedditMarkdown`
+  (`[DECISION: snudown-renderer]`) covering every construct in `04a` §18.1 — spoilers, tables, code
+  blocks, blockquotes, correctly numbered nested lists, inline images, Giphy interception, true
+  superscript (`[DECISION: superscript-baseline]`), clamped emoji runs, and the link-tap routing
+  rules — with inline text selection **disabled** on bodies; the text-selection sheet; read-only
+  polls.
 - **DoD:** the 2,000-comment fixture renders its first screen in well under a second and memory
   does not scale with thread size; collapsing a 500-child thread does not re-render the list.
 - **Tests:** flattening (port every case of the original's ~20-case suite: emission order,
   filtered-subtree removal, both collapse modes, sibling independence, root trailing load-more,
-  stable keys); a ~2,000-node synthetic tree flattens in <100 ms; HTML renderer golden tests
-  (element tree in, node tree out) for each tag; markdown composer preview round-trips.
+  stable keys); a ~2,000-node synthetic tree flattens in <100 ms; the markdown golden-file corpus
+  (`02-architecture.md` §9.1) plus one AST-to-render test per block type; composer toolbar
+  transforms including the fixed first-line quote (`[DECISION: quote-first-line]`).
 - **Smoke:** open a megathread; collapse/expand at several depths; tap "N more replies" twice;
   jump with the floating button; reveal a spoiler; scroll a wide table; select text.
 
@@ -323,11 +336,15 @@ not depend on it.
   `onScrollTargetVisibilityChange` with the 70%/60% thresholds, 150 ms settle, lenient stop,
   immediate release, remembered positions (LRU 200); Redgifs lazy resolution with the exact
   concurrency/backoff contract; query-param-trim fallback with signed-host exclusions; reload
-  watchdog; overlay state machine; Gallery Mode grid (masonry, 2 columns) **with NSFW blur**
-  (`[DECISION: gallery-mode-no-blur]`) and the `[GATE: gate.galleryMode]` 100-item footer;
-  download/share/save flows with add-only Photos permission (`[GATE: gate.downloads]`);
-  video long-press menu (`[DECISION: no-video-longpress-menu]`); Live Text via
-  `ImageAnalysisInteraction` (`[DECISION: live-text-dead-setting]`); low-data-mode rules.
+  watchdog; overlay state machine; the viewer's zoom navigation transition
+  (`[DECISION: viewer-zoom-transition]`) and its tappable-to-retry hard-error state
+  (`[DECISION: fullscreen-player-retry]`); Gallery Mode grid (masonry, 2 columns) **with NSFW blur**
+  (`[DECISION: gallery-mode-no-blur]`), a **4-player ceiling** (`[DECISION: gallery-video-cap]`) and
+  the `[GATE: gate.galleryMode]` 100-item inline footer; download/share/save flows with add-only
+  Photos permission (`[GATE: gate.downloads]`); the new video long-press menu
+  (`[DECISION: no-video-longpress-menu]`); Live Text via `ImageAnalysisInteraction`
+  (`[DECISION: live-text-dead-setting]`); the 6-concurrent OpenGraph cap
+  (`[DECISION: og-concurrency-cap]`); low-data-mode rules.
 - **DoD:** a 100%-video fixture feed plays exactly one video at a time, never exceeds 12 live
   players, and survives a 10-second fling with no black tiles.
 - **Tests:** tap classifier (pure, table-driven, every threshold boundary); overlay state machine
@@ -341,9 +358,13 @@ not depend on it.
 ### Phase 5 — Accounts, inbox, messages, user, search, subreddits, sidebar, wiki
 
 - **Inputs:** `04c-…`; `spec/07` in full; `spec/02` §§2.5–2.9.
-- **Deliverables:** login via SwiftUI `WebView`/`WebPage` with a non-persistent data store per
-  attempt, both success detectors (navigation off the allow-list + cookie poll), temp-logout and
-  restore-on-cancel; accounts list with swipe/long-press delete and the "Logged Out" row;
+- **Deliverables:** login via SwiftUI `WebView`/`WebPage` against the **shared persistent**
+  `WKWebsiteDataStore` (so the cookie lands in the app's jar), both success detectors (navigation off
+  the four-entry allow-list + the 500 ms cookie poll), temp-logout and restore-on-cancel, **no CSS
+  injection** (`[DECISION: login-css-injection]`) and one line of explanatory copy
+  (`[DECISION: login-no-instructions]`); the one-time NSFW-visibility banner that replaces the
+  `/prefs` rewrite (`[DECISION: prefs-force-over18-on-login]`); accounts list with swipe/long-press
+  delete **behind a confirmation** (`[DECISION: no-confirm-account-delete]`) and the "Logged Out" row;
   `[GATE: gate.multiAccount]` on the second account and on quick swap; inbox list with the two item
   kinds, swipe and long-press actions, mark-all-read, 60 s poll, badge; message thread with bubbles
   and reply; new message composer; user profile with stats, avatar
@@ -390,14 +411,20 @@ not depend on it.
   defaults from its §11.2 table (minus removed rows per `08-decisions-and-drift.md`); theme list
   and Theme Maker with the five colour groups, the colour picker (hex + RGB sliders), live
   app-wide preview that excludes the editor itself, and save/overwrite/delete
-  (`[GATE: gate.customThemes]`); theme share/import with the **new** sentinel format
-  (`[DECISION: theme-import-format-compat]`); alternate icons grid
-  (`[GATE: gate.appIcons]`); Stats screen with all six sections including achievements and fun
-  facts (`[GATE: gate.stats]`); the reduced help section (`[DECISION: guide-included-or-not]`);
+  (`[GATE: gate.customThemes]`); the **new 6–8 theme built-in catalogue**
+  (`[DECISION: theme-count]`); theme share/import with the **new** base64url sentinel format
+  (`[DECISION: theme-import-format-compat]`); the alternate-icons grid with no artist-credit pages
+  (`[GATE: gate.appIcons]`, `[DECISION: app-icons-new-art]`); the Gestures screen
+  (`[GATE: gate.gestures]`) and the Sorting screen (`[GATE: gate.sortMemory]`); Stats screen with all
+  six sections including achievements and fun facts (`[GATE: gate.stats]`); the reduced help section
+  with **SQLite FTS5 + BM25 search, no embeddings and no answer card**
+  (`[DECISION: guide-included-or-not]`, `[DECISION: guide-ai-answer-drop]`);
   external-link browser routing with the seven targets and the not-installed fallback; cache
   clearing (image immediate, video deferred to next launch); startup tab and startup URL.
-- **DoD:** every setting persists across a cold launch and takes effect without a restart, except
-  where a restart is genuinely unavoidable (video cache clear only).
+- **DoD:** every setting persists across a cold launch and takes effect **without a restart** — no
+  setting shows a restart alert (`[DECISION: mark-seen-live]`, `[DECISION: error-reporting-default]`).
+  The single deferred-to-next-launch operation is clearing the **video** cache, which is not a
+  setting.
 - **Tests:** settings defaults table (one assertion per key); theme resolution order (built-in →
   custom by name → default, plus live draft overlay); theme import parsing including malformed and
   nested-brace payloads; stats arithmetic (distance conversions, ratios, achievement thresholds,
@@ -413,7 +440,7 @@ not depend on it.
   `currentEntitlements` read, renewal-state mapping, offline cache with 16-day leeway, purchase
   and restore, `requiresEntitlement(_:style:)` with its four gate styles, `PaywallPresenter` with
   the pending-action replay, `SubscriptionStoreView`-based paywall, Settings → APPNAME Plus screen
-  with `manageSubscriptionsSheet`; then a sweep applying every `[GATE: …]` tag across the `04*`
+  with `manageSubscriptionsSheet`; then a sweep applying every `[GATE: gate.*]` tag across the `04*`
   docs to the code built in Phases 2–7.
 - **DoD:** with the StoreKit configuration file active, all eleven gates lock and unlock correctly
   across purchase, cancel, expire, grace, retry, refund and family-share revocation.
@@ -426,8 +453,12 @@ not depend on it.
 
 - **Inputs:** `spec/01` §§6–9, §§12–20; `spec/10` §A2; `08-decisions-and-drift.md` §2.
 - **Deliverables:** Share Extension; custom URL scheme + the `openurl` wrapper; "Open in APPNAME"
-  App Intent (`[DECISION: shortcuts-intent]`); clipboard link detection (default off); startup
-  modals (what's new, `requestReview`); haptics policy applied at every call site; one-time tips;
+  App Intent (`[DECISION: shortcuts-intent]`); **no Associated Domains**
+  (`[DECISION: universal-links-absent]`); clipboard link detection (default off,
+  `[DECISION: clipboard-read-default]`); startup modals — what's new, then the review prompt via
+  `requestReview` (`[DECISION: review-prompt-mechanism]`, `[DECISION: startup-modals]`) and **no
+  community-subscribe nudge** (`[DECISION: subscribe-nag-removed]`); haptics policy applied at every
+  call site; one-time tips;
   the fix-forward sweep over `08` §2; a **Liquid Glass audit** (remove custom backgrounds from
   bars/tab bar/toolbars, verify scroll-edge effects, verify all themes against Reduce Transparency,
   Reduce Motion and Increase Contrast — `spec/10` §A2); an **accessibility audit** (VoiceOver
@@ -463,7 +494,7 @@ not depend on it.
    through the real parsers, and asserts a golden summary per file (counts, ids, classified media
    type, error mapping). A parser change that silently drops a field fails here.
 4. **UI smoke.** One XCUITest target, kept deliberately small, launched with
-   `-UITestFixtureMode 1` so `RedditKit` serves fixtures instead of the network.
+   `-UITestFixtureMode 1` so `RedditAPI` serves fixtures instead of the network.
 5. **Manual smoke.** The per-phase lists above, consolidated in `PROGRESS.md`, run on a device
    before Phase 10.
 
@@ -499,8 +530,8 @@ such in `PROGRESS.md`. **CHANGED** items are built differently from the original
 - [ ] 19. Manual "Mark as Read"/"Mark as Unread" from the long-press menu.
 - [ ] 20. Per-page override of hide-seen via the "…" menu; overridden pages listed in Filters settings.
 - [ ] 21. Gallery Mode: two-column masonry of media-only posts, entered from the "…" menu.
-- [ ] 22. Automatic one-time Gallery Mode suggestion on a media-heavy feed (≥100 posts, ≥85% media, non-combined feed).
-- [ ] 23. Gallery Mode fullscreen: horizontal between items, vertical between posts, pinch zoom, tap for overlay, swipe/✕ to close.
+- [ ] 22. **CHANGED** Automatic one-time Gallery Mode suggestion on a media-heavy feed (≥100 posts, ≥85% media, non-combined feed); the one-time flag is written on **either** answer (`[DECISION: gallery-offer-cancel]`).
+- [ ] 23. Gallery Mode fullscreen: horizontal between items, vertical between posts, pinch zoom, tap for overlay, swipe/✕ to close; at most 4 grid videos play at once (`[DECISION: gallery-video-cap]`).
 - [ ] 24. Gallery overlay shows title, text preview, subreddit, author; tap opens the post; share button shares the media.
 - [ ] 25. **CHANGED** Gallery Mode applies text filters, hide-seen and subreddit filters, **and NSFW/spoiler blur** (`[DECISION: gallery-mode-no-blur]`).
 - [ ] 26. **CHANGED** Gallery Mode capped at 100 items without a subscription (`[GATE: gate.galleryMode]`), as an inline footer rather than a hard stop.
@@ -520,8 +551,8 @@ such in `PROGRESS.md`. **CHANGED** items are built differently from the original
 - [ ] 37. Image posts: single image from the library, uploaded with a preview before submit; multi-image unsupported.
 - [ ] 38. Toolbar: link, bold, italic, quote, strikethrough, spoiler; wraps a selection; raw markdown typeable.
 - [ ] 39. Flair picker when the subreddit offers non-mod-only flairs, including "No Flair".
-- [ ] 40. **CHANGED** Post drafts autosave per subreddit **and per post kind** and restore; cleared on success (`[DECISION: newpost-type-switch-keeps-text]`).
-- [ ] 41. Editing a post changes body text only; edited indicator shown.
+- [ ] 40. **CHANGED** Post drafts autosave per subreddit **and per post kind**, using the `03` §7.5 key formats, and restore; cleared only on success (`[DECISION: newpost-type-switch-keeps-text]`, `[DECISION: settings-key-rename]`).
+- [ ] 41. Editing a post changes body text only; edited indicator shown; cancelling with unsaved changes confirms first (`[DECISION: composer-no-discard-confirm]`).
 - [ ] 42. Deleting a post requires confirmation.
 - [ ] 43. Captcha fallback opens Reddit's submit page in a web view; self-post body copied to the clipboard.
 - [ ] 44. Posting requires login; subreddit age/karma errors surfaced verbatim.
@@ -562,13 +593,13 @@ such in `PROGRESS.md`. **CHANGED** items are built differently from the original
 ### D. Media → `04b`
 
 - [ ] 75. Inline images with gallery support for multi-image posts.
-- [ ] 76. Fullscreen viewer: double-tap zooms to 3×, again to fit; pinch 1–10×; pan while zoomed.
+- [ ] 76. **CHANGED** Fullscreen viewer entered with a zoom transition from the thumbnail (`[DECISION: viewer-zoom-transition]`); double-tap zooms to 3×, again to fit; pinch 1–10×; pan while zoomed.
 - [ ] 77. Multi-image posts: horizontal paging with an "n / total" indicator and prev/next buttons.
 - [ ] 78. Long-press an image: Share / Save / Copy Link (`[GATE: gate.downloads]` on Save).
 - [ ] 79. Collection navigation arrows in the viewer, dimmed at the ends.
 - [ ] 80. Viewer overlay shows title, text preview, subreddit, author; each navigates.
 - [ ] 81. Viewer dismisses by overscroll flick up or down.
-- [ ] 82. **CHANGED** Live Text on images actually implemented (`[DECISION: live-text-dead-setting]`).
+- [ ] 82. **CHANGED** Live Text on images actually implemented via `ImageAnalysisInteraction` (`[DECISION: live-text-dead-setting]`).
 - [ ] 83. Live Text off by default.
 - [ ] 84. With Live Text on, the long-press context menu requires a longer hold.
 - [ ] 85. Live Text limitations documented in help text, not worked around.
@@ -606,7 +637,7 @@ such in `PROGRESS.md`. **CHANGED** items are built differently from the original
 - [ ] 114. **N/A** Google sign-in presence is Reddit's own page's business (`[DECISION: D17]`).
 - [ ] 114a. Account tab and "+" pulse while zero accounts are saved.
 - [ ] 114b. One-time tip: long-press the Account tab to swap accounts.
-- [ ] 114c. **CHANGED** The `/prefs` NSFW/media normalization is disclosed and toggleable (`[DECISION: prefs-force-over18-on-login]`).
+- [ ] 114c. **CUT** The silent `/prefs` NSFW/media normalization is **not built**; a one-time dismissible banner points at Reddit's own settings instead (`[DECISION: prefs-force-over18-on-login]`).
 
 ### F. Inbox / messages → `04c`
 
@@ -619,13 +650,13 @@ such in `PROGRESS.md`. **CHANGED** items are built differently from the original
 - [ ] 121. Reply swipes: right = upvote (short) / downvote (long); left = toggle read.
 - [ ] 122. Message swipes: toggle read.
 - [ ] 123. Long-press a reply: Upvote / Downvote / Mark Read / Mark Unread.
-- [ ] 124. **CHANGED** Long-press a message: Mark Read **or** Mark Unread (label reflects state).
+- [ ] 124. **CHANGED** Long-press a message: Mark Read **or** Mark Unread, label reflecting state (`[DECISION: message-modal-copy-bugs]`).
 - [ ] 125. "Mark All Read" with confirmation, success alert and a delayed re-check.
 - [ ] 126. Message thread view: chronological bubbles, own messages right-aligned.
 - [ ] 127. New message from a profile's "…" menu: subject + body + send.
 - [ ] 128. Message composer has the markdown toolbar and live preview.
 - [ ] 129. Message drafts (new and reply) autosave and restore.
-- [ ] 130. **CHANGED** Reply from the thread; modal titled "Reply"; errors say "message" (`[DECISION: message-modal-copy-bugs]`).
+- [ ] 130. **CHANGED** Reply from the thread; the modal is titled "Reply" and its failure alert reads "Failed to send message" (`[DECISION: message-modal-copy-bugs]`).
 - [ ] 131. **CUT** Inbox Alerts / push notifications (`[DECISION: push-removed]`).
 - [ ] 131a. 60-second foreground poll updates the count and the app-icon badge; no background delivery.
 
@@ -665,10 +696,10 @@ such in `PROGRESS.md`. **CHANGED** items are built differently from the original
 
 ### I. Voting → `04a`
 
-- [ ] 160. Up/down arrows colour and adjust the score; the same arrow again retracts.
+- [ ] 160. **CHANGED** Up/down arrows colour and adjust the score **optimistically**, rolling back with a transient error on failure; the same arrow again retracts (`[DECISION: vote-no-optimistic-rollback]`, `[DECISION: unhandled-save-failure]`).
 - [ ] 161. Voting via configured swipe gestures on posts and comments.
 - [ ] 162. Swiping the same action again undoes the vote.
-- [ ] 163. Score is upvotes minus downvotes; hidden scores show "–"; Reddit fuzzes counts.
+- [ ] 163. **CHANGED** Score is upvotes minus downvotes, abbreviated on feed cards (`[DECISION: number-format-parity]`); hidden scores show "–"; Reddit fuzzes counts.
 - [ ] 164. **CHANGED (FIXED)** Voting in post detail is reflected in the feed behind it (`[DECISION: postdetail-vote-not-reflected]`).
 
 ### J. Saving → `04a`
@@ -767,7 +798,7 @@ such in `PROGRESS.md`. **CHANGED** items are built differently from the original
 
 ### Q. Themes and appearance → `04c`
 
-- [ ] 234. **CHANGED** New built-in theme set, all free (`[DECISION: theme-count]`).
+- [ ] 234. **CHANGED** New built-in theme set of 6–8 themes with new palettes, all free (`[DECISION: theme-count]`).
 - [ ] 235. **CUT** Timed previews of locked themes (dark pattern).
 - [ ] 236. Tapping a theme applies it immediately and persists it.
 - [ ] 237. Separate light/dark theme pairing following the system appearance (`[GATE: gate.customThemes]`).
@@ -778,7 +809,7 @@ such in `PROGRESS.md`. **CHANGED** items are built differently from the original
 - [ ] 242. Theme status-bar style setting.
 - [ ] 243. Five colour groups covering 19 roles.
 - [ ] 244. Unset colours show "(default)" and inherit the base theme.
-- [ ] 245. Comment depth colours are fixed and shared across themes.
+- [ ] 245. Comment depth colours are a fixed 6-colour cycle, shared across themes and not customisable — **with new colours**, not the original's (`[DECISION: theme-count]`).
 - [ ] 246. Theme edits preview live app-wide but not inside the editor; unsaved edits end when leaving.
 - [ ] 247. Save requires a name; overwriting prompts; saved themes appear in the list immediately.
 - [ ] 248. Edit an existing custom theme by long-pressing it.
@@ -808,7 +839,7 @@ such in `PROGRESS.md`. **CHANGED** items are built differently from the original
 - [ ] 272. Appearance — Collapse children only.
 - [ ] 273. Appearance — Show username in the tab bar.
 - [ ] 274. Appearance — Hide tab bar on scroll.
-- [ ] 275. **CHANGED** Settings search filters settings rows locally; no AI question box (`[DECISION: guide-included-or-not]`).
+- [ ] 275. **CHANGED** The Settings-root search bar is a shortcut into the Guide's own FTS5 search; there is no AI question box (`[DECISION: guide-included-or-not]`, `[DECISION: guide-ai-answer-drop]`).
 
 ### R. AI summaries → **entire area CUT** (`[DECISION: ai-removed]`)
 
@@ -853,7 +884,7 @@ such in `PROGRESS.md`. **CHANGED** items are built differently from the original
 - [ ] 304. **CUT** Self-hosted server section (`[DECISION: self-hosted-server-row]`).
 - [ ] 305. Startup: start on a chosen tab.
 - [ ] 306. Startup: startup URL overriding the tab, with validation feedback.
-- [ ] 307. **CHANGED** Settings root lists: General, Help, Theme, Appearance, App Icon, Account, Data Use, Stats, Privacy, Advanced, **APPNAME Plus**, What's New, Feedback.
+- [ ] 307. **CHANGED** Settings root lists, in order: Guide, General, Theme, Appearance, App Icon (device-conditional), Account, **APPNAME Plus**, Data Use, Stats, Privacy, Advanced, Patch Notes, Request A Feature (`04c` §15).
 - [ ] 308. "What's New" shows the current release notes.
 - [ ] 309. **CHANGED** Feedback links to the owner's chosen destination (no third-party subreddit by default).
 - [ ] 310. All settings autosave and persist.
@@ -864,8 +895,8 @@ such in `PROGRESS.md`. **CHANGED** items are built differently from the original
 ### V. App icons → `04c`, `[GATE: gate.appIcons]`
 
 - [ ] 313. App Icon section shown only where alternate icons are supported.
-- [ ] 314. Tap an icon to preview, then set it; immediate effect; the active icon is badged.
-- [ ] 315. **CHANGED** No artist-credit detail pages (`[DECISION: app-icons-new-art]`).
+- [ ] 314. Tapping an icon in the grid sets it directly; immediate effect, no restart; the active icon is badged. Alternates carry a Plus badge while locked (`[GATE: gate.appIcons]`); reverting to the default is always free.
+- [ ] 315. **CHANGED** No per-icon detail page and no artist-credit card; the grid is the whole screen (`[DECISION: app-icons-new-art]`).
 - [ ] 316. **CHANGED** One default plus three new alternates, authored for this app.
 
 ### W. Help → `04c`
@@ -912,7 +943,7 @@ such in `PROGRESS.md`. **CHANGED** items are built differently from the original
 
 | # | Risk | Likelihood | Impact | Mitigation |
 |---|---|---|---|---|
-| R1 | **Reddit blocks the keyless model** — UA fingerprinting, mandatory OAuth, or blanket 403s on `www.reddit.com` JSON | Medium | Fatal | Isolate all of it behind the `RedditKit` actor so the transport can change in one place. Ship the randomized-UA strategy from day one. Build `[DECISION: no-429-handling]` so throttling degrades gracefully instead of looking like corruption. Keep the fixture suite so a protocol change is diagnosed in minutes. Have a contingency: a Reddit OAuth app with the installed-client flow is a two-day change if `RedditKit` is clean |
+| R1 | **Reddit blocks the keyless model** — UA fingerprinting, mandatory OAuth, or blanket 403s on `www.reddit.com` JSON | Medium | Fatal | Isolate all of it behind the `RedditAPI` package's `RedditClient` actor so the transport can change in one place. Ship the randomized-UA strategy from day one. Build `[DECISION: no-429-handling]` so throttling degrades gracefully instead of looking like corruption. Keep the fixture suite so a protocol change is diagnosed in minutes. Have a contingency: a Reddit OAuth app with the installed-client flow is a two-day change if `RedditAPI` is clean |
 | R2 | **Cookie login fragility** — Reddit changes its login page, the success heuristics stop firing, or WebKit cookie behaviour shifts | High | High | Keep **both** success detectors (navigation allow-list **and** a cookie poll). Use `WebPage.Configuration` with an explicit `websiteDataStore` so each login attempt starts clean. Never parse Reddit's DOM for anything but cosmetics. Reproduce the expire-then-clear logout ordering exactly. Add an explicit "login timed out" state after 120 s with a retry, instead of hanging |
 | R3 | **App Store review of a third-party Reddit client** — 4.2 minimum functionality, 5.2.5 trademark, UGC/age-rating, or the login-in-a-web-view pattern | Medium | High | 17+ rating with the UGC questions answered; block and report paths present and named in review notes; no Reddit wordmark or Snoo anywhere; the app is a native client with web views only for login, wiki and report; review notes explain the access model and that no demo account is needed; the free tier is fully functional without login |
 | R4 | **Liquid Glass regressions** — themed backgrounds fight the material; custom colours fail Increase Contrast / Reduce Transparency | High | Medium | Phase 9 audit is a gate, not a nicety. Rule: no custom background on any bar, tab bar or toolbar. `glassEffect` only on the media viewer chrome and the paywall header. Every theme ships light and dark variants and is checked against the three accessibility settings. Theme roles that must meet contrast (text on background, text on tint) are validated at save time in the Theme Maker |
@@ -933,30 +964,34 @@ Ballpark, to calibrate the one-shot. Swift lines, excluding tests, comments and 
 
 | Package / target | Files | LoC | Notes |
 |---|---|---|---|
-| `Core` | 25–35 | 1,800 | Theme model + resolution, tokens, routes, formatters (time/number), haptics, small utilities |
-| `RedditKit` | 45–60 | 5,500 | API actor, URL parsing, 12 model families with decoding, auth + cookies, error taxonomy, paging state machine |
-| `Persistence` | 15–20 | 1,200 | GRDB stack, 6 tables, migrations, maintenance, seen pub/sub |
-| `DesignSystem` | 30–40 | 2,500 | Rows, list primitives, swipe container, context menus, badges, refresh, access-failure views |
-| `MarkdownRender` | 20–25 | 2,800 | HTML→SwiftUI walker (~30 tag handlers), composer markdown pipeline, spoilers, tables, code |
-| `MediaKit` | 40–50 | 5,000 | Image pipeline, viewer, tap classifier, zoom/pan, player registry, focus engine, Redgifs, watchdog, gallery grid, download/share |
-| `Feature/Feeds` | 25–35 | 3,200 | Feed screens, post card (2 layouts), filters, sorting, subreddit hub |
-| `Feature/PostDetail` | 20–25 | 2,600 | Header, action bar, flattening, comment row, collapse, load-more, scroll-to-next |
-| `Feature/Accounts` | 15–20 | 1,600 | Login web view, account store, list, quick swap, prefs normalization |
-| `Feature/Inbox` | 12–15 | 1,100 | List, two row kinds, thread view, poll/badge |
-| `Feature/Search` | 10–14 | 900 | Three scopes, trending, in-subreddit, quick search |
-| `Feature/Subreddits` | 14–18 | 1,400 | Hub, A–Z, sidebar, wiki, multireddits |
-| `Feature/Compose` | 15–20 | 1,800 | Shell, editor, toolbar, preview, drafts, four composers, image upload |
-| `Feature/Settings` | 40–55 | 4,200 | ~20 screens, theme maker, colour picker, stats, help |
-| `Entitlements` | 12–16 | 1,100 | StoreKit 2, feature table, paywall, settings screen, modifier |
-| App target + Share Extension | 12–15 | 700 | Composition root, scene, tabs, extension |
-| **Total (production)** | **~350–450** | **~37,000** | |
-| Tests | ~120–160 | ~11,000 | Swift Testing; roughly 30% of production LoC |
+| `AppCore` | 30–40 | 2,400 | Domain values, `RedditLink` + `PageKind`, sort types, error taxonomy, formatters (time/number), the `Feature` enum, pure filter predicates, comment flattening |
+| `RedditAPI` | 45–60 | 5,500 | `RedditClient` actor, request builder, endpoint catalog, decoding, `SessionStore`, cookies/Keychain, `RedgifsResolver`, `OpenGraphFetcher`, login policy |
+| `Persistence` | 15–20 | 1,400 | GRDB stack, 6 tables, migrations, maintenance, seen pub/sub, `SettingsStore` |
+| `RedditMarkdown` | 20–25 | 2,800 | cmark-gfm bridge, Reddit-dialect pre/post passes, AST, SwiftUI block renderer, composer toolbar transforms |
+| `Theming` | 10–14 | 900 | `Theme`/`ThemeColor` model, resolution order, custom-theme merge, import/export codec, glass tint rules |
+| `Entitlements` | 12–16 | 1,100 | StoreKit 2, `Feature.isGated`, paywall, Plus settings screen, `requiresEntitlement` modifier |
+| `MediaKit` | 40–50 | 5,000 | Image pipeline, viewer, tap classifier, zoom/pan, player registry, focus engine, watchdog, gallery grid, download/share, Live Text bridge |
+| `AppRouting` | 12–16 | 1,000 | `Route`, per-tab `Router` + forward history, `RouteResolver`, `LinkIntake`, `ModalCoordinator` |
+| `DesignSystem` | 30–40 | 2,500 | Rows, list primitives, four-band swipe container, context menus, badges, refresh, access-failure views, haptics facade |
+| `Features/FeedFeature` | 25–35 | 3,200 | Feed screens, post card (2 layouts), filters, sorting, subreddit switcher |
+| `Features/PostDetailFeature` | 20–25 | 2,600 | Header, action bar, flattened tree, comment row, collapse, load-more, scroll-to-next |
+| `Features/ComposerFeature` | 15–20 | 1,800 | Shell, editor, toolbar, preview, drafts, four composers, image upload |
+| `Features/MediaFeature` | 10–14 | 900 | Fullscreen viewer screen and Gallery Mode screen over `MediaKit` |
+| `Features/AccountsFeature` | 15–20 | 1,500 | Login web view, accounts list, quick swap, NSFW-visibility banner |
+| `Features/InboxFeature` | 12–15 | 1,100 | List, two row kinds, thread view, poller/badge wiring |
+| `Features/SearchFeature` | 10–14 | 900 | Three scopes, trending, in-subreddit, quick search |
+| `Features/SubredditsFeature` | 14–18 | 1,400 | Hub, A–Z rail, sidebar, wiki, multireddits |
+| `Features/SettingsFeature` | 40–55 | 4,200 | ~19 screens, theme maker, colour picker, stats, help |
+| App target + ShareExtension | 12–15 | 700 | Composition root, scene, tabs, extension |
+| **Total (production)** | **~380–480** | **~40,900** | 18 packages plus two non-package targets |
+| Tests | ~120–160 | ~12,000 | Swift Testing; roughly 30% of production LoC |
 | Fixtures | ~40 JSON | — | A few MB |
+
 
 For calibration: this is a 10–14 week build for one experienced iOS engineer working full time, or
 roughly 60–90 agent-hours of well-gated generation with human review at each phase boundary. The
 three most expensive single items are `MediaKit` (video is where all the subtlety lives),
-`MarkdownRender` (breadth of tags), and `Feature/Settings` (sheer surface area).
+`RedditMarkdown` (breadth of constructs), and `Features/SettingsFeature` (sheer surface area).
 
 ---
 

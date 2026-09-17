@@ -4,7 +4,7 @@ Status: design spec, authoritative for the rewrite.
 Audience: the AI coding agent building the app, and the owner approving the plan.
 Companion docs: `02-architecture.md` (Entitlements seam, packages), `03-data-and-networking.md`
 (no server, keyless Reddit access), `04a-feeds-posts-comments.md` / `04b-media.md` /
-`04c-accounts-inbox-search-subs-settings.md` (per-screen `[GATE: …]` tags),
+`04c-accounts-inbox-search-subs-settings.md` (per-screen `[GATE: gate.*]` tags),
 `06-build-plan-and-acceptance.md` (Phase 8), `08-decisions-and-drift.md` (owner decisions).
 
 ---
@@ -34,7 +34,7 @@ That single sentence carries three design consequences:
 
 ### 1.2 Cost structure the design must respect
 
-The rewrite inherits Hydra's **keyless** access model (spec/02 §0): no Reddit OAuth app, no API
+The rewrite inherits the original's **keyless** access model (spec/02 §0): no Reddit OAuth app, no API
 key, no `oauth.reddit.com`, cookie + `X-Modhash` auth against `www.reddit.com`. Combined with the
 owner's removal of AI and push, this means:
 
@@ -66,7 +66,7 @@ it is a pleasant, legible free-tier demo of a paid feature, not because it saves
   degrade content the user's own Reddit account already entitles them to: their subscriptions,
   their NSFW setting, their saved items, their messages. Concretely: **never** gate reading a
   feed, opening a post, reading comments, voting, saving, subscribing, searching, or reading the
-  inbox. `[GATE: …]` tags never appear on those paths in the `04*` docs.
+  inbox. `[GATE: gate.*]` tags never appear on those paths in the `04*` docs.
 - **Guideline 3.1.2 (Subscriptions).** Auto-renewable subscriptions must disclose title, length,
   price per period, and what the subscription provides, adjacent to the purchase control, plus
   functional links to Terms of Use (EULA) and Privacy Policy, plus a Restore control.
@@ -193,7 +193,7 @@ confirm or flip before the build starts; every other row is a default the plan a
 | C | Comments | Read, thread, collapse, load-more, sort, vote, reply, edit, delete, save, share, scroll-to-next-comment button | — | Same argument as B. The comment reader *is* the app. |
 | D | Media (images/video/gallery) | Full-screen viewer, zoom/pan, double-tap, swipe-to-dismiss, multi-image paging, video playback, scrub, playback speed, mute, Live Text | Save to Photos (`gate.downloads`); feed autoplay (`gate.videoAutoplay`, **OWNER**) | Viewing media is reading. Saving media to the device is a *device* capability we implement (permission flow, download, temp-file handling) and is a classic, legible paid feature. **Share sheet stays free** — the OS share sheet's own "Save Image" is reachable from it, so the gate is soft by construction and we do not fight the user. |
 | E | Accounts / login | One signed-in account; logged-out browsing; login, logout, remove account | Second and subsequent accounts, quick account swap (`gate.multiAccount`) | The single clearest "power user" line in the whole app, and the one every competitor charges for. One account is a complete experience. |
-| F | Inbox / messages | Inbox list, unread badge, 60s poll, mark read/unread, mark all read, conversations, compose, reply, drafts | — | Messaging is Reddit functionality. (Push alerts, which the original sold, do not exist — `[DECISION: push-removed]`.) |
+| F | Inbox / messages | Inbox list, unread badge, 60s poll, mark read/unread, mark all read, conversations, compose, reply, drafts | — | Messaging is Reddit functionality. The badge and its `.badge` authorization are free too — see §4.1. (Push alerts, which the original sold, do not exist — `[DECISION: push-removed]`.) |
 | G | Search | Post/subreddit/user search, in-subreddit search, quick subreddit search, trending | — | Search is Reddit functionality and also the main discovery path; gating it would suppress engagement. |
 | H | Subreddits / multireddits | Subreddits hub, A–Z scroller, favorites, subscribe/unsubscribe, multireddit feeds, add/remove sub to multi, sidebar, wiki | — | All Reddit-account functionality. |
 | I | Voting | Tap and swipe voting on posts and comments, vote retraction | — | Reddit functionality. |
@@ -206,7 +206,7 @@ confirm or flip before the build starts; every other row is a default the plan a
 | P | Filters | — | Keyword/text filters, subreddit filters (incl. temporary), hide-seen-posts (global + per-page override), hidden-posts management (`gate.filters`) | Filtering is pure client-side work we built, with no Reddit analogue, and is the single most-requested power feature in every Reddit client. Strongest paid row in the matrix. Note: "mark as seen" *tracking* and the dimming stay free; only *filtering by* seen state is gated. |
 | Q | Themes / appearance | All built-in themes (`[DECISION: theme-count]`); every appearance toggle (compact mode, title/text line limits, flairs, blur, thumbnails side, vote indicators, AutoMod collapse, tab settings) | Theme Maker, saving/editing/deleting custom themes, importing a shared theme, separate light/dark theme pairing (`gate.customThemes`) | Picking a theme is free — the app should look good for everyone, and built-in themes cost nothing to ship. *Authoring* a theme is a creative tool we built. The original app's "5-minute Pro theme preview" mechanic is **not** reproduced; it is a dark pattern and the theme set is free anyway. |
 | R | AI summaries | **Feature does not exist** (`[DECISION: ai-removed]`) | — | Removed by owner decision; also absent from the current code. |
-| S | Paid tier itself | — | This document | Replaces "Hydra Pro" entirely, clean-room. |
+| S | Paid tier itself | The Settings → APPNAME Plus row, always visible and always free to open (§4.1) | This document | Replaces the original's paid tier entirely, clean-room (`[DECISION: pro-removed]`). |
 | T | Stats | — | The whole Stats screen (`gate.stats`) | Local-only vanity metrics, zero marginal cost, purely additive, nobody is harmed by not having it. Textbook paid feature. **Counters still accumulate for free users** so the screen is full of data the day they subscribe. The original's asterisk-obfuscation is *not* reproduced — free users see a locked screen with a real description of what is inside, not fake blurred numbers (`[DECISION: stats-obfuscation]`). |
 | U | Privacy / general settings | Error-reporting toggle, data-use (low data) settings, cache clearing, startup tab, startup URL, legal links, settings search | — | Never gate privacy controls or data-saving controls. Gating low-data mode would actively cost users money on cellular. |
 | V | App icons | Default icon | All alternates (`gate.appIcons`) | Cosmetic, discrete, classic paid perk, trivially implemented as a gate. |
@@ -242,7 +242,7 @@ decision) sort memory and feed autoplay.
 
 ## 4. Gate identifiers (canonical list)
 
-These are the exact strings the `04a`/`04b`/`04c` docs use in their `[GATE: name]` tags and the
+These are the exact strings the `04a`/`04b`/`04c` docs use in their `[GATE: gate.*]` tags and the
 exact cases of the `Feature` enum in code. Nothing else is a gate.
 
 | Gate id | `Feature` case | Protects | Free behaviour when locked |
@@ -259,27 +259,41 @@ exact cases of the `Feature` enum in code. Nothing else is a gate.
 | `gate.videoAutoplay` | `.videoAutoplay` | Inline feed video autoplay and the feed-audio FAB | **OWNER.** Default assumed **OFF (free)** — gating it makes the feed feel broken and interacts badly with low-data mode. Gate is defined so the owner can flip it. |
 | `gate.compose` | `.compose` | Creating posts, comments and messages | **OWNER.** Default assumed **OFF (free)**. Strongly recommended to leave off. |
 
-### 4.1 Tag aliases (normalization)
+### 4.1 There are no aliases, and three things that are not gates
 
-The `04*` screen specs were drafted in parallel with this document and contain a few earlier-draft
-tag spellings. Treat the following as exact synonyms; the canonical form is always the `gate.*` one.
+**The eleven ids in §4 are the only gate ids that exist.** Every `[GATE: gate.*]` tag in `04a`, `04b` and
+`04c` is spelled as one of them; the earlier-draft spellings those documents once carried
+(`gallery-mode`, `custom-themes`, `text-filters`, `multi-account`, `stats`) have been rewritten, and
+the normalization table that used to sit here is gone. A tag naming anything else is an error: a gate
+that is not defined in §4 does not exist, and the feature is free.
 
-| Variant seen in `04*` | Canonical |
-|---|---|
-| `[GATE: gallery-mode]` | `gate.galleryMode` |
-| `[GATE: custom-themes]` | `gate.customThemes` |
-| `[GATE: text-filters]` | `gate.filters` |
-| `[GATE: multi-account]` | `gate.multiAccount` |
-| `[GATE: pro-entry]` | **Not a gate.** It marks the Settings → APPNAME Plus row, which is always visible and always free to open |
-| `[GATE: inbox-badge]` | **Not a gate.** The inbox, its polling and its badge are free (`05` §3.1 row F) |
+Three tags in earlier drafts marked seams that are **not** gates. They are recorded here so nobody
+re-adds them:
 
-Any `[GATE: …]` tag naming something not in the table above or in §4's table is an error: resolve
-it to the nearest canonical gate, or, if none fits, treat the feature as **free** and record the
-discrepancy. A gate that is not defined here does not exist.
+- **Settings → APPNAME Plus (was `pro-entry`).** This row is the paywall's *entry point*, not
+  something the paywall protects. It is always visible and always free to open, for subscribers and
+  non-subscribers alike — for a subscriber it is the status and management screen (§6.4), and for a
+  non-subscriber it is the one place besides a tapped gated affordance where the paywall may be
+  presented (§5.10 rule 2). Gating it would make subscribing impossible. It is prose in `04c` §15,
+  not a tag.
 
-Implementation note for the `04*` docs: a screen tagged `[GATE: gate.filters]` means the *feature*
-on that screen is gated; the screen itself must still be reachable and must still render its
-explanatory copy. Gates never hide navigation.
+- **The inbox badge (was `inbox-badge`).** The inbox, its 60-second foreground poll, the tab badge and
+  the springboard badge are **free**, and must stay free: the inbox is the user's own Reddit
+  functionality (§3.1 row F), and the original sold *push alerts*, which do not exist here at all
+  (`push-removed`). The `.badge` notification authorization request is likewise not a paid feature —
+  it is a system permission, and if the user denies it the tab badge still works. Charging for a
+  number on an app icon would be the pettiest possible gate and a 3.1.3 risk besides.
+
+- **Built-in themes (was `premium-themes`).** §3.1 row Q draws the line at *authoring*, not at
+  *choosing*: every built-in theme is free and there is no second, "premium" tier of them. The
+  original's documentation labelled five of its twelve as paid with a five-minute preview; its code
+  never enforced it, and §3.3 forbids timed previews outright. There is therefore no
+  `gate.premiumThemes`, and `gate.customThemes` alone covers the Theme Maker, saving and editing a
+  custom theme, importing a shared one, and the separate light/dark pairing.
+
+Implementation note for the `04*` docs: a screen tagged with a gate means the *feature* on that screen
+is gated; the screen itself must still be reachable and must still render its explanatory copy. Gates
+never hide navigation, and a locked row is never removed — only badged (§5.9).
 
 ---
 
@@ -689,15 +703,15 @@ manual tests, run in the simulator, and are listed in the Phase 8 manual smoke c
 | §1.1–1.2 goals, zero-marginal-cost argument | Owner's product decisions; `spec/02-api-contract.md` §0 (keyless model), §2.13 (Hydra server), `spec/09-persistence-pro-utils.md` §0, §3.1 | `08-decisions-and-drift.md` ids `pro-removed`, `ai-removed`, `push-removed`, `self-hosted-server-row` |
 | §1.3 Apple rules | App Store Review Guidelines 3.1.1, 3.1.2, 3.1.3(a), 4.2, 5.1.1(iv), 5.2.5 | §7 checklist |
 | §2 catalogue, ASC setup | `spec/10-swiftui-2026-baseline.md` §A3 "IAP, intents, background" (StoreKit 2 + `SubscriptionStoreView`, iOS 17+; iOS 27 additions) | `06` Phase 8; `07` kickoff checklist |
-| §3 matrix | `spec/08-feature-inventory.md` §1 areas A–X (items 1–327); `spec/06-settings-themes.md` §§2–10; `spec/03-feed-and-posts.md` §§11–15; `spec/05-media.md` §§9–10 | `04a`/`04b`/`04c` `[GATE: …]` tags; `06` acceptance checklist |
+| §3 matrix | `spec/08-feature-inventory.md` §1 areas A–X (items 1–327); `spec/06-settings-themes.md` §§2–10; `spec/03-feed-and-posts.md` §§11–15; `spec/05-media.md` §§9–10 | `04a`/`04b`/`04c` `[GATE: gate.*]` tags; `06` acceptance checklist |
 | §3.1 row D/K split (share free, save gated) | `spec/05-media.md` §9.1–9.2 | `04b-media.md` |
 | §3.1 row P (filters) | `spec/03-feed-and-posts.md` §§11–14; `spec/06-settings-themes.md` §2.3 | `04a-feeds-posts-comments.md`, `04c-…-settings.md` |
-| §3.1 row Q (themes) | `spec/06-settings-themes.md` §3 (12 themes, Theme Maker, import format) | `04c-…-settings.md`; `[DECISION: theme-import-format-compat]` |
+| §3.1 row Q (themes) | `spec/06-settings-themes.md` §3 (the original's 12 themes, Theme Maker, import format) | `04c-…-settings.md` §18; `[DECISION: theme-count]`, `[DECISION: theme-import-format-compat]` |
 | §3.1 row T (stats) | `spec/06-settings-themes.md` §8; `spec/09-persistence-pro-utils.md` §1.2 (`counter_stats`, `subreddit_visits`) | `04c-…-settings.md`; `[DECISION: stats-obfuscation]` |
-| §4 gate ids | This document is the source of truth for gate names | Every `[GATE: …]` tag in `04a`, `04b`, `04c` |
+| §4 gate ids | This document is the source of truth for gate names; there are no aliases (§4.1) | Every `[GATE: gate.*]` tag in `04a`, `04b`, `04c`; `06` Phase 8 sweep; `07` guardrails |
 | §5 entitlement architecture | `spec/10-swiftui-2026-baseline.md` §A3 (Observation, approachable concurrency, StoreKit 2) | `02-architecture.md` (Entitlements seam); `06` Phase 8 |
 | §5.4 no-server verification | `spec/02-api-contract.md` §3.7 (no receipt validation existed); `spec/09` §3.3 (no IAP plumbing existed) | `07-one-shot-prompt.md` guardrails |
 | §6 paywall UI | `spec/10` §A2 (Liquid Glass: reduce custom backgrounds), §A3 (`SubscriptionStoreView`) | `04c-…-settings.md` (Settings root row placement) |
 | §7 compliance | Guidelines as cited; `spec/08` §6 (`ITSAppUsesNonExemptEncryption: false`) | `06` Phase 10 release gate |
 | §8 privacy label | `spec/06-settings-themes.md` §9 (error-reporting toggle); `spec/08` §1 items 296–301 | `08-decisions-and-drift.md` id `sentry-or-not` |
-| §9 testing | `spec/10` §A3 Testing (Swift Testing default, XCTest for UI) | `06` Phase 8 DoD |
+| §9 testing | `spec/10` §A3 Testing (Swift Testing default, XCTest for UI only) | `06` Phase 8 DoD; `07` guardrail "no XCTest for unit tests" |

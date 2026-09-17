@@ -7,10 +7,10 @@
 `03-data-and-networking.md` (`RedditAPI` actor, endpoint IDs, media model derivation),
 `04a-feeds-posts-comments.md` (post cards, the feed-side video contract, low-data effects on cards),
 `04c-accounts-inbox-search-subs-settings.md` (settings tree UI, Data Use screen, Advanced/cache rows),
-`05-monetization.md` (binds `[GATE: …]`), `08-decisions-and-drift.md` (resolves `[DECISION: …]`).
+`05-monetization.md` (binds `[GATE: gate.*]`), `08-decisions-and-drift.md` (resolves `[DECISION: <id>]`).
 
 Clean-room reproduction of *behavior*. Quoted strings are functional UI copy and are reproduced
-verbatim. iPhone only; no iPad split-view media pane. `[DECISION: ipad-split-view]`
+verbatim. iPhone only; no iPad split-view media pane. `[DECISION: ipad-split-view-deferred]`
 
 ---
 
@@ -42,7 +42,7 @@ both collapses to its videos.
 
 | # | Condition | `source` | `downloadURL` | Notes |
 |---|---|---|---|---|
-| 1 | `media.reddit_video.hls_url` present | the **HLS `.m3u8`** playlist | `reddit_video.fallback_url` (a DASH mp4) | Normal `v.redd.it` video with audio. The HLS URL is **not** entity-decoded in the original while its sibling is — reproduce or fix consistently and note it. `[DECISION: hls-url-entity-decoding]` |
+| 1 | `media.reddit_video.hls_url` present | the **HLS `.m3u8`** playlist | `reddit_video.fallback_url` (a DASH mp4) | Normal `v.redd.it` video with audio. The original entity-decoded ~30 string fields client-side and missed this one; `APPNAME` sends `raw_json=1` on every read, so **no field is ever entity-encoded and no decoding step exists**. `[DECISION: raw-json-param]` |
 | 2 | `fallback_url` present, no HLS | the DASH mp4 | same | Crossposts, older videos |
 | 3 | Gallery videos (`gallery_data.items` + `media_metadata[id].s.mp4`) | `s.mp4` per item, ordered by `gallery_data.items` | same | **Checked before rule 4** so a gallery that also has a preview isn't collapsed to one preview-resolution video. Items lacking a `p` array (unprocessed) are dropped. |
 | 4 | `preview.images[].variants.mp4` | `variants.mp4.source` if present, else the **last** (largest) entry of `variants.mp4.resolutions` | same | The "Reddit GIF as mp4" path (r/gifs etc.). Nulls dropped. |
@@ -98,9 +98,11 @@ read from `@Environment`.
   (`UIWindowScene.requestGeometryUpdate(.iOS(interfaceOrientations:))` plus a
   `supportedInterfaceOrientations` override on the hosting controller), never via the deprecated
   `UIApplication` status-bar/orientation APIs.
-- **No hero/zoom transition.** The original simply presents on a black background. A
-  `.navigationTransition(.zoom(sourceID:in:))` from the thumbnail would be a visible improvement but
-  is a deliberate deviation — flag it if adopted. `[DECISION: viewer-zoom-transition]`
+- **Zoom transition.** Enter with `.navigationTransition(.zoom(sourceID:in:))` from the tapped
+  thumbnail, matched on the media item's id (`02-architecture.md` §10.5). The original simply
+  presented on a black background with no shared-element transition; this is a deliberate,
+  flagged enhancement, and it is **suppressed under Reduce Motion**
+  (`02-architecture.md` §15.1 rule 3). `[DECISION: viewer-zoom-transition]`
 
 ### 2.2 Paging structure
 
@@ -295,8 +297,8 @@ the fullscreen viewer. A native `.contextMenu` with exactly three items:
 
 | Item | Effect |
 |---|---|
-| `Share Image` | `share("image", item)` (§9) |
-| `Save Image` | `save("image", item)` (§9) — requests add-only photo permission on first use |
+| `Share Image` | `share("image", item)` (§9). **Free** — the OS share sheet's own "Save Image" is reachable from it, so the gate below is soft by construction and we do not fight the user (`05-monetization.md` §3.1 row D) |
+| `Save Image` | `save("image", item)` (§9) — requests add-only photo permission on first use. `[GATE: gate.downloads]`: the row stays visible with a Plus badge; tapping it while locked opens the paywall |
 | `Copy Image Link` | Resolves the item to a URL (a plain URL as-is; an array of variants → the **largest** variant's URL) and copies it to the pasteboard. There is **no** "Copy Image" (pixel data). |
 
 There is **no** "Open in Browser" item for images anywhere.
@@ -363,7 +365,7 @@ surface. Priority order, first match wins:
 | # | Condition | Overlay |
 |---|---|---|
 | 1 | resolution status is `error` | **"Couldn't load video. Tap to retry."** — tappable, retries the Redgifs resolution |
-| 2 | player status is `error` | **"Couldn't load video."** — **not** tappable in the inline feed (terminal; only a source swap via the watchdog or the Redgifs cache-bust recovers it). See §8.3 for the fullscreen variant. |
+| 2 | player status is `error` | **"Couldn't load video."** — **not** tappable in the inline feed (the watchdog and the Redgifs cache-bust are the recovery there). In the fullscreen viewer the same state reads **"Couldn't load video. Tap to retry."** and is tappable (§8.3, `[DECISION: fullscreen-player-retry]`). |
 | 3 | **Readiness short-circuit:** `isPlaying \|\| currentTime > 0 \|\| status == .readyToPlay` | **hidden, unconditionally** — this always wins over any "still loading" state below |
 | 4 | resolution status is `loading` | **"Resolving video…"** + spinner |
 | 5 | no player attached | **"No player available"** + spinner (transient; creation is async) |
@@ -406,8 +408,9 @@ With focused-only feed playback (§7), the live player count during normal brows
 (the Focused Post plus possibly one still-deferred neighbor), so the cap is a safety net rather than a
 hot path.
 
-**No speculative preloading** of the next likely-focused video exists. Do not add it. `[DECISION:
-no-speculative-preload]`
+**No speculative preloading** of the next likely-focused video exists, and none is added: it would
+spend bandwidth and decoders on posts the user flings past, which is exactly what focused-only
+playback exists to avoid. `[DECISION: no-speculative-preload]`
 
 ---
 
@@ -433,15 +436,15 @@ yields an empty id, treated as unresolvable — never issue a request for an emp
 
 ### 6.3 Token
 
-`GET https://api.redgifs.com/v2/auth/temporary` with header `User-Agent: Hydra` (a literal, distinct
-from the app's randomized Reddit user agent — see `03-data-and-networking.md`). The returned token is
-persisted under the key `redgifsToken`. Fetched lazily when none is stored; refreshed on any non-OK
-response or thrown error.
+`GET https://api.redgifs.com/v2/auth/temporary` with header `User-Agent: APPNAME` (a literal, distinct
+from the app's randomized Reddit user agent — `03-data-and-networking.md` §1.4, §9.1 endpoint **G1**).
+The returned token is persisted under the key `redgifsToken`. Fetched lazily when none is stored;
+refreshed on any non-OK response or thrown error.
 
 ### 6.4 Resolution
 
-`GET https://api.redgifs.com/v2/gifs/<id>` with `Authorization: Bearer <token>` and
-`User-Agent: Hydra`. The resolved URL is `gif.urls.hd ?? gif.urls.sd` (prefer HD).
+`GET https://api.redgifs.com/v2/gifs/<id>` (endpoint **G2**) with `Authorization: Bearer <token>` and
+`User-Agent: APPNAME`. The resolved URL is `gif.urls.hd ?? gif.urls.sd` (prefer HD).
 
 ### 6.5 Concurrency, queueing, backoff
 
@@ -565,11 +568,14 @@ Settings → Appearance rows and persist across launches.
 - **No** playback-rate control, **no** explicit play/pause button, and **no** mute button on the
   inline tile. The whole tile is one tap target that opens the fullscreen viewer; all controls live
   there.
-- **No long-press menu on any video tile**, inline or in the gallery grid. Video share/save is
-  reachable **only** through the fullscreen viewer's overlay share button. The original's own
-  documentation describes a "long-press the video → Share" flow that does not exist in code; it is
-  conflating the OS share sheet's own "Save Video" action with an app-drawn menu.
-  `[DECISION: no-video-long-press-menu]`
+- **Long-press menu on video tiles (fix forward).** Inline feed video tiles and Gallery Mode video
+  cells carry a native `.contextMenu` with exactly three items, mirroring the image menu (§3.4):
+  **Share Video**, **Save Video** (`[GATE: gate.downloads]`), **Copy Video Link** (copies
+  `downloadURL`, never the HLS `source`). The original has no such menu anywhere, even though its own
+  help text describes the flow — that is a gap, not a design, and it is also the natural home for the
+  downloads gate on video. A Redgifs source resolves first; on a resolution failure the menu's action
+  presents `.alert("Couldn't load video", "Redgifs is rate limiting requests. Please try again in a
+  moment.")` and aborts. `[DECISION: no-video-longpress-menu]`
 
 ---
 
@@ -590,7 +596,7 @@ initially focused column/row, starts playback.
 | **Playback speed** | beside the mute pill | Cycles **`[0.5, 1, 1.5, 2]`**, wrapping back to 0.5 after 2×. Label shows the current multiplier, e.g. `"1.5x"`. Sets `preservesPitch = true` on **every** change (defensively, even though creation already does). |
 | **Loop** | — | Always on, same as the feed |
 | **Rotation** | — | Rotation is unlocked while the viewer is open (§2.1); the video surface reflows with `.scaledToFit()` and the shared player survives rotation with no reload. Container height is `min(screenHeight, screenWidth / aspectRatio)` where the aspect ratio comes from the video track's natural size. |
-| **Picture-in-Picture** | — | **Not enabled.** No PiP button, no `AVPictureInPictureController`. Adding it would be a deliberate behavior change, not a parity port. `[DECISION: no-pip]` |
+| **Picture-in-Picture** | — | **Not enabled.** No PiP button, no `AVPictureInPictureController`. Adding it would be a deliberate behavior change, not a parity port. `[DECISION: background-audio-pip]` |
 | **Background audio** | — | **None** — the same background teardown as §7.4 applies. |
 
 **Scrub ("swipe to scrub"):**
@@ -632,11 +638,13 @@ waiting for a focus effect to run after the view appears.
 - Once a player exists, re-derive status from **live getters** on every (re)attachment for the same
   reason as §4.4, and render in priority order: resolve-error (tap to retry) → resolve-loading
   (spinner) → hard player error → not-yet-visually-ready → spinner → nothing.
-- **Divergence to reproduce:** a hard player error in the fullscreen viewer renders a message with
-  **no visible tap-to-retry affordance**, unlike the resolution-error case. A user hitting a genuine
-  non-Redgifs player error has no manual recovery beyond closing and reopening the viewer. This reads
-  as a gap; **recommendation: make it tappable-to-retry** and flag the deviation.
-  `[DECISION: fullscreen-player-error-no-retry]`
+- **Hard player error — tappable to retry (fix forward).** In the fullscreen viewer a hard player
+  error renders **"Couldn't load video. Tap to retry."** and the tap re-creates the player item from
+  the cached source. In the original this state had no retry affordance at all, unlike the
+  resolution-error case, so a genuine non-Redgifs player error left the user with no recovery but
+  closing and reopening the viewer. The **inline** feed player keeps its non-tappable
+  "Couldn't load video." (§4.4 rule 2), because there the watchdog and cache-bust paths are the
+  recovery. `[DECISION: fullscreen-player-retry]`
 - Redgifs stale-cache busting (§6.8) runs here independently of the feed player, with its own
   per-attachment guard.
 
@@ -672,7 +680,7 @@ Two entry points share one private download helper.
 | Situation | UI |
 |---|---|
 | Save, permission not yet requested | Request **add-only** access (`PHPhotoLibrary.requestAuthorization(for: .addOnly)`) — the app never needs full library read access for saving |
-| Save, permission denied | `.alert("Can't save to Photos", "Allow Hydra to add to your photo library in Settings to save media.")` with **no** deep link to Settings. Replace `Hydra` with `APPNAME`. |
+| Save, permission denied | `.alert("Can't save to Photos", "Allow APPNAME to add to your photo library in Settings to save media.")`, with a button that opens the app's own Settings page (`UIApplication.openSettingsURLString`) — the original offered no route out of the denial. |
 | Save success (image) | `.alert("Image saved to Photos")` |
 | Save success (video) | `.alert("Video saved to Photos")` |
 | Any download/share/save failure | dismiss the preparing modal, then `.alert("Error", "Failed to <share\|save> <image\|video>")` |
@@ -684,8 +692,9 @@ Two entry points share one private download helper.
 |---|---|---|---|
 | Fullscreen viewer overlay | ✅ (one button) | ❌ — saving from there happens through the system share sheet's own action | ❌ |
 | Feed/comment inline **image** long-press | ✅ | ✅ | ✅ |
-| Feed inline **video** long-press | ❌ (no menu exists) | ❌ | ❌ |
-| Gallery Mode grid cell | ❌ (no menu exists) | ❌ | ❌ |
+| Feed inline **video** long-press | ✅ | ✅ (`[GATE: gate.downloads]`) | ✅ (Copy Video Link) |
+| Gallery Mode grid cell (video) | ✅ | ✅ (`[GATE: gate.downloads]`) | ✅ |
+| Gallery Mode grid cell (image) | ✅ | ✅ (`[GATE: gate.downloads]`) | ✅ |
 | Post long-press "Share" (`04a` §7.2) | shares the **post permalink**, never the media file | — | — |
 
 ### 9.4 Link sharing (for contrast)
@@ -700,7 +709,7 @@ embedded.
 ## 10. Gallery Mode
 
 A dedicated full-screen route (`Route.gallery(FeedTarget)`) that re-fetches the same listing as a
-normal feed but renders it as a media grid. `[GATE: gallery-mode]`
+normal feed but renders it as a media grid. `[GATE: gate.galleryMode]`
 
 ### 10.1 Data and qualification
 
@@ -710,9 +719,11 @@ normal feed but renders it as a media grid. `[GATE: gallery-mode]`
 - `pageLimits = [10, 30, 50]`, `filterRetries = 3`.
 - Sort and context menu options mirror the normal page's options for the same target type, still in
   the navigation bar.
-- **No 100-post cap exists in the original's code**, despite its documentation describing one for
-  free users. Do not build a cap; if `05-monetization.md` wants one, it binds to
-  `[GATE: gallery-mode]` at entry, not as a scroll limit. `[DECISION: gallery-no-post-cap]`
+- **100-item limit, reinstated as a gate.** The original's code has no cap despite its documentation
+  describing one; `05-monetization.md` §3.1 row A and §4 reinstate it as `[GATE: gate.galleryMode]`.
+  Gallery Mode **opens normally for everyone**; after **100 loaded items** a locked user's grid stops
+  loading more and appends an inline **"Continue with Plus"** footer row — `GateStyle.inlineFooter`,
+  never a modal, never a hard stop at entry. Unlocked users have no limit. `[DECISION: gate-matrix]`
 - **Text filters and hide-seen apply.** There are no AI filters to apply.
 
 ### 10.2 Entry
@@ -720,7 +731,7 @@ normal feed but renders it as a media grid. `[GATE: gallery-mode]`
 - **Manual:** the "…" context menu → **"Open in Gallery Mode"**, present on Home, subreddit and
   multireddit feeds.
 - **Automatic one-time offer:** see `04a` §10 for the full heuristic (≥100 posts, non-combined feed,
-  ≥85 % media, one-time flag set only on accept).
+  ≥85 % media, one-time flag set on **either** answer — `[DECISION: gallery-offer-cancel]`).
 
 ### 10.3 Grid layout and scrolling
 
@@ -736,14 +747,16 @@ normal feed but renders it as a media grid. `[GATE: gallery-mode]`
   - Images: `.scaledToFit()`, **no autoplay** for animated content, and **downscaling disabled** on
     iOS — downscaling was found to cause glitchy scroll performance from heavy CPU use, at the cost of
     higher memory.
-  - Videos: the shared video view, but with **no focus context**, so **every video cell plays
-    immediately and simultaneously** once mounted and on screen, muted, with no focused-only gating.
-    The registry's 12-player cap is what actually bounds this.
-- **No NSFW/spoiler blur.** Gallery grid cells render their raw thumbnail directly, with no NSFW or
-  spoiler check, unlike the normal feed. This is a real behavioral gap in the original.
-  **Recommendation: add blur for parity and safety** — a grid of unblurred NSFW thumbnails is a worse
-  outcome than a slightly divergent one. Flag as a deliberate deviation.
-  `[DECISION: gallery-no-nsfw-blur]`
+  - Videos: the shared video view with **no focus context**, so visible video cells play immediately,
+    muted, with no focused-only gating. **At most 4 gallery players run simultaneously**: the focus
+    engine's candidate set is applied as a ceiling, nearest-to-viewport-centre first, because letting
+    every visible cell play is real decoder pressure against the registry's cap of 12
+    (`02-architecture.md` §10.6). `[DECISION: gallery-video-cap]`
+- **NSFW/spoiler blur applies (fix forward).** Gallery grid cells honour `post.blurNSFW` and
+  `post.blurSpoilers` exactly as feed cards do (`04a` §4.5), including the eye-glyph pill labelled
+  "NSFW" or "Spoiler" (NSFW wins when both apply) and the per-cell reveal keyed on the post id. The
+  original rendered raw thumbnails here with no check at all; a grid of unblurred NSFW thumbnails is
+  a safety problem and an App Store age-rating risk. `[DECISION: gallery-mode-no-blur]`
 - **Loading more:** the same 2-screen prefetch threshold. Footer: spinner while loading (unless the
   filter limit was hit), `"Wow. You've reached the bottom."` once fully loaded with at least one post,
   or the filter-limit copy from `04a` §2.2.
@@ -775,7 +788,7 @@ Owned by the model layer, consumed by the link card in `04a` §4.8.
 | Aspect | Rule |
 |---|---|
 | **When fetched** | Only for a link post whose URL is **not** a valid in-Reddit page, **and** does not contain any of: `imgur.com`, `gfycat.com`, `redgifs.com`, `.gif`, `.gifv`, `.mp4`, **and** the post produced zero videos |
-| **Where** | Inline during post formatting — one request per eligible link post in a page, all concurrent, **with no cap** |
+| **Where** | Inline during post formatting — one request per eligible link post in a page, concurrent but **capped at 6 in flight** via a `TaskGroup` semaphore. The original imposed no cap, so a 100-post page on a filter retry could open 100 sockets. `[DECISION: og-concurrency-cap]` |
 | **Timeout** | **1 750 ms**, deliberately short so a slow site never stalls a feed load |
 | **Binary bail-out** | Abort as soon as response headers arrive if `Content-Type` is a PDF, `application/octet-stream`, a zip type, or matches `^(image|video|audio)/` |
 | **Parsing** | Stream-parse the HTML; every `<meta property="og:*">` contributes `title`, `type`, `image`, `url`, `description`. **No** fallback to `<title>` or `<meta name="description">`, **no** Twitter Card tags, **no** favicon fetching, **no** per-host special cases (YouTube, X, …) |
@@ -1056,23 +1069,38 @@ All pure logic below is testable without a network, a player, or a screen.
 | `09-persistence-pro-utils.md` §2.3 (media caches), §5.2 (media sharing) | caches, share/save | §9, §12 |
 | `10-swiftui-2026-baseline.md` A3 (images, media/autoplay/PiP, gestures/zoom/Live Text, lazy stacks, sensory feedback, scene APIs) | component choices | §14 |
 
-### 16.2 `[DECISION:]` tags used in this document
+### 16.2 Decision tags used in this document
+
+Every id below is the canonical id of a numbered entry in `08-decisions-and-drift.md` §1/§2. There are
+no aliases, and the register's "Default (assumed)" column is what this document specs.
 
 | Tag | Subject |
 |---|---|
-| `ipad-split-view` | iPad split view out of scope |
-| `hls-url-entity-decoding` | HLS URL is not entity-decoded while its sibling is |
-| `viewer-zoom-transition` | No hero/zoom transition into the viewer in the original |
-| `live-text-dead-setting` | Live Text toggle exists but nothing reads it; we spec the intended behavior |
+| `ipad-split-view-deferred` | iPad split view out of scope |
+| `raw-json-param` | `raw_json=1` on every read; no entity decoding anywhere, `hls_url` included |
+| `viewer-zoom-transition` | Enter the viewer with a zoom navigation transition |
+| `live-text-dead-setting` | The Live Text toggle is inert in the original; implemented for real here |
 | `no-speculative-preload` | No next-video preloading |
-| `no-video-long-press-menu` | No long-press share/save menu on any video tile |
-| `no-pip` | Picture-in-Picture is not enabled |
-| `fullscreen-player-error-no-retry` | Hard player errors in the viewer have no retry affordance |
-| `gallery-no-post-cap` | No 100-post gallery cap exists in code |
-| `gallery-no-nsfw-blur` | Gallery grid cells are not blurred; recommend adding blur |
+| `no-video-longpress-menu` | Video tiles gain a Share / Save / Copy Link long-press menu |
+| `background-audio-pip` | No Picture-in-Picture and no background audio; players unmount on background |
+| `fullscreen-player-retry` | A hard player error in the viewer is tappable to retry |
+| `gate-matrix` | Gallery Mode's 100-item limit is reinstated as a gate, as an inline footer |
+| `gallery-mode-no-blur` | Gallery grid cells apply NSFW/spoiler blur |
+| `gallery-video-cap` | At most 4 simultaneous gallery-grid players |
+| `redgifs-memory-only` | Resolved Redgifs URLs are never persisted |
+| `shared-player-registry` | One ref-counted player per video, deferred release, LRU cap 12 |
+| `feed-focus-playback` | Focused-only feed playback with the 70 % / 60 % thresholds and 150 ms settle |
+| `og-concurrency-cap` | OpenGraph preview fetches capped at 6 concurrent |
+| `no-offline-detection` | Offline is distinguished from server error |
 
-### 16.3 `[GATE:]` tags used in this document
+### 16.3 Gate tags used in this document
 
-| Tag | Where |
+| Gate id | Where |
 |---|---|
-| `gallery-mode` | Gallery Mode route entry (§10) — the natural binding point if gallery mode is ever paid |
+| `gate.galleryMode` | Gallery Mode's 100-item limit and its inline "Continue with Plus" footer (§10.1) |
+| `gate.downloads` | "Save Image" in the image long-press menu (§3.4), "Save Video" in the new video long-press menu (§7.4), and the `save(_:_:)` flow itself (§9). **Sharing stays free** |
+| `gate.videoAutoplay` | Inline feed autoplay and feed audio (§7.2). **OWNER, default free** — see `04a` §9 |
+
+Gates declared in the companion documents and referenced from here: `gate.customThemes`,
+`gate.filters`, `gate.sortMemory`, `gate.compose` (`04a`), and `gate.multiAccount`, `gate.gestures`,
+`gate.appIcons`, `gate.stats` (`04c`).

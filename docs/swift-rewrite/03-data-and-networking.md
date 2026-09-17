@@ -2,7 +2,7 @@
 
 **Project:** `APPNAME` (bundle id `com.OWNER.appname`, URL scheme `appname`).
 **Status:** normative. This is the wire contract and the domain model. Where this document and a screen spec disagree about *what a field means*, this document wins; where they disagree about *what the screen shows*, the screen spec wins.
-**Companion documents:** `02-architecture.md` (module boundaries, concurrency, persistence engine choice), `04a-feeds-posts-comments.md`, `04b-media.md`, `04c-accounts-inbox-search-subs-settings.md`, `05-monetization.md`, `06-build-plan.md`, `07-one-shot-prompt.md`, `08-decisions-and-drift.md`.
+**Companion documents:** `02-architecture.md` (module boundaries, concurrency, persistence engine choice), `04a-feeds-posts-comments.md`, `04b-media.md`, `04c-accounts-inbox-search-subs-settings.md`, `05-monetization.md`, `06-build-plan-and-acceptance.md`, `07-one-shot-prompt.md`, `08-decisions-and-drift.md`.
 
 Reading order for an implementer: §1 (access model) → §2 (links) → §4 (domain model + derivation rules) → §5 (client and endpoints) → §7/§8 (persistence and settings).
 
@@ -35,7 +35,7 @@ Every request passes through one method, in this order:
 | 4 | If a form body is present → set `Content-Type: application/x-www-form-urlencoded` and percent-encode the body as URL-form pairs. **Every Reddit write is form-encoded, never JSON** |
 | 5 | Set `User-Agent` to the per-launch randomized string (§1.4) |
 | 6 | Issue the request. Cookies are attached by `URLSession`; the client never writes a `Cookie` header itself |
-| 7 | After **every** response, run the session-cookie persistence rewrite (§5.4) |
+| 7 | Run the session-cookie persistence rewrite (§5.4) if it has not yet run for this account in this app session |
 | 8 | Classify the response (§10). Decode, or return raw text for the endpoints that ask for it |
 | 9 | If the call is `depaginate` → while `data.after != nil`, rewrite the `after` query parameter and recurse, concatenating `data.children` |
 
@@ -131,7 +131,7 @@ Evaluated in this exact order against the **normalized** URL's relative path; fi
 | 9 | Path begins `/r/` (none of the above) | `.subreddit` |
 | 10 | Path begins `/message/inbox` | `.inbox` |
 | 11 | Path begins `/message/messages` | `.messages` |
-| 12 | Path matches `/(user|u)/<name>/m/<multi>` | `.multireddit` |
+| 12 | Path matches `/(user\|u)/<name>/m/<multi>` | `.multireddit` |
 | 13 | Path begins `/u/` or `/user/` | `.user` |
 | 14 | Path begins `/search` | `.search` |
 | 15 | Host is `i.redd.it` | `.image` |
@@ -841,7 +841,7 @@ With `WebPage`, the allow-list check lives in a `NavigationDeciding` policy obje
 | Cookie of record | `reddit_session`, domain `.reddit.com`, path `/` |
 | Between launches | Keychain, service `com.OWNER.appname.session`, account `<username>`, value = JSON of the cookie's properties (§7.4) |
 | Restore on switch | Write the stored cookie back into both `HTTPCookieStorage` and the `WKWebsiteDataStore` |
-| **Expiry rewrite** | Reddit's `reddit_session` cookie has **no expiry**, so iOS treats it as a session cookie and drops it at launch. After **every** API response, if a `reddit_session` cookie exists with no `expiresDate`, rewrite it with `expiresDate = now + 10_000 days`. This is the single reason sessions survive app restarts |
+| **Expiry rewrite** | Reddit's `reddit_session` cookie has **no expiry**, so iOS treats it as a session cookie and drops it at launch. If a `reddit_session` cookie exists with no `expiresDate`, rewrite it with `expiresDate = now + 10_000 days`. This is the single reason sessions survive app restarts. **Frequency: at most once per app session per account**, not after every response as the original did — the per-response rewrite is pure waste (`cookie-expiry-rewrite` in `08`) |
 | Logout | A cookie library bug (in the original's RN stack) re-synced WebKit cookies back into the HTTP jar on a full clear, resurrecting the session. The defensive order is preserved because the same class of bug exists between `HTTPCookieStorage` and `WKHTTPCookieStore`: **first** write a stale `reddit_session` (empty value, `expiresDate = .distantPast`) into *both* stores, **then** clear both |
 | Other cookies | Never read, written or inspected by name; everything else Reddit sets rides along |
 
@@ -1089,9 +1089,9 @@ One draft per opaque key. Formats, chosen so drafts never collide across account
 | New message, body | `message.body.<recipient-lowercased>` |
 | Reply to a message | `messageReply.<authorOfPreviousMessage-lowercased>` |
 
-Edit flows (`EditPost`, `EditComment`) **do not use drafts at all** — parity with the original; unsaved edits are lost on cancel with no confirmation. Recorded as `edit-draft` in `08` (a candidate improvement, not parity).
+Edit flows (`EditPost`, `EditComment`) **do not use drafts at all** — parity with the original. Unsaved edits are still lost on cancel, but **cancelling an edit with unsaved changes now asks for confirmation first** (`04a` §16.5, `composer-no-discard-confirm` in `08`). Persisting edits as drafts is recorded as `edit-draft` in `08` and is not built in v1.
 
-One post draft exists per subreddit, so starting a second draft in the same subreddit overwrites the first. Switching the post-type pill does **not** clear the shared body field — a latent state-mixing quirk in the original that we **fix**: the body field is cleared when switching between `link` and the others, since a URL sitting in a text body is never intended. Recorded as `newpost-type-switch-keeps-text` in `08`.
+One post draft exists per subreddit, so starting a second draft in the same subreddit overwrites the first. The original shared one `text` field across all three post kinds, so switching the post-type pill left a URL sitting in the body editor. We **fix** it by giving the composer a **separate field per kind**; the `post.body.<subreddit>` draft is likewise keyed per kind, so a link draft and a text draft in the same subreddit do not collide. Recorded as `newpost-type-switch-keeps-text` in `08`.
 
 ### 7.6 File cache layout and limits
 
@@ -1188,10 +1188,10 @@ Backed by `UserDefaults` through a typed `SettingsStore`. Every read is `stored 
 | `data.wifi` | `DataMode` | `.normal` | `dataMode.wifi` | `normal` / `lowData` |
 | `data.cellular` | `DataMode` | `.normal` | `dataMode.cellular` | The active mode is chosen live from the current path type (`NWPathMonitor`) and re-evaluated on every change, with no reload |
 | **Privacy** | | | | |
-| `privacy.errorReporting` | Bool | `true` | `allowErrorReporting` | Opt-out crash reporting. Restart required |
+| `privacy.errorReporting` | Bool | `true` | `allowErrorReporting` | Opt-out crash reporting. Read **reactively** — no restart, unlike the original (`error-reporting-default` in `08`) |
 | **Misc / internal** | | | | |
 | `ui.scrollToNextButtonPosition` | `ButtonAnchor` | `.bottomRight` | `scrollToNextButtonPosition` | One of the ten snap positions |
-| `flags.galleryModeOffered` | Bool | `false` | `has_already_offered_gallery_mode` | One-time gallery-mode suggestion. Set **only on accept**, so declining can re-prompt on a different qualifying feed |
+| `flags.galleryModeOffered` | Bool | `false` | `has_already_offered_gallery_mode` | One-time gallery-mode suggestion. Set on **either** answer, so declining suppresses it for good. The original wrote it only on accept, letting a declined prompt reappear on another feed (`gallery-offer-cancel` in `08`) |
 | `flags.quickSearchTip` | Bool | `false` | `quickSearchGuideAlert` | One-time alert |
 | `flags.quickAccountSwapTip` | Bool | `false` | `quickAccountSwapGuideAlert` | One-time alert |
 | `flags.lastSeenUpdate` | String | — | `lastSeenUpdate` | What's-new gate |
@@ -1205,11 +1205,13 @@ Backed by `UserDefaults` through a typed `SettingsStore`. Every read is `stored 
 | — | — | — | `splitViewEnabled` | iPad only; out of scope for v1 |
 | — | — | — | `useHydraServer`, `customHydraServerUrl` | No backend exists (§9) |
 | — | — | — | `lastFixedAccountSettings` | The silent prefs write is dropped (§5.7) |
-| — | — | — | `lastAskedToSubscribeToHydraClient-<userId>` | Product decision for `05` (`subscribe-nag-removed`) |
+| — | — | — | `lastAskedToSubscribeToHydraClient-<userId>` | The community-subscribe nag is not reproduced (`subscribe-nag-removed`) |
 
-### 8.2 Feature matrix storage
+### 8.2 Gate configuration storage
 
-`05` owns the free/paid split. Architecturally it lives in a bundled `FeatureMatrix.json` resource with a code default, plus an optional `UserDefaults` override key `entitlements.matrixOverride` used only in Debug/TestFlight for testing the paywall. Feature code never reads either.
+`05-monetization.md` §4 owns the free/paid split. Architecturally it is a single compile-time table, `Feature.isGated` (`02-architecture.md` §13.2) — eleven entries, of which `videoAutoplay` and `compose` are `false` (free) by default. There is no `FeatureMatrix.json`, no server-tuned matrix and no free-allowance mechanism.
+
+One `UserDefaults` key exists for testing only: `entitlements.debugUnlockOverride` (`Bool?`), honoured **only** in Debug and TestFlight builds, so the paywall and the locked states can be exercised without a sandbox purchase. It is absent from Release builds and no feature code reads it — feature code asks `entitlements.isUnlocked(_:)` and nothing else.
 
 ---
 
@@ -1342,7 +1344,7 @@ Classification runs on the parsed body first, in this order, and only then consi
 | Login web flow failed | `Login failed / Something went wrong` |
 | Media share/save failure | `Error / Failed to {share\|save} {image\|video}` and the preparing modal is dismissed |
 | Redgifs unresolvable | The video tile shows `Couldn't load video. Tap to retry.` |
-| Hard player error | `Couldn't load video.` — not tappable inline; the watchdog and cache-bust paths are the recovery. **In the fullscreen viewer this state becomes tappable-to-retry**, closing a gap in the original where the only recovery was closing and reopening. Recorded as `fullscreen-player-retry` in `08` |
+| Hard player error | `Couldn't load video.` — not tappable inline; the watchdog and cache-bust paths are the recovery there. **In the fullscreen viewer the copy becomes `Couldn't load video. Tap to retry.` and is tappable**, closing a gap in the original where the only recovery was closing and reopening. Recorded as `fullscreen-player-retry` in `08` |
 
 ### 10.3 Complete retry inventory
 
@@ -1501,8 +1503,8 @@ Every item below is resolved in `08-decisions-and-drift.md`. Items marked **(new
 | `poll-voting-stub` | Build real poll voting, or render read-only with results — the model supports both (§4.13) |
 | `time-year-seam` | Preserve the 360–365-day "0 years" seam, or fix it (§4.16) |
 | `time-format-parity` / `number-format-parity` | Reproduce the custom formatters exactly rather than using `RelativeDateTimeFormatter` / `NumberFormatter` (§4.16) |
-| `prefs-force-over18-on-login` / `account-settings-throttle` | Drop the undisclosed `old.reddit.com/prefs` rewrite; replace with a one-time banner (§5.7) |
-| `cookie-expiry-rewrite` | Keep the `+10 000 days` expiry rewrite after every response (§5.4) |
+| `prefs-force-over18-on-login` | Drop the undisclosed `old.reddit.com/prefs` rewrite entirely; replace it with a one-time, dismissible banner (§5.7). This also retires `account-settings-throttle`, whose bug (a global timestamp written before the request) has nothing left to affect |
+| `cookie-expiry-rewrite` | Keep the `+10 000 days` expiry rewrite, but run it once per app session per account rather than after every response (§5.4) |
 | `no-offline-detection` | Distinguish offline from server error with `NWPathMonitor` (§10.1) |
 | `no-429-handling` | Add minimal 429 recognition, a global cooldown and exactly one retry (§11.2) |
 | `self-hosted-server-row` | No first-party backend; the self-hosted-server settings section disappears (§9.6) |
@@ -1510,29 +1512,31 @@ Every item below is resolved in `08-decisions-and-drift.md`. Items marked **(new
 | `newpost-type-switch-keeps-text` | Clear the composer body when switching to or from a link post (§7.5) |
 | `clipboard-read-default` | Resolve the original's contradictory defaults in favour of `false` (§8.1) |
 | `unpruned-tables` | Leave `custom_themes`, `counter_stats` and `subreddit_visits` unpruned (§7.3) |
-| `theme-import-format-compat` | Accept the legacy theme-import sentinel; emit ours (`02 §8.5`) |
-| `snudown-renderer` / `swift-markdown` | Parse markdown source rather than Reddit's rendered HTML (`02 §9.1`) |
+| `theme-import-format-compat` | A new `::appname-theme::` base64url sentinel; the legacy format is neither emitted nor imported (`02 §8.5`, `04c` §18.5) |
+| `snudown-renderer` | Parse markdown source rather than Reddit's rendered HTML, one pipeline for fetched content and composer previews (`02 §9.1`) |
 | `redgifs-memory-only` | Never persist resolved Redgifs URLs (§6.4, §9.1) |
 | `hidden-posts-local` | Hiding stays local; Reddit's own hide endpoint is never called (§7.3) |
 | `multireddit-merged-feed` | Read multireddit feeds through the merged `r/a+b+c` URL with the three-source definition fallback (§5.2 M2/M3) |
 | `captcha-webview-fallback` | Keep the new.reddit submit-page fallback on `BAD_CAPTCHA` (§5.2 S1) |
-| `report-webview` / `wiki-webview` | Report and wiki remain embedded web pages (§5.2, `04c`) |
+| `report-webview` / `wiki-webview` | Report and wiki remain embedded web pages (§5.2, `04c` §3.3, §9) |
 | `inbox-no-filter-tabs` | One interleaved inbox feed; no All/Unread/Messages segmentation (§4.11) |
-| `user-page-minimal` | No avatar, no trophies, no follow control on the profile (§4.9) |
-| `comment-sort-six` | Six comment sorts; whether "Default" is added is a `04a` decision (§2.4) |
+| `user-page-minimal` | Minimal profile — no trophies, no cake-day UI, no follow control — but the avatar **is** rendered from `icon_img` (§4.9) |
+| `comment-sort-six` | Six comment sorts in the in-post menu; the Settings picker additionally offers the `default` sentinel, which writes nothing (§2.4, `04c` §16.2) |
 | `share-extension` / `shortcuts-intent` | Share extension payload plus the App Intent (§12.3, §12.4) |
 | `pro-removed` / `ai-removed` / `push-removed` | Out of scope; nothing in this contract depends on them |
 | `message-modal-copy-bugs` / `unknown-error-rethrow` / `edit-comment-crash` / `pencil-modal-close` | Original bugs that this contract does not reproduce |
 
-### 14.2 New items raised by this document
+### 14.2 Items first raised by this document
 
-| Short name | Question |
+All of these now have numbered entries in `08-decisions-and-drift.md` §1.4; the ids are canonical.
+
+| Short name | What this document needs from it |
 |---|---|
-| `user-agent-string` **(new)** | Emit a well-formed iOS-Safari UA rather than the original's typo'd one (§1.4) |
-| `login-css-injection` **(new)** | Inject no cosmetic CSS into Reddit's login page (§5.3) |
-| `stale-modhash-recovery` **(new)** | Re-validate the session after three consecutive rejected writes (§5.9) |
-| `og-concurrency-cap` **(new)** | Cap OpenGraph preview fetches at 6 concurrent (§9.4) |
-| `fullscreen-player-retry` **(new)** | Make a hard player error tappable-to-retry in the fullscreen viewer (§10.2) |
-| `edit-draft` **(new)** | Persist in-progress edits, which the original loses silently (§7.5) |
-| `startup-url-default` **(new)** | Default the startup URL to empty instead of the Reddit home page (§8.1) |
-| `settings-key-rename` **(new)** | Confirm the namespaced `APPNAME` key names in §8.1; there is no import path from the original, so this is free to get right once |
+| `user-agent-string` | Emit a well-formed iOS-Safari UA rather than the original's typo'd one (§1.4) |
+| `login-css-injection` | Inject no cosmetic CSS into Reddit's login page (§5.3) |
+| `stale-modhash-recovery` | Re-validate the session after three consecutive rejected writes (§5.9) |
+| `og-concurrency-cap` | Cap OpenGraph preview fetches at 6 concurrent (§9.4) |
+| `fullscreen-player-retry` | Make a hard player error tappable-to-retry in the fullscreen viewer (§10.2) |
+| `edit-draft` | Edits stay unpersisted, but cancelling one with unsaved changes now confirms first (§7.5, `04a` §16.5) |
+| `startup-url-default` | Default the startup URL to empty instead of the Reddit home page (§8.1) |
+| `settings-key-rename` | The namespaced `APPNAME` key names in §8.1 are canonical everywhere; the 04 docs' legacy-style names are §8.1's "Legacy key" column |

@@ -41,13 +41,18 @@ Do these first. The agent cannot do them and will stall or invent values without
       `APP_IDENTIFIER` as GitHub Actions repository secrets.
 - [ ] **10. Signing**: enable automatic signing with the ASC API key; no certificates in the repo.
 - [ ] **11. Answer the three OWNER gate questions** in `05-monetization.md` §4:
-      `gate.sortMemory` (default: gated), `gate.videoAutoplay` (default: free),
-      `gate.compose` (default: free). Also settle `[DECISION: sentry-or-not]` — if yes, have the
-      Sentry DSN ready; if no, tell the agent to skip it.
-- [ ] **12. Icon assets.** Either have the four Icon Composer documents ready, or accept that the
+      `gate.sortMemory` (default: **gated**), `gate.videoAutoplay` (default: **free**),
+      `gate.compose` (default: **free**). Every other gate is on. Also settle
+      `[DECISION: sentry-or-not]` — if yes, have the Sentry DSN ready; if no, tell the agent to skip
+      it and note that the privacy label then stays "Data Not Collected".
+- [ ] **12. Icon assets.** Either have the four Icon Composer documents ready — one default plus
+      three alternates, all **new artwork** (`[DECISION: app-icons-new-art]`) — or accept that the
       agent will ship placeholder icons and mark items 313–316 as deferred in `PROGRESS.md`.
-- [ ] **13. Privacy Policy URL** hosted somewhere the owner controls. Required by the paywall and
-      by App Store Connect.
+- [ ] **13. Privacy Policy URL** hosted somewhere the owner controls. Required by the paywall, by
+      the Settings → Legal screen and by App Store Connect. The EULA may be Apple's standard one.
+- [ ] **13a. Decide the theme palettes.** The agent cannot invent 6–8 coherent accessible palettes
+      from nothing and must not copy the original's (`[DECISION: theme-count]`). Either supply them,
+      or accept two starter themes in Phase 0 and the rest deferred.
 - [ ] **14. Xcode 27** installed (Swift 6.4, iOS 27 SDK) on macOS Tahoe 26.6+.
 - [ ] **15. Capture the Reddit JSON fixtures** listed in `06-build-plan-and-acceptance.md` §1.7, or
       let the agent stub them and fill them in at the end of Phase 1. Capturing them by hand first
@@ -77,19 +82,19 @@ Before anything else:
 
 1. Copy the folder `<path-to-spec-repo>/docs/swift-rewrite/` into this repository as `docs/`.
 2. Read it in this order, in full, before writing a single line of Swift:
-   - `00-README.md` — orientation (if present; if it is missing, start at `02`)
+   - `00-README.md` — orientation: scope, principles, the owner decisions already made
    - `02-architecture.md` — the app's structure: Observation stores, per-tab `NavigationStack`
-     plus a `Route` enum, the `RedditAPI` actor, GRDB, the Theme environment, the Entitlements
-     seam, and the Swift package split
+     plus a `Route` enum, the `RedditClient` actor, GRDB, the Theme environment, the Entitlements
+     seam, and the **18-package split (§2.2 and §3.1 are the canonical package list)**
    - `03-data-and-networking.md` — the network layer and data model contract
    - `04a-feeds-posts-comments.md`, `04b-media.md`,
      `04c-accounts-inbox-search-subs-settings.md` — per-screen specifications, carrying
-     `[GATE: name]` and `[DECISION: name]` tags
+     `[GATE: gate.*]` and `[DECISION: <id>]` tags
    - `05-monetization.md` — the subscription, the entitlement architecture, and the definition of
-     every `[GATE: …]` identifier
+     every `[GATE: gate.*]` identifier
    - `06-build-plan-and-acceptance.md` — your build plan, your verification gates, and the
      ~350-item acceptance checklist you must satisfy
-   - `08-decisions-and-drift.md` — the resolved decisions behind every `[DECISION: …]` tag, plus
+   - `08-decisions-and-drift.md` — the resolved decisions behind every `[DECISION: <id>]` tag, plus
      the list of original-app bugs you must **not** reproduce
    - `docs/spec/01` through `docs/spec/10` — the raw behavioural surveys. These are reference
      material: when a `04*` document is ambiguous, the corresponding `spec/` file has the exact
@@ -99,16 +104,17 @@ Before anything else:
    `06-build-plan-and-acceptance.md` §4, each marked `TODO`, grouped by area, with a column for the
    phase that will deliver it. Commit: `chore: import specification and seed progress tracker`.
 
-Tag spellings: the `04*` documents were drafted in parallel with `05` and `08` and contain some
-earlier-draft tag names. `05-monetization.md` §4.1 and `08-decisions-and-drift.md` §4 are
-normalization tables that map every variant to its canonical id — consult them whenever you meet a
-`[GATE: …]` or `[DECISION: …]` you do not recognise. A gate not defined in `05` §4 does not exist;
-treat that feature as free.
+Tag spellings: **there are no aliases.** Every `[GATE: gate.*]` tag names one of the eleven gate ids
+defined in `05-monetization.md` §4, and every `[DECISION: <id>]` tag names a numbered entry in
+`08-decisions-and-drift.md` §1 (#1–#95), a bug id in its §2, or a drift row `D1`–`D20` in its §3. A
+gate not defined in `05` §4 does not exist — treat that feature as free. A decision id you cannot find
+is an error: record it in `PROGRESS.md` under "Open questions" and match the code as `spec/` describes
+it. Do not invent register entries.
 
 Precedence, when documents disagree: `08-decisions-and-drift.md` > `05-monetization.md` >
-`04a`/`04b`/`04c` > `02`/`03` > `spec/01`–`spec/10`. If a conflict is material and none of them
-resolves it, record it in `PROGRESS.md` under "Open questions", pick the option that best matches
-`spec/`'s description of the current code, and continue. Do not stop to ask.
+`04a`/`04b`/`04c` > `02`/`03` > `spec/01`–`spec/10`. The set has been reconciled, so a material
+conflict is a defect rather than a choice: record it in `PROGRESS.md` under "Open questions", pick the
+option that best matches `spec/`'s description of the current code, and continue. Do not stop to ask.
 
 ## Non-negotiables
 
@@ -213,32 +219,42 @@ Restated here so you never have to guess:
   `APPNAME Plus` StoreKit 2 subscription replaces the paid tier.
 - Dead settings that did nothing in the original — post summary, comment summary — are **deleted**.
   Live Text, which also did nothing, is **actually implemented**.
-- Polls render **read-only**. No fake vote button.
+- Polls render **read-only**, with per-option results when Reddit supplies them. No fake vote button.
+- Votes and saves apply **optimistically and roll back** on failure, and a vote cast in post detail
+  patches the feed row behind it. No rejection is ever swallowed.
+- One markdown pipeline: Reddit's **markdown source** is parsed into a typed AST and rendered from it,
+  for fetched content and composer previews alike. Reddit's `body_html` is not the rendering path.
 - Gallery Mode **does** blur NSFW and spoiler media. Videos **do** get a long-press
   Share/Save/Copy menu. Both are gaps in the original that you fix.
-- The `/prefs` NSFW normalization on login is kept but **disclosed**, with a toggle, a per-account
-  throttle, and the throttle timestamp written only on success.
-- The session-cookie expiry rewrite is kept (sessions die without it) but runs once per session per
-  account, not after every response. The pre-expire-then-clear logout ordering is kept verbatim.
+- The silent `/prefs` NSFW normalization on login is **dropped entirely** — no `old.reddit.com/prefs`
+  scrape, no `/post/options` write, no throttle. A one-time dismissible banner points the user at
+  Reddit's own settings instead. The app never writes to a user's Reddit account preferences.
+- The session-cookie expiry rewrite is kept (sessions die without it) but runs once per app session
+  per account, not after every response. The pre-expire-then-clear logout ordering is kept verbatim.
 - Redgifs lazy resolution is reproduced **exactly**: 2 concurrent, LIFO queue, abort on scroll-off,
   3 retries, 1s/2s/3s escalating cooldown, 30s global cooldown on HTTP 429, memory-only cache,
   playback error busts the cache and re-resolves once.
 - Reddit HTTP status codes **are** inspected (the original ignored them): 429 with `Retry-After`,
   5xx, and offline are three distinct, distinguishable states with distinct messages.
-- `raw_json=1` is **not** sent; entities are decoded client-side, consistently, including on
-  `hls_url`.
+- `raw_json=1` **is** sent on every read, and there is **no** client-side HTML-entity decoding
+  anywhere — the original decoded ~30 fields by hand and missed `hls_url`. Consequence to accept:
+  text containing the literal characters `&amp;` now renders as `&amp;`, not `&`.
 - Pagination uses the **last item's own fullname**, not the listing envelope's `after`, with a
   separately-tracked unfiltered cursor.
 - Time and number formatting reproduce the original's bucket arithmetic exactly, except the
   360–365-day "0 years" seam, which is fixed; and feed cards **do** abbreviate vote and comment
   counts.
-- Comment sort offers exactly six options. The inbox is a single list with no filter tabs. The
-  profile page is minimal, but **does** show the user's avatar.
-- Themes: a new built-in set with new palettes, all free; the Theme Maker is gated; theme sharing
-  uses a **new** sentinel format, not the original's; no timed previews of locked features, ever.
+- The in-post comment sort menu offers exactly six options; the Settings picker adds the `default`
+  sentinel, which is not a seventh sort. The inbox is a single list with no filter tabs. The profile
+  page is minimal, but **does** show the user's avatar.
+- Themes: a new built-in set of 6–8 themes with new palettes and a new comment-depth cycle, all
+  free; the Theme Maker is gated; theme sharing uses a **new** `::appname-theme::` base64url sentinel
+  and the original's format is neither emitted nor imported; no timed previews of locked features,
+  ever. Do not copy a single hex value from the surveys' palette tables.
 - App icons: all-new artwork, one default plus three alternates, no artist-credit pages.
-- The in-app guide shrinks to a small hand-written help section; there is no embedding search, no
-  AI answer, and no self-hosted-server setting.
+- The in-app guide shrinks to a 10–14 topic hand-written help section. Its search is **SQLite FTS5
+  with BM25 ranking, entirely on-device** — no embeddings, no vectors, no cosine similarity, no AI
+  answer card, and no self-hosted-server setting.
 - The right-edge swipe-forward gesture is dropped. The scroll-to-next-comment button stays, with
   its 10 snap positions, but "previous" becomes a long-press with haptic confirmation.
 - Universal links are not configured (we cannot host an AASA file for `reddit.com`); the entry
@@ -254,9 +270,9 @@ Violating any of these is a defect even if the code compiles and the tests pass.
 
 - **Never copy from the original app.** Not code, not strings, not palettes, not icons, not
   documentation prose. Write everything fresh.
-- **No third-party dependency outside the allow-list** in `02-architecture.md` (mirrored in
-  `06-build-plan-and-acceptance.md` §1.4): GRDB, Nuke, a markdown parser for composer previews,
-  and optionally Sentry. Nothing else — no networking library, no navigation library, no DI
+- **No third-party dependency outside the allow-list** in `02-architecture.md` §3.4 (mirrored in
+  `06-build-plan-and-acceptance.md` §1.4): GRDB, Nuke, `swift-cmark-gfm` (the whole markdown
+  pipeline, not just previews), and optionally Sentry. Nothing else — no networking library, no navigation library, no DI
   container, no purchase SDK, no snapshot-testing library, no SwiftUI-helper grab-bags. If you
   believe you need one, write the 200 lines instead.
 - **No network access in unit tests.** Ever. Not "only in this one integration test". Inject the
@@ -270,21 +286,27 @@ Violating any of these is a defect even if the code compiles and the tests pass.
   means.
 - **No `TODO:` or `FIXME:` comments** in shipped code. Unfinished work goes in `PROGRESS.md` as a
   `DEFERRED` line with a reason; the lint config fails the build on `TODO`.
+- **No restart alerts.** Every setting takes effect immediately. The one deferred-to-next-launch
+  operation is clearing the video cache, and that is an action, not a setting.
 - **No feature code in the app target.** It holds `@main`, the scene, the tab shell and the
-  composition root. Everything else lives in a package with its own tests.
+  `AppGraph` composition root. Everything else lives in one of the **18** packages named in
+  `02-architecture.md` §2.2/§3.1 — use those names verbatim; do not invent a package layout.
 - **No hard-coded prices, currencies or subscription periods.** Every price string comes from
   `Product.displayPrice` and friends.
 - **No paywall on launch, on a timer, after N sessions, or on backgrounding.** The paywall appears
   only as the direct result of a tap on a gated affordance, or from Settings → APPNAME Plus.
 - **Never gate Reddit's own functionality**: browsing, reading comments, voting, saving,
   subscribing, searching, messaging and composing are free. Only the eleven gates defined in
-  `05-monetization.md` §4 exist, and three of them are switched off by default.
+  `05-monetization.md` §4 exist, and **two** of them — `gate.videoAutoplay` and `gate.compose` — are
+  switched off (free) by default, with `gate.sortMemory` the third OWNER row and gated by default.
+  The Settings → APPNAME Plus row, the inbox badge and the built-in themes are **not** gates
+  (`05` §4.1).
 - **Never block content the user has already entered.** Gates check before an editor opens, never
   on submit. Drafts save regardless of subscription state.
 - **Never delete user data on lapse.** Custom themes, filters and saved accounts survive an expired
   subscription; they simply stop being applied or selectable.
 - **Never skip a checklist item silently.** Every one of the ~350 items in
-  `06-build-plan-and-acceptance.md` §4 ends the build as `DONE`, `CUT` (because a `[DECISION: …]`
+  `06-build-plan-and-acceptance.md` §4 ends the build as `DONE`, `CUT` (because a `[DECISION: <id>]`
   says so), or `DEFERRED` with a written reason.
 - **Do not invent behaviour.** If the specs do not say, the `spec/` surveys are the tiebreaker; if
   they do not say either, choose the simplest behaviour consistent with the platform's defaults and
@@ -305,7 +327,7 @@ At the end of the run, this repository contains:
 2. **Passing tests** — `swift test` green in every package; `xcodebuild test` green; the fixture
    replay green; the UI smoke test green.
 3. **`PROGRESS.md`** — every acceptance-checklist item marked `DONE`, `CUT` (with the
-   `[DECISION: …]` that cuts it), or `DEFERRED` (with a reason and a suggested follow-up). Plus a
+   `[DECISION: <id>]` that cuts it), or `DEFERRED` (with a reason and a suggested follow-up). Plus a
    "Blocked", an "Open questions", and a "Could not verify without a device/account" section.
 4. **`README.md`** — what the app is; the iOS/Xcode/Swift versions; how to build, test and run;
    the package layout and what each package owns; how fixtures work and how to record new ones;
@@ -343,9 +365,12 @@ did not cover.
 - **Expect to re-read `08-decisions-and-drift.md` yourself** when the agent asks a question. Most
   "the specs don't say" questions are actually answered there.
 - **The three OWNER gate switches** (`gate.sortMemory`, `gate.videoAutoplay`, `gate.compose`) are
-  the only product decisions still open when the prompt runs. Settle them in step A-11; flipping
-  one later is a one-line change in `Feature.isGated` plus a checklist annotation, but it is much
-  cheaper to decide first.
+  the only product decisions still open when the prompt runs. Settle them in step A-11; flipping one
+  later is a one-line change in the `Feature.isGated` table (`02` §13.2) plus a checklist annotation,
+  but it is much cheaper to decide first.
+- **The 95 numbered decisions in `08` §1 all carry a default.** The agent does not need any of them
+  answered to start; it needs them *not contradicted* mid-build. Read §1's "Default (assumed)"
+  column top to bottom once before kickoff and flag anything you disagree with.
 
 ---
 
@@ -358,10 +383,10 @@ did not cover.
 | §A step 14 | `spec/10-swiftui-2026-baseline.md` §A1 (Xcode 27 / Swift 6.4 / macOS Tahoe 26.6+) | Non-negotiable 3 |
 | §A step 15 | `06-build-plan-and-acceptance.md` §1.7 (fixture list) | Verification method, Phase 1 |
 | §B "Mission" and "Step 0" | `06-build-plan-and-acceptance.md` §1.1 (clean-room boundary), §2 (phases) | `PROGRESS.md` |
-| §B non-negotiables 2–8 | `spec/10` §§A1–A3 and Part C; `08-decisions-and-drift.md` items 6, 14, 39 | Build settings in `06` §1.3 |
+| §B non-negotiables 2–8 | `spec/10` §§A1–A3 and Part C; `08-decisions-and-drift.md` items 6, 14, 39, 93–95 | Build settings in `06` §1.3 |
 | §B non-negotiables 9–11 | `08-decisions-and-drift.md` items 2, 3, 10; `05-monetization.md` §5.4 | Phases 5, 7, 8 |
 | §B working method and gate | `06-build-plan-and-acceptance.md` §2 (per-phase DoD), §3 (verification method) | CI workflows |
-| §B assumed decisions | `08-decisions-and-drift.md` §§1–2 in condensed form — **that file remains authoritative** | `04a`/`04b`/`04c` `[DECISION: …]` tags |
+| §B assumed decisions | `08-decisions-and-drift.md` §§1–3 in condensed form — **that file remains authoritative** | Every `[DECISION: <id>]` tag in `02`–`06` |
 | §B guardrails | `06-build-plan-and-acceptance.md` §1.4 (dependency allow-list), §1.5 (lint rules encoding these guardrails), §5 (risk R9 agent drift); `05-monetization.md` §§3.3, 5.10; `spec/10` Part C | `.swiftlint.yml`, `.swift-format` |
 | §B output artifacts | `06-build-plan-and-acceptance.md` §2 Phase 10; §3 | Release readiness |
 | §C operator notes | `06-build-plan-and-acceptance.md` §5 risk R9 | — |
